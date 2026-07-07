@@ -1,6 +1,8 @@
 /**
  * commit-msg-rules.js — the pure, importable rule module that is the single
- * source of truth for the commit-msg validator hook (GH-539).
+ * source of truth for commit-message validation (GH-539). Consumed by the
+ * sanctioned `commit-and-push.js` script (the only path `enforce-agent-usage`
+ * lets an agent commit through) and the `git-identity` guard.
  *
  * Every rule is a pure predicate `(message, ctx) => { ok, reason?, hint? }`.
  * A passing rule returns `{ ok: true }`; a failing rule returns
@@ -51,11 +53,13 @@ const AI_TOOL_NAMES = [
 // product (e.g. "feat: add openai adapter" is fine; "Generated with Claude" is not).
 const AI_NAME_ALT = AI_TOOL_NAMES.join('|');
 const AI_ATTRIBUTION_RE = new RegExp(
-  '(?:co-?authored-?by:[^\\n]*\\b(?:' + AI_NAME_ALT + ')\\b)' +
+  '(?:co-?authored-?by:[^\\n]*\\b(?:' +
+    AI_NAME_ALT +
+    ')\\b)' +
     '|(?:\\b(?:generated|written|created|authored|produced|co-?authored)\\b[^\\n]*\\b(?:with|by)\\b[^\\n]*\\b(?:' +
     AI_NAME_ALT +
     ')\\b)',
-  'i',
+  'i'
 );
 
 /** Title in `type(scope): description` form (scope and `!` optional). */
@@ -75,7 +79,9 @@ function getTitle(message) {
 
 /** @returns {string[]} every line after the title. */
 function getBodyLines(message) {
-  return String(message == null ? '' : message).split('\n').slice(1);
+  return String(message == null ? '' : message)
+    .split('\n')
+    .slice(1);
 }
 
 /**
@@ -100,7 +106,7 @@ function semanticFormatRule(message) {
   if (SEMANTIC_TITLE_RE.test(getTitle(message))) return { ok: true };
   return fail(
     'Title is not in semantic format "type(scope): description"',
-    'Prefix the title with a type, e.g. "feat(scope): add thing".',
+    'Prefix the title with a type, e.g. "feat(scope): add thing".'
   );
 }
 
@@ -112,7 +118,7 @@ function allowedTypeRule(message) {
   if (ALLOWED_TYPES.has(type)) return { ok: true };
   return fail(
     `Type "${type}" is not an allowed commit type`,
-    `Use one of: ${[...ALLOWED_TYPES].join(', ')}.`,
+    `Use one of: ${[...ALLOWED_TYPES].join(', ')}.`
   );
 }
 
@@ -122,7 +128,7 @@ function titleLengthRule(message) {
   if (title.length <= MAX_TITLE_LEN) return { ok: true };
   return fail(
     `Title is ${title.length} characters (max ${MAX_TITLE_LEN})`,
-    `Shorten the title to ${MAX_TITLE_LEN} characters or fewer.`,
+    `Shorten the title to ${MAX_TITLE_LEN} characters or fewer.`
   );
 }
 
@@ -143,11 +149,36 @@ function noEmojiInTitleRule(message) {
 // imperatives ("process", "address", "embed", "feed") are never rejected.
 const IMPERATIVE_EXCEPTIONS = new Set([
   // base verbs ending in "s"
-  'process', 'address', 'compress', 'express', 'focus', 'pass', 'bypass',
-  'dismiss', 'discuss', 'guess', 'press', 'access', 'cross', 'toss', 'miss',
+  'process',
+  'address',
+  'compress',
+  'express',
+  'focus',
+  'pass',
+  'bypass',
+  'dismiss',
+  'discuss',
+  'guess',
+  'press',
+  'access',
+  'cross',
+  'toss',
+  'miss',
   // base verbs ending in "ed"
-  'embed', 'feed', 'seed', 'speed', 'need', 'proceed', 'exceed', 'succeed',
-  'breed', 'bleed', 'shed', 'wed', 'spread', 'thread',
+  'embed',
+  'feed',
+  'seed',
+  'speed',
+  'need',
+  'proceed',
+  'exceed',
+  'succeed',
+  'breed',
+  'bleed',
+  'shed',
+  'wed',
+  'spread',
+  'thread',
 ]);
 
 /**
@@ -167,7 +198,7 @@ function imperativeMoodRule(message) {
   if (!/(ed|s)$/.test(firstWord)) return { ok: true };
   return fail(
     `Subject "${firstWord}" is not in imperative mood`,
-    'Use the imperative mood, e.g. "add" not "added"/"adds".',
+    'Use the imperative mood, e.g. "add" not "added"/"adds".'
   );
 }
 
@@ -177,7 +208,7 @@ function bodyLineLengthRule(message) {
     if (line.length > MAX_BODY_LINE_LEN) {
       return fail(
         `A body line is ${line.length} characters (max ${MAX_BODY_LINE_LEN})`,
-        `Wrap body lines at ${MAX_BODY_LINE_LEN} characters.`,
+        `Wrap body lines at ${MAX_BODY_LINE_LEN} characters.`
       );
     }
   }
@@ -189,7 +220,7 @@ function noAiAttributionRule(message) {
   if (!AI_ATTRIBUTION_RE.test(String(message == null ? '' : message))) return { ok: true };
   return fail(
     'Commit message contains AI tool attribution',
-    'Remove AI/tool attribution such as co-author trailers or "Generated with ...".',
+    'Remove AI/tool attribution such as co-author trailers or "Generated with ...".'
   );
 }
 
@@ -199,13 +230,12 @@ function noAiAttributionRule(message) {
  * provider (github `#N`/`GH-N`, jira `PROJ-123`) — never a hard-coded pattern.
  */
 function ticketIdPresentRule(message, ctx) {
-  const providerConfig =
-    (ctx && ctx.providerConfig) || getProviderConfig({ skipPrompt: true });
+  const providerConfig = (ctx && ctx.providerConfig) || getProviderConfig({ skipPrompt: true });
   const pattern = getTicketPattern(providerConfig);
   if (pattern.test(String(message == null ? '' : message))) return { ok: true };
   return fail(
     'No ticket ID found for the configured provider',
-    'Reference the ticket in the message, e.g. "(#123)" or "(PROJ-123)".',
+    'Reference the ticket in the message, e.g. "(#123)" or "(PROJ-123)".'
   );
 }
 

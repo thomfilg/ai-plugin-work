@@ -20,9 +20,10 @@
  */
 
 const REGISTRY = Object.freeze({
-  // GH-539: commit-writer removed. Commits now go directly through the
-  // commit-msg validator hook (format + no-attribution + git-identity guard),
-  // authored by the session agent — so no commit-writer agent hooks remain.
+  // GH-539: commit-writer removed. Commits now go through the sanctioned
+  // commit-and-push.js script (format + no-attribution + git-identity guard),
+  // authored by the session agent and forced by enforce-agent-usage — so no
+  // commit-writer agent hooks remain.
   'pr-generator': Object.freeze({
     PreToolUse: Object.freeze([
       Object.freeze({

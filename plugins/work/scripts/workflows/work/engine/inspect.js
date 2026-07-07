@@ -16,7 +16,6 @@ const path = require('path');
 const { parseReportStatus } = require(
   path.join(__dirname, '..', '..', 'lib', 'parse-report-status')
 );
-const { hasCommitMsgValidator } = require(path.join(__dirname, '..', '..', 'lib', 'commit-msg-hook'));
 
 // Report-type mapping for the parse-report-status fallback (echo-5219: reviewer
 // agents emit prose verdicts like "## Overall Assessment: ✅ Well-Implemented"
@@ -41,7 +40,6 @@ function collectGitState(s, deps, ticket) {
       uncommittedCount: 0,
       hasUnpushed: false,
       lastCommitMsg: '',
-      hasCommitMsgHook: false,
     });
     return;
   }
@@ -67,7 +65,6 @@ function collectGitState(s, deps, ticket) {
   s.hasUnpushed = s.branch
     ? run(`git -C "${c}" log origin/${s.branch}..HEAD --oneline 2>/dev/null`) !== ''
     : false;
-  s.hasCommitMsgHook = hasCommitMsgValidator(c);
 }
 
 /** Open-PR info for the worktree branch (null when absent/unparseable). */

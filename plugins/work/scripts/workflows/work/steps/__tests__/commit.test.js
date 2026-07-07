@@ -58,7 +58,7 @@ describe('commit step', () => {
     assert.equal(entries[0].agentType, 'inline-commit');
     assert.match(entries[0].agentPrompt, /semantic commit message/);
     assert.match(entries[0].agentPrompt, /TEST-100/);
-    assert.match(entries[0].agentPrompt, /git add -A && git commit -m/);
+    assert.match(entries[0].agentPrompt, /commit-and-push\.js" -m/);
   });
 
   it('DEFERs when a previous commit already has ticket ID', () => {
@@ -120,7 +120,7 @@ describe('commit step', () => {
     // set — a command-only entry would be a silent no-op. inline-commit → a
     // `commit` delegate whose prompt directs the orchestrator to author + commit.
     assert.equal(instr.delegate.type, 'commit');
-    assert.match(instr.delegate.prompt, /git add -A && git commit -m/);
+    assert.match(instr.delegate.prompt, /commit-and-push\.js" -m/);
     assert.match(instr.delegate.prompt, /AI\/tool attribution/i);
   });
 

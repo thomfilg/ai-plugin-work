@@ -83,7 +83,7 @@ Read final results from tests-feedback.jsonl.
 ## Step 7: Report Results and Commit
 
 Report final rating, iterations, and stop reason.
-If tests were modified, prompt to commit the changes directly (the commit-msg validator hook enforces conventions).
+If tests were modified, prompt to commit the changes through `commit-and-push.js` (a raw `git commit` is blocked; the script enforces conventions).
 
 ---
 

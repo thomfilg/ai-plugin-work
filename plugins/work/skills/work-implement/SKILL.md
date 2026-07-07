@@ -283,7 +283,7 @@ Fix any issues before completing.
 
 **When in subtask mode (`--subtask` was set):**
 
-1. Commit changes directly — author a semantic message and `git add -A && git commit` (the commit-msg validator hook enforces format, no attribution, and identity). Subtasks commit before returning, unlike normal mode.
+1. Commit changes through the sanctioned script — author a semantic message and run `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/scripts/commit-and-push.js -m "<message>"` (a raw `git commit` is blocked; the script enforces format, no attribution, and a human identity, then pushes). Subtasks commit before returning, unlike normal mode.
 2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-state.js complete-subtask <TICKET_ID> <N>`
    (where `<N>` is the subtask index from the init-subtask output)
 3. Report completion briefly and return control to the parent workflow
@@ -349,7 +349,7 @@ Next steps:
 
 ## Notes
 
-- This command does NOT create commits - commit directly after reviewing (the commit-msg validator hook enforces conventions)
+- This command does NOT create commits - commit after reviewing via `commit-and-push.js` (a raw `git commit` is blocked; the script enforces conventions)
   - **Exception:** In `--subtask` mode, the subtask commits before returning
 - This command does NOT run /check - use `/check` separately if needed
 - This command does NOT create PRs - use `/work` for full workflow

@@ -8,21 +8,24 @@
  * wiki upload) and blocking agent self-invocation loops.
  *
  * GH-539: relocated from the global `~/.claude/hooks/` into the work-workflow
- * plugin so its lifecycle is owned here, and the "Semantic Commits" rule is
- * ADAPTED — it now LIFTS the direct-`git commit` block in any worktree where
- * the `commit-msg` validator hook is installed (`hasCommitMsgValidator`). There
- * the git hook enforces the same rules deterministically, so the commit-writer
- * subagent is no longer the enforcement boundary and a direct `git commit`
- * (e.g. the /work commit step's direct path) is allowed. Worktrees without the
- * validator still require commit-writer, preserving the old behavior.
+ * plugin so its lifecycle is owned here, and the "Semantic Commits" rule now
+ * FORCES every commit through the sanctioned `commit-and-push.js` script. A raw
+ * `git commit` is ALWAYS blocked (no agent bypass, no install step) and the
+ * operator is told to run the script, which validates semantic format, blocks
+ * AI attribution, enforces a human git identity, and pushes. The script itself
+ * commits via child_process (not the Bash tool), so it never trips this hook,
+ * and it is explicitly exempt from the script-bypass scan below.
  *
  * exit 0 = allow, exit 2 = block. Fails open (exit 0) on any internal error.
  */
 
+const path = require('path');
 const { isRunningInAgent } = require('../agent-detection');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
-const { hasCommitMsgValidator } = require('../commit-msg-hook');
 const { logHookError } = require('../hook-error-log');
+
+// Absolute path to the sanctioned commit script agents are forced to use.
+const COMMIT_SCRIPT = path.resolve(__dirname, '..', '..', 'work', 'scripts', 'commit-and-push.js');
 
 // Agents that should NEVER call themselves via Skill or Task tool.
 const SELF_CALL_BLOCKED_AGENTS = [
@@ -89,24 +92,23 @@ This ensures consistent PR descriptions with proper analysis.`,
     name: 'Semantic Commits',
     toolName: 'Bash',
     commandPattern: /git\s+commit\s+(?!.*--amend)/, // git commit but not --amend
-    // GH-539: commit-writer was removed. There is no agent bypass anymore — the
-    // commit-msg validator hook IS the gate. A direct `git commit` is allowed
-    // when that hook is installed (see `bypassOnValidatorHook`); otherwise it is
-    // blocked and the operator is told to install the hook.
+    // GH-539: a raw `git commit` is ALWAYS blocked — there is no agent bypass and
+    // no install step. Every commit MUST go through `commit-and-push.js`, which
+    // validates the message + committer identity and pushes. The script commits
+    // via child_process, so it never re-enters this hook.
     agentAliases: [],
     allowPatterns: [/--allow-empty/, /--amend/, /fixup!/, /squash!/],
-    bypassOnValidatorHook: true,
-    message: `❌ Direct git commit is blocked: this worktree has no commit-msg validator hook.
+    message: `❌ Direct \`git commit\` is not allowed.
 
-✅ Install it — then direct \`git commit\` works with NO subagent, and git enforces
-   semantic format, no AI attribution, and a human git identity on every commit:
+✅ Author your semantic message, then commit + push through the guard script — it
+   validates the format, blocks AI attribution, enforces a human git identity,
+   and pushes. It is the ONLY sanctioned commit path; nothing commits around it:
 
-     node scripts/workflows/work/scripts/install-commit-msg-hook.js "<worktree>"
+     node "${COMMIT_SCRIPT}" -m "type(scope): summary (#123)"
 
-   (In /work, bootstrap installs this automatically.) Author the commit message
-   yourself — the hook validates it.
+   (Use \`-F <file>\` for a multi-line message, or \`--no-push\` to commit only.)
 
-💡 Amend / fixup / empty commits bypass via --amend / --allow-empty / fixup! / squash!.`,
+💡 Amend / fixup / empty commits are exempt via --amend / --allow-empty / fixup! / squash!.`,
   },
   {
     name: 'Wiki Screenshot Upload',
@@ -134,19 +136,6 @@ function shouldBypass(toolInput, allowPatterns) {
   if (!allowPatterns || allowPatterns.length === 0) return false;
   const command = toolInput?.command || '';
   return allowPatterns.some((pattern) => pattern.test(command));
-}
-
-/**
- * GH-539 adaptation: the Semantic Commits rule is lifted when the validator
- * commit-msg hook is installed in the worktree the command runs in. Resolve the
- * worktree from `git -C <path>` in the command, else the hook's cwd.
- */
-function bypassOnValidatorHook(rule, toolInput, hookData) {
-  if (!rule.bypassOnValidatorHook) return false;
-  const command = toolInput?.command || '';
-  const dashC = command.match(/git\s+-C\s+["']?([^"'\s]+)/);
-  const worktree = dashC ? dashC[1] : hookData?.cwd || process.cwd();
-  return hasCommitMsgValidator(worktree);
 }
 
 /** Skill-tool self-call: `skillName` names a blocked agent AND we're inside it. */
@@ -207,7 +196,6 @@ function ruleMatches(rule, toolName, toolInput) {
 function ruleSatisfied(rule, toolInput, transcriptPath, hookData) {
   return (
     shouldBypass(toolInput, rule.allowPatterns) ||
-    bypassOnValidatorHook(rule, toolInput, hookData) ||
     isRunningInAgent(transcriptPath, rule.agentAliases, hookData) ||
     agentHintsMatch(hookData, transcriptPath, rule.agentAliases)
   );
@@ -226,11 +214,17 @@ function enforceRules(toolName, toolInput, transcriptPath, hookData) {
 // (the plugin's own hooks/scripts must be able to run these operations).
 const TRUSTED_SCRIPT_ROOTS = ['/.claude/hooks/', 'claude-plugin-work/', '/.claude/plugins/'];
 
-/** A protected-operation script hit that is NOT under a trusted root. */
+// The plugin's own sanctioned commit script — it IS the enforcement path, so it
+// must never be flagged as a `git commit` bypass regardless of where it lives.
+const SANCTIONED_SCRIPT_BASENAMES = ['commit-and-push.js'];
+
+/** A protected-operation script hit that is NOT under a trusted root / sanctioned. */
 function isUntrustedScriptHit(scriptCheck) {
-  return (
-    scriptCheck.found && !TRUSTED_SCRIPT_ROOTS.some((root) => scriptCheck.scriptPath.includes(root))
-  );
+  if (!scriptCheck.found) return false;
+  const scriptPath = scriptCheck.scriptPath;
+  if (TRUSTED_SCRIPT_ROOTS.some((root) => scriptPath.includes(root))) return false;
+  if (SANCTIONED_SCRIPT_BASENAMES.some((name) => scriptPath.endsWith(name))) return false;
+  return true;
 }
 
 /** The Bash rule whose command-pattern the script's source matches, or undefined. */
@@ -252,8 +246,6 @@ function enforceScriptBypass(toolName, toolInput, transcriptPath, hookData) {
   if (!isUntrustedScriptHit(scriptCheck)) return;
   const matchedRule = ruleMatchedInScript(bashRules, scriptCheck.scriptPath);
   if (!matchedRule) return;
-  // Reuse the validator-hook lift for commit scripts too.
-  if (bypassOnValidatorHook(matchedRule, toolInput, hookData)) return;
   if (isRunningInAgent(transcriptPath, matchedRule.agentAliases, hookData)) return;
   process.stderr.write(
     `BLOCKED: Script "${scriptCheck.scriptPath}" contains ${matchedRule.name} operation!\n\n${matchedRule.message}\n`
@@ -288,6 +280,6 @@ if (require.main === module) {
 module.exports = {
   AGENT_ENFORCEMENT_RULES,
   SELF_CALL_BLOCKED_AGENTS,
+  COMMIT_SCRIPT,
   shouldBypass,
-  bypassOnValidatorHook,
 };

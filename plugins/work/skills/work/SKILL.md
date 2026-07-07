@@ -87,7 +87,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js "$ARGUMENTS" --in
 | `bash` | Run the `command` field with Bash |
 | `task` | `Task(agentType)` with the `prompt` field. Do NOT read files yourself. |
 | `skill` | `Skill(name)` with the `prompt` field |
-| `commit` | YOU (the session agent) do it — do NOT dispatch a subagent. Follow the `prompt`: author a concise semantic commit message for the staged changes (`type(scope): description`, referencing the ticket, **no AI attribution**), then run `git add -A && git commit -m "<your message>" && git push` yourself with Bash. The installed `commit-msg` validator hook enforces format, no-attribution, and a human git identity — if it rejects, fix the message and retry. |
+| `commit` | YOU (the session agent) do it — do NOT dispatch a subagent. Follow the `prompt`: author a concise semantic commit message for the staged changes (`type(scope): description`, referencing the ticket, **no AI attribution**), then run the sanctioned commit script from the `prompt` — `node "<…>/commit-and-push.js" -m "<your message>"` — which stages, validates, commits, and pushes. A raw `git commit` is blocked by `enforce-agent-usage`; the script is the only path. If it rejects the message (format, attribution, or an AI git identity), fix it and re-run. |
 
 If the instruction has `parallel: true` with `delegates` array: launch ALL agents as parallel Task() calls in a single message.
 

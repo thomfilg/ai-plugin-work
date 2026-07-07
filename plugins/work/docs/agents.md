@@ -58,7 +58,7 @@ The `/work` orchestrator selects agents based on the current step:
 | spec | spec-writer |
 | tasks | (skill: split-in-tasks) |
 | implement | developer-* (auto-selected) |
-| commit | _(session agent authors; commit-msg validator hook enforces)_ |
+| commit | _(session agent authors; forced through commit-and-push.js by enforce-agent-usage)_ |
 | check | code-checker, quality-checker, qa-*, completion-checker (parallel) |
 | pr | pr-generator |
 

@@ -33,6 +33,19 @@ function runHook(hookData, env = {}) {
 }
 
 describe('work-auto-advance hook', () => {
+  // Isolate TASKS_BASE/WORKTREES_BASE to an EMPTY temp dir so the hook never
+  // reads an ambient /work marker from the developer's real workspace. Without
+  // this, running the suite inside a live /work session made the hook find that
+  // session's marker and spawn work-next.js — hanging past the 10s timeout.
+  let isoEnv;
+  beforeEach(() => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'work-aa-guard-'));
+    isoEnv = { TASKS_BASE: base, WORKTREES_BASE: base };
+  });
+  afterEach(() => {
+    fs.rmSync(isoEnv.TASKS_BASE, { recursive: true, force: true });
+  });
+
   it('exits 0 silently when no stdin', () => {
     try {
       const result = execFileSync(process.execPath, [hookPath], {
@@ -40,6 +53,7 @@ describe('work-auto-advance hook', () => {
         encoding: 'utf8',
         timeout: 10000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, ...isoEnv },
       });
       assert.equal(result.trim(), '');
     } catch (err) {
@@ -48,11 +62,14 @@ describe('work-auto-advance hook', () => {
   });
 
   it('exits 0 when no matching marker file exists', () => {
-    const result = runHook({
-      tool_name: 'Task',
-      tool_input: { description: 'brief generate brief' },
-      session_id: 'test-session',
-    });
+    const result = runHook(
+      {
+        tool_name: 'Task',
+        tool_input: { description: 'brief generate brief' },
+        session_id: 'test-session',
+      },
+      isoEnv
+    );
     assert.equal(result.exitCode, 0);
   });
 
@@ -63,6 +80,7 @@ describe('work-auto-advance hook', () => {
         encoding: 'utf8',
         timeout: 10000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, ...isoEnv },
       });
       assert.equal(result.trim(), '');
     } catch (err) {

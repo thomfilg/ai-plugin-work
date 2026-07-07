@@ -79,20 +79,21 @@ The plugin registers hooks that enforce workflow discipline:
 
 The `commit-writer` subagent was **removed** (GH-539). Instead:
 
-- The **session agent authors the commit message** inline (it has the context) and commits
-  directly — `git add -A && git commit -m "…" && git push`. No subagent dispatch.
-- A git **`commit-msg` validator hook** (`validate-commit-msg.js`, installed by bootstrap into
-  each worktree) enforces the rules at commit time and **rejects** a bad commit. It checks,
-  from a single source of truth (`scripts/workflows/work/hooks/commit-msg-rules.js`):
+- The **session agent authors the commit message** inline (it has the context), then commits
+  through the sanctioned script **`commit-and-push.js`**, which stages (`git add -A`),
+  validates, commits, and pushes. No subagent dispatch.
+- The **always-on `enforce-agent-usage` PreToolUse hook FORCES it**: a raw `git commit` is
+  **always blocked** (exit 2) and the agent is told to run `commit-and-push.js`. There is no
+  install step and no bypass — the script is the only path, so a commit can never skip
+  validation. (`--amend` / `--allow-empty` / `fixup!` / `squash!` are exempt.)
+- The script enforces the rules from a single source of truth
+  (`scripts/workflows/work/hooks/commit-msg-rules.js`) and **rejects** a bad commit:
   - **semantic format** (`type(scope): description`, allowed types, ≤72-char title, no trailing
     period, no emoji, imperative mood, ≤100-char body lines);
   - **no AI/tool attribution** (`Co-Authored-By: Claude`, `Generated with Codex`, etc.);
   - **a human git identity** — the committing `user.name`/`user.email` must not be an AI tool
     (`claude`, `codex`, `gemini`, …). The identity is the worktree's effective git user (its
     local config when a worktree `.envrc` set it up, else the global user).
-- The `enforce-agent-usage` hook blocks a raw `git commit` **unless** the validator hook is
-  installed — so commits can't skip validation. The hook coexists with the biome `pre-commit`
-  hook (both run on a direct `git commit`).
 
 ### Commit-message rule decisions
 

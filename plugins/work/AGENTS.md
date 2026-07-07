@@ -66,7 +66,7 @@ For detailed documentation see **[docs/README.md](./docs/README.md)**.
 | brief | brief-writer |
 | spec | spec-writer |
 | implement | developer-* (by file type) |
-| commit | _(session agent authors; commit-msg validator hook enforces)_ |
+| commit | _(session agent authors; forced through commit-and-push.js by enforce-agent-usage)_ |
 | check | code-checker, quality-checker, qa-*, completion-checker |
 | pr | pr-generator, pr-post-generator |
 

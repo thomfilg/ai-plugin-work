@@ -1,12 +1,18 @@
+const path = require('path');
+
+// Absolute path to the sanctioned commit script the session agent must use.
+const COMMIT_SCRIPT = path.resolve(__dirname, '..', 'scripts', 'commit-and-push.js');
+
 /**
  * Step: commit
  *
  * GH-539: commit-writer was removed. The SESSION AGENT authors the commit
- * message inline (it has the context), and the `commit-msg` validator hook
- * enforces the rules deterministically — semantic format, no AI attribution,
- * and a human git identity. So the commit step no longer dispatches a subagent;
- * it emits an `inline-commit` directive that the orchestrator fills with a real
- * semantic message and runs directly (`git add -A && git commit -m … && git push`).
+ * message inline (it has the context) and commits through the sanctioned
+ * `commit-and-push.js` script — the ONLY path the `enforce-agent-usage` hook
+ * allows (a raw `git commit` is always blocked). The script validates semantic
+ * format, blocks AI attribution, enforces a human git identity, and pushes. So
+ * the commit step no longer dispatches a subagent; it emits an `inline-commit`
+ * directive that the orchestrator fills with a real semantic message.
  *
  * @param {Function} add
  * @param {object} s
@@ -17,10 +23,12 @@ module.exports = function commitStep(add, s, ctx) {
 
   const directive =
     `Author a concise semantic commit message (type(scope): description) summarizing ` +
-    `the staged changes for ${t}. Do NOT add any AI/tool attribution. Then run:\n` +
-    `  git add -A && git commit -m "<your message>" && git push\n` +
-    `The installed commit-msg validator hook will reject a non-conforming message, ` +
-    `an AI attribution line, or an AI git identity.`;
+    `the staged changes for ${t}, referencing the ticket. Do NOT add any AI/tool ` +
+    `attribution. Then run the sanctioned commit script (it stages, validates, ` +
+    `commits, and pushes):\n` +
+    `  node "${COMMIT_SCRIPT}" -m "<your message>"\n` +
+    `A raw \`git commit\` is blocked. The script rejects a non-conforming message, ` +
+    `an AI attribution line, or an AI git identity — fix and re-run if it does.`;
 
   const emitInlineCommit = (reason) =>
     add(STEPS.commit, 'RUN', 'author + commit', reason, {
