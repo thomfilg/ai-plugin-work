@@ -54,6 +54,29 @@ Concurrent instances: see the "Running concurrent maestro instances" section in
 `docs/OPERATOR_PLAYBOOK.md` for the one-conductor rule and the `MAESTRO_NS`
 isolation recipe.
 
+## Under Codex
+
+- **Invocation**: mention `$conduct` (maestro:conduct) — codex has no
+  `/plugin:skill` slash commands.
+- **Per-session runtime**: the daemon resolves each ticket's runtime
+  independently (`.maestro-runtime` file → manifest task/pool `runtime` keys
+  via `manifest.runtimeForTask` → `MAESTRO_RUNTIME` → `claude`), so one
+  conductor watches a mixed claude/codex fleet.
+- **Codex exec sessions** (launched with `--runtime=codex`) are detected via
+  their teed `<state>/<TICKET>.exec.jsonl` stream — bytes appended = alive,
+  `turn.completed` = progress, process exit = done — not pane regexes.
+  Restarts resume via `codex exec resume` (probe:
+  `transcript.listSessionsForCwd(worktree)`).
+- **Codex TUI panes** (no exec stream) run the `codex-tui-conservative`
+  dialect: spinner/question/stuck-input detectors report
+  unsupported-capability instead of guessing, and the session is NEVER
+  auto-killed or auto-restarted on pane-glyph evidence (DEAD-END-HOLD keeps it
+  alive for the operator).
+- **No Monitor tool**: run the daemon detached instead of piping through
+  Monitor — `nohup node plugins/maestro/scripts/maestro-conduct.js --daemon
+  >/tmp/maestro-conduct-daemon.log 2>&1 &` — and poll `LOG_FILE` /
+  `/tmp/maestro-alerts.jsonl` with `tail`.
+
 ## Stop
 
 The orchestrator exits on TaskStop or session end. Killing it never touches the agent sessions.

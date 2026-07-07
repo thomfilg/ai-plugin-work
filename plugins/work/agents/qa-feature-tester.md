@@ -443,3 +443,5 @@ If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed
 ### Long-running commands
 
 For any command that may run more than ~10 seconds (test suites, builds, dev servers, CI watchers), launch with `Bash(run_in_background: true)` and read progress via `BashOutput` between subsequent tool calls. Use the `Monitor` tool when you need to react to streaming stdout line-by-line. The runtime will notify you when a background bash or Agent completes; continue with other work in the meantime.
+
+(Codex runtime: `run_in_background`/`BashOutput`/`Monitor` do not exist — run long commands detached instead, `nohup <cmd> >/tmp/<log> 2>&1 &`, then poll the log with `tail`.)
