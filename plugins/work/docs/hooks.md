@@ -222,3 +222,54 @@ export WORK_TDD_TOKEN_SKIP=1
 # Disable session guard
 export SESSION_GUARD_ENABLED=0
 ```
+
+## Dual runtime: the same hooks.json on Codex CLI
+
+One `hooks/hooks.json` serves both runtimes (kept in the intersection both parsers accept by
+`scripts/lint-hooks-json.js`). Every hook script detects its runtime via the vendored
+`lib/runtime` detector (`AGENT_RUNTIME` pin → payload sniff → codex env signatures → session
+stamp → Claude signals → default `claude`) and adapts. What differs on codex:
+
+### Matcher lanes
+
+Codex only ever emits its own tool names, so some lanes can never fire there:
+
+| Matcher lane | claude | codex |
+|---|---|---|
+| `Bash` | fires | fires (codex reads files via shell too — this lane covers the Read/Grep/Glob loss) |
+| `Edit\|Write\|MultiEdit` | fires | `Write`/`Edit` alias-fire for `apply_patch`; `MultiEdit` dead |
+| `Task\|Skill\|Agent` | `Task`/`Skill` fire | only `Agent` fires (spawn-agent events) |
+| `AskUserQuestion\|request_user_input` | `AskUserQuestion` fires | only `request_user_input` fires |
+| `Read\|Grep\|Glob`, `MultiEdit`, `NotebookEdit`, `Skill`, `Monitor` | fire | dead — accepted loss, Bash/UPS lanes carry enforcement |
+| `UserPromptSubmit` / `Stop` matchers | applied by Claude | **ignored** — the hooks fire on every prompt/stop and re-apply their matcher in-script |
+
+Run `node scripts/runtime-doctor.js` (repo root) for the live per-plugin lane table.
+
+### Payload and emission differences
+
+- **Payload-first reads**: `CLAUDE_USER_PROMPT`, `TOOL_INPUT`, `CLAUDE_PROJECT_DIR` etc. are
+  never set by codex — every script reads the stdin payload first (`prompt`, `tool_input`,
+  `cwd`, `session_id`), env as legacy fallback.
+- **`tool_input.file_path` is absent** on codex writes — `apply_patch` carries a raw patch;
+  write targets are parsed from the `*** Add/Update/Delete File:` headers. Parse failure on a
+  write tool fails **closed** for protectors with active locks.
+- **Auto-advance channel**: plain PostToolUse stdout is not injected by codex — the drivetrain
+  banner rides `hookSpecificOutput.additionalContext` instead (identical text).
+- **Exit-2 stderr** and UserPromptSubmit/SessionStart plain stdout behave the same on both.
+
+### Trust model (codex only — READ THIS)
+
+Codex **silently skips untrusted hooks**: after install or ANY hooks.json change, every gate in
+this document is OFF until the hooks are re-trusted in the codex TUI `/hooks` review (one-time
+per change; changes are batched per release). Unattended runs use
+`codex exec --dangerously-bypass-hook-trust` per invocation. Never script `[hooks.state]`
+`trusted_hash` writes — the hash formula is source-derived, not bit-exact-verified, and
+pre-seeding trust is a gate-bypass. Audit with `node scripts/runtime-doctor.js` (its
+"modified" verdicts are best-effort for the same reason).
+
+### Interactive gates in `codex exec`
+
+Unattended exec has no question UI: gates that would call `AskUserQuestion` park the step
+BLOCKED and persist a hold file. Answer via the maestro `/signal` inbox or
+`codex exec resume --last "<answer>"` — the resume answer-argument syntax is **still
+unverified** (flagged in the design; the integration package pins the working form).

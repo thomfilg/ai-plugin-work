@@ -9,10 +9,26 @@
  *   --remove    unregister and restore the chained bar
  *
  * Renderer path resolves from __dirname (never process.env.CLAUDE_PLUGIN_ROOT).
+ *
+ * Codex guard (design C4/§M): codex has no plugin statusline surface, so under
+ * AGENT_RUNTIME=codex every mode refuses cleanly (exit 0) and prints the CLI
+ * alternative instead of touching ~/.claude/settings.json.
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+const { detectRuntime } = require('../../lib/runtime');
+
+if (detectRuntime() === 'codex') {
+  process.stdout.write(
+    '[work:codex-degraded] statusline unavailable — codex has no plugin statusline surface.\n' +
+      'Watch follow-up progress from the CLI instead:\n' +
+      "  watch -n 3 'cat <TASKS_BASE>/<ticket>/.follow-up-state.json'\n" +
+      '(the /follow-up monitor step keeps writing that state file on codex too)\n'
+  );
+  process.exit(0);
+}
 
 const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 const CHAIN = path.join(os.homedir(), '.cache', 'followup', 'statusline-chain.cmd');
