@@ -46,7 +46,10 @@ const TOKENS = {
   },
   'tool.question': {
     claude: () => 'AskUserQuestion',
-    codex: () => 'request_user_input',
+    // request_user_input is Plan-mode-only on codex (openai/codex#10384,
+    // #29104: "request_user_input is unavailable in code mode") — default to
+    // plain-chat numbered options, which work in every mode.
+    codex: () => 'a plain-chat question with numbered options',
   },
   'monitor.step': {
     claude: ({ command }) => `Monitor(${command})`,
@@ -77,7 +80,8 @@ const SLASH_SKILL_RE = /(^|[\s(`'"])\/([a-z][\w-]*):([a-z][\w-]*)/g;
  * Rewrite Claude-vocabulary tokens inside an emitted instruction string for
  * the target runtime. Claude branch returns the input UNCHANGED (byte
  * identity); codex swaps `/plugin:skill` → `$skill` mention, TodoWrite →
- * update_plan, AskUserQuestion → request_user_input.
+ * update_plan, AskUserQuestion → plain-chat numbered options
+ * (request_user_input is Plan-mode-only: openai/codex#10384, #29104).
  */
 function renderInstruction(text, runtime) {
   if (runtime !== 'codex') return text;
@@ -87,7 +91,10 @@ function renderInstruction(text, runtime) {
       (_m, pre, plugin, skill) => `${pre}the $${skill} skill (${plugin}:${skill})`
     )
     .replace(/\bTodoWrite\b/g, 'update_plan')
-    .replace(/\bAskUserQuestion\b/g, 'request_user_input');
+    .replace(
+      /\bAskUserQuestion\b/g,
+      'a plain-chat question with numbered options (request_user_input only works in Plan mode)'
+    );
 }
 
 function resolveVia(opts, relPath) {

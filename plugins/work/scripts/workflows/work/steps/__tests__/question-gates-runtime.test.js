@@ -4,7 +4,7 @@
  *
  * Claude characterization: command labels and prompts are byte-identical to
  * the pre-vocabulary HEAD literals. Codex: the command label renders
- * `request_user_input`, prompts swap the question vocabulary, and non-
+ * plain-chat numbered options, prompts swap the question vocabulary, and non-
  * interactive modes append the parked-gate notice ([work:codex-degraded]).
  *
  * Run: node --test scripts/workflows/work/steps/__tests__/question-gates-runtime.test.js
@@ -103,11 +103,14 @@ describe('brief-gate question site', () => {
     );
   });
 
-  it('codex interactive: request_user_input prose, no parked notice', () => {
+  it('codex interactive: plain-chat numbered-options prose, no parked notice', () => {
     pin('codex', 'interactive');
     const entry = runBriefGate();
-    assert.equal(entry.command, 'request_user_input');
-    assert.match(entry.agentPrompt, /Use request_user_input to resolve 1 unresolved/);
+    assert.equal(entry.command, 'a plain-chat question with numbered options');
+    assert.match(
+      entry.agentPrompt,
+      /Use a plain-chat question with numbered options .* to resolve 1 unresolved/
+    );
     assert.ok(!entry.agentPrompt.includes(PARKED_NOTICE));
   });
 
@@ -159,11 +162,14 @@ describe('task-review escalation site', () => {
     );
   });
 
-  it('codex: request_user_input command + parked notice in unknown mode', () => {
+  it('codex: plain-chat question command + parked notice in unknown mode', () => {
     pin('codex');
     const entry = runTaskReview();
-    assert.equal(entry.command, 'request_user_input');
-    assert.match(entry.agentPrompt, /Use request_user_input to ask the user/);
+    assert.equal(entry.command, 'a plain-chat question with numbered options');
+    assert.match(
+      entry.agentPrompt,
+      /Use a plain-chat question with numbered options .* to ask the user/
+    );
     assert.ok(entry.agentPrompt.endsWith(PARKED_NOTICE));
   });
 });
@@ -202,7 +208,10 @@ describe('planner-hold operator suggestion', () => {
     pin('codex');
     const instr = buildPlannerHoldInstruction(HOLD_WS, 'TEST-1');
     assert.equal(instr.action, 'blocked');
-    assert.match(instr.suggestion, /operator with request_user_input, offering:/);
+    assert.match(
+      instr.suggestion,
+      /operator with a plain-chat question with numbered options .*, offering:/
+    );
     assert.ok(instr.suggestion.endsWith(PARKED_NOTICE));
   });
 });

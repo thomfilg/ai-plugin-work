@@ -307,7 +307,7 @@ launches carry `--dangerously-bypass-hook-trust` per invocation regardless. Audi
 1. Statusline features (`install-followup-statusline`, `maestro:install`) — no surface.
 2. `Monitor` tool step in /work — hook relay + tmux listener instead.
 3. Parallel subagent fan-out — serialized inline.
-4. Forced-choice `AskUserQuestion` UI — prose + `request_user_input` (TUI) / parked+resume (exec).
+4. Forced-choice `AskUserQuestion` UI — plain-chat numbered options (TUI; `request_user_input` is Plan-mode-only per openai/codex#10384) / parked+resume (exec).
 5. `Skill()`-tool dispatch — mention text only; **no argument substitution** (probe: `argument-hint` stripped; `$ARGUMENTS` never expands in exec).
 6. Plugin `agents/*.md` as real subagents (until U8/U4; `.codex/agents/*.toml` generation deferred).
 7. Synapsys `/clear`-rotation semantics; crystallize from codex history.

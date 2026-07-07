@@ -83,7 +83,7 @@ describe('T — claude snapshots equal the HEAD literals', () => {
 describe('T — codex renderings', () => {
   it('tool tokens swap to the codex vocabulary (probe-verified names)', () => {
     assert.equal(T('tool.plan', {}, 'codex'), 'update_plan');
-    assert.equal(T('tool.question', {}, 'codex'), 'request_user_input');
+    assert.equal(T('tool.question', {}, 'codex'), 'a plain-chat question with numbered options');
     assert.equal(
       T('skill.invoke', { plugin: 'work-workflow', skill: 'configure' }, 'codex'),
       'the $configure skill (work-workflow:configure)'
@@ -109,7 +109,7 @@ describe('renderInstruction', () => {
     );
     assert.equal(
       renderInstruction('Track with TodoWrite; gate via AskUserQuestion.', 'codex'),
-      'Track with update_plan; gate via request_user_input.'
+      'Track with update_plan; gate via a plain-chat question with numbered options (request_user_input only works in Plan mode).'
     );
   });
 

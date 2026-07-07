@@ -3,7 +3,7 @@
  * vocabulary renderer (WP-08).
  *
  * Claude is pinned byte-identical (passthrough/same-reference); codex
- * renders the degradation contract: request_user_input prose + parked-gate
+ * renders the degradation contract: plain-chat numbered-options prose + parked-gate
  * notice per mode (C3), inline-agent personas with an on-disk personaPath
  * resolved against the plugin root (C1).
  *
@@ -70,7 +70,10 @@ describe('renderQuestionText (C3)', () => {
 
   it('codex interactive: swaps the question vocabulary, no parked notice', () => {
     const out = renderQuestionText(TEXT, rtFor('codex', 'interactive'));
-    assert.equal(out, 'Use request_user_input to resolve 2 open question(s).');
+    assert.equal(
+      out,
+      'Use a plain-chat question with numbered options (request_user_input only works in Plan mode) to resolve 2 open question(s).'
+    );
     assert.ok(!out.includes(PARKED_NOTICE));
   });
 

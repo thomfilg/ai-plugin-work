@@ -239,7 +239,7 @@ Codex only ever emits its own tool names, so some lanes can never fire there:
 | `Bash` | fires | fires (codex reads files via shell too — this lane covers the Read/Grep/Glob loss) |
 | `Edit\|Write\|MultiEdit` | fires | `Write`/`Edit` alias-fire for `apply_patch`; `MultiEdit` dead |
 | `Task\|Skill\|Agent` | `Task`/`Skill` fire | only `Agent` fires (spawn-agent events) |
-| `AskUserQuestion\|request_user_input` | `AskUserQuestion` fires | only `request_user_input` fires |
+| `AskUserQuestion\|request_user_input` | `AskUserQuestion` fires | only `request_user_input` fires — and only in Plan mode (openai/codex#10384); in code mode the model asks in chat, so this lane is rarely exercised |
 | `Read\|Grep\|Glob`, `MultiEdit`, `NotebookEdit`, `Skill`, `Monitor` | fire | dead — accepted loss, Bash/UPS lanes carry enforcement |
 | `UserPromptSubmit` / `Stop` matchers | applied by Claude | **ignored** — the hooks fire on every prompt/stop and re-apply their matcher in-script |
 
