@@ -124,11 +124,20 @@ test('detect: a truncated/rotated stream refreshes the marker instead of countin
   const ctx = { session: 'GH-9-work', ticket: 'GH-9', execLog, limitSec: 300 };
   execJson.detect(ctx); // seed
   // Rotate: file shrinks. An old lastActiveAt must NOT produce a hit — the
-  // size change is treated as activity.
-  state.write('GH-9-work', 'exec-json', {
-    size: fs.statSync(execLog).size,
-    lastActiveAt: state.now() - 9999,
-  });
-  fs.writeFileSync(execLog, '{"type":"thread.started"}\n');
+  // size change is treated as activity. Stat + truncate + rewrite on ONE
+  // descriptor — no path-based check-then-use gap (CodeQL
+  // js/file-system-race, precedent 47107ae6). The 0o600 mode is inert for
+  // an existing file but satisfies js/insecure-temporary-file.
+  const fd = fs.openSync(execLog, 'r+', 0o600);
+  try {
+    state.write('GH-9-work', 'exec-json', {
+      size: fs.fstatSync(fd).size,
+      lastActiveAt: state.now() - 9999,
+    });
+    fs.ftruncateSync(fd, 0);
+    fs.writeSync(fd, '{"type":"thread.started"}\n', 0, 'utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
   assert.deepEqual(execJson.detect(ctx), { hit: false });
 });
