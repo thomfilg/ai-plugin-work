@@ -66,7 +66,12 @@ This ensures consistent ticket formatting and validation.`,
     toolName: 'Bash',
     commandPattern: /gh\s+pr\s+create|gh\s+api\s+repos\/[^\s]*\/pulls\s+-X\s+POST/,
     requiredAgent: 'pr-generator',
-    agentAliases: ['pr-generator', 'PR Generator', 'Pull Request Generator', 'work-workflow:pr-generator'],
+    agentAliases: [
+      'pr-generator',
+      'PR Generator',
+      'Pull Request Generator',
+      'work-workflow:pr-generator',
+    ],
     message: `❌ Direct PR creation not allowed!
 
 ✅ Use Task tool with subagent_type="pr-generator" instead
@@ -144,31 +149,38 @@ function bypassOnValidatorHook(rule, toolInput, hookData) {
   return hasCommitMsgValidator(worktree);
 }
 
+/** Skill-tool self-call: `skillName` names a blocked agent AND we're inside it. */
+function skillSelfCall(skillName, blocked, transcriptPath) {
+  const named = skillName === blocked || skillName === `/${blocked}`;
+  return named && isRunningInAgent(transcriptPath, [blocked]);
+}
+
+/** Task-tool self-call: dispatched subagent equals the currently-running agent. */
+function taskSelfCall(subagentType, blocked) {
+  const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
+  return (
+    subagentType === blocked &&
+    Boolean(currentAgent) &&
+    currentAgent.toLowerCase() === blocked.toLowerCase()
+  );
+}
+
 function blockSelfCall(toolName, toolInput, transcriptPath) {
-  if (toolName === 'Skill') {
-    const skillName = toolInput?.skill || '';
-    for (const blocked of SELF_CALL_BLOCKED_AGENTS) {
-      if ((skillName === blocked || skillName === `/${blocked}`) && isRunningInAgent(transcriptPath, [blocked])) {
-        process.stderr.write(
-          `BLOCKED: Infinite loop detected!\n\nAgent "${blocked}" cannot call itself via Skill tool.\n` +
-            `You ARE the ${blocked} — do the work directly.\n`,
-        );
-        process.exit(2);
-      }
+  const skillName = toolInput?.skill || '';
+  const subagentType = toolInput?.subagent_type || '';
+  for (const blocked of SELF_CALL_BLOCKED_AGENTS) {
+    if (toolName === 'Skill' && skillSelfCall(skillName, blocked, transcriptPath)) {
+      process.stderr.write(
+        `BLOCKED: Infinite loop detected!\n\nAgent "${blocked}" cannot call itself via Skill tool.\n` +
+          `You ARE the ${blocked} — do the work directly.\n`
+      );
+      process.exit(2);
     }
-  }
-  if (toolName === 'Task') {
-    const subagentType = toolInput?.subagent_type || '';
-    const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
-    for (const blocked of SELF_CALL_BLOCKED_AGENTS) {
-      const isSelfCall =
-        subagentType === blocked && currentAgent && currentAgent.toLowerCase() === blocked.toLowerCase();
-      if (isSelfCall) {
-        process.stderr.write(
-          `INFINITE LOOP BLOCKED\n\nAgent "${blocked}" cannot call itself via Task tool.\nDo the work directly.\n`,
-        );
-        process.exit(2);
-      }
+    if (toolName === 'Task' && taskSelfCall(subagentType, blocked)) {
+      process.stderr.write(
+        `INFINITE LOOP BLOCKED\n\nAgent "${blocked}" cannot call itself via Task tool.\nDo the work directly.\n`
+      );
+      process.exit(2);
     }
   }
 }
@@ -185,49 +197,68 @@ function agentHintsMatch(hookData, transcriptPath, agentAliases) {
   return hints.some((hint) => agentAliases.some((alias) => hint.includes(alias.toLowerCase())));
 }
 
+/** Whether `rule` applies to the current tool invocation (tool + command match). */
+function ruleMatches(rule, toolName, toolInput) {
+  if (rule.toolName !== toolName) return false;
+  return rule.commandPattern ? rule.commandPattern.test(toolInput?.command || '') : true;
+}
+
+/** Whether a matched rule is satisfied (bypassed or run by the right agent). */
+function ruleSatisfied(rule, toolInput, transcriptPath, hookData) {
+  return (
+    shouldBypass(toolInput, rule.allowPatterns) ||
+    bypassOnValidatorHook(rule, toolInput, hookData) ||
+    isRunningInAgent(transcriptPath, rule.agentAliases, hookData) ||
+    agentHintsMatch(hookData, transcriptPath, rule.agentAliases)
+  );
+}
+
 function enforceRules(toolName, toolInput, transcriptPath, hookData) {
   for (const rule of AGENT_ENFORCEMENT_RULES) {
-    let matches = false;
-    if (rule.toolName === toolName) {
-      matches = rule.commandPattern ? rule.commandPattern.test(toolInput?.command || '') : true;
-    }
-    if (!matches) continue;
-    if (shouldBypass(toolInput, rule.allowPatterns)) continue;
-    if (bypassOnValidatorHook(rule, toolInput, hookData)) continue;
-    if (isRunningInAgent(transcriptPath, rule.agentAliases, hookData)) continue;
-    if (agentHintsMatch(hookData, transcriptPath, rule.agentAliases)) continue;
+    if (!ruleMatches(rule, toolName, toolInput)) continue;
+    if (ruleSatisfied(rule, toolInput, transcriptPath, hookData)) continue;
     process.stderr.write(`BLOCKED: ${rule.name} requires agent!\n\n${rule.message}\n`);
     process.exit(2);
   }
 }
 
+// Trusted script roots whose contents are never treated as agent-gate bypasses
+// (the plugin's own hooks/scripts must be able to run these operations).
+const TRUSTED_SCRIPT_ROOTS = ['/.claude/hooks/', 'claude-plugin-work/', '/.claude/plugins/'];
+
+/** A protected-operation script hit that is NOT under a trusted root. */
+function isUntrustedScriptHit(scriptCheck) {
+  return (
+    scriptCheck.found && !TRUSTED_SCRIPT_ROOTS.some((root) => scriptCheck.scriptPath.includes(root))
+  );
+}
+
+/** The Bash rule whose command-pattern the script's source matches, or undefined. */
+function ruleMatchedInScript(bashRules, scriptPath) {
+  const source = require('fs').readFileSync(scriptPath, 'utf8');
+  return bashRules.find((r) => r.commandPattern.test(source));
+}
+
 function enforceScriptBypass(toolName, toolInput, transcriptPath, hookData) {
   if (toolName !== 'Bash') return;
   const command = toolInput?.command || '';
-  const bashRules = AGENT_ENFORCEMENT_RULES.filter((r) => r.toolName === 'Bash' && r.commandPattern);
+  const bashRules = AGENT_ENFORCEMENT_RULES.filter(
+    (r) => r.toolName === 'Bash' && r.commandPattern
+  );
   const scriptCheck = commandAccessesProtectedPaths(
     command,
-    bashRules.map((r) => r.commandPattern),
+    bashRules.map((r) => r.commandPattern)
   );
-  if (
-    !scriptCheck.found ||
-    scriptCheck.scriptPath.includes('/.claude/hooks/') ||
-    scriptCheck.scriptPath.includes('claude-plugin-work/') ||
-    scriptCheck.scriptPath.includes('/.claude/plugins/')
-  ) {
-    return;
-  }
-  const fsMod = require('fs');
-  const matchedRule = bashRules.find((r) => r.commandPattern.test(fsMod.readFileSync(scriptCheck.scriptPath, 'utf8')));
+  if (!isUntrustedScriptHit(scriptCheck)) return;
+  const matchedRule = ruleMatchedInScript(bashRules, scriptCheck.scriptPath);
   if (!matchedRule) return;
   // Reuse the validator-hook lift for commit scripts too.
   if (bypassOnValidatorHook(matchedRule, toolInput, hookData)) return;
-  if (!isRunningInAgent(transcriptPath, matchedRule.agentAliases, hookData)) {
-    process.stderr.write(
-      `BLOCKED: Script "${scriptCheck.scriptPath}" contains ${matchedRule.name} operation!\n\n${matchedRule.message}\n`,
-    );
-    process.exit(2);
-  }
+  if (isRunningInAgent(transcriptPath, matchedRule.agentAliases, hookData)) return;
+  process.stderr.write(
+    `BLOCKED: Script "${scriptCheck.scriptPath}" contains ${matchedRule.name} operation!\n\n${matchedRule.message}\n`
+  );
+  process.exit(2);
 }
 
 async function main() {

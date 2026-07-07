@@ -8,52 +8,68 @@
  * `node /tmp/script.js` where the script internally runs a blocked operation).
  *
  * Used by: enforce-agent-usage.js (script-bypass detection).
+ *
+ * NOTE: the interpreter regex intentionally mirrors the one in
+ * `protect-state-files.js` (same detection surface across the plugin's two
+ * script-bypass guards); the surrounding logic here is written in a functional
+ * style so the module stays independently readable.
  */
 
 const fs = require('fs');
 
 /**
- * Extract script paths from a Bash command that runs an interpreter. Matches
- * `node /path/x.js`, `bash /tmp/run.sh`, etc.; ignores inline eval (`-e`/`-c`).
+ * Interpreter invocations that run a script file: `node /path/x.js`,
+ * `bash /tmp/run.sh`, etc. Inline eval (`-e`/`-c`) has no capture and is ignored.
+ */
+const INTERPRETER_PATTERN =
+  /\b(?:node|python[23]?|ruby|perl|bash|sh)\s+(?:--?\w[\w-]*(?:=\S+)?\s+)*["']?([/\w._-]+\.(?:js|mjs|cjs|py|rb|pl|sh))["']?/g;
+
+/**
+ * Extract script paths from a Bash command that runs an interpreter.
  * @param {string} command
  * @returns {string[]}
  */
 function extractScriptPaths(command) {
   if (!command) return [];
-  const scripts = [];
-  const interpreterPattern =
-    /\b(?:node|python[23]?|ruby|perl|bash|sh)\s+(?:--?\w[\w-]*(?:=\S+)?\s+)*["']?([/\w._-]+\.(?:js|mjs|cjs|py|rb|pl|sh))["']?/g;
-  let match;
-  while ((match = interpreterPattern.exec(command)) !== null) {
-    const scriptPath = match[1];
-    if (!scriptPath.startsWith('-')) scripts.push(scriptPath);
-  }
-  return scripts;
+  INTERPRETER_PATTERN.lastIndex = 0;
+  return [...command.matchAll(INTERPRETER_PATTERN)]
+    .map((m) => m[1])
+    .filter((scriptPath) => scriptPath && !scriptPath.startsWith('-'));
 }
 
 /**
- * Read a script file and check if it references any of the given protected
+ * Does `content` reference a single protected pattern? Returns the match label
+ * (the pattern source) when it hits, else `null`.
+ * @param {string} content
+ * @param {RegExp|string} pattern
+ * @returns {string|null}
+ */
+function patternMatchLabel(content, pattern) {
+  if (pattern instanceof RegExp) {
+    return pattern.test(content) ? pattern.toString() : null;
+  }
+  return content.includes(pattern) ? pattern : null;
+}
+
+/**
+ * Read a script file and check whether it references any of the given protected
  * patterns (RegExp or string literal).
  * @param {string} scriptPath
  * @param {Array<RegExp|string>} protectedPatterns
  * @returns {{found: boolean, matches: string[]}}
  */
 function scriptReferencesProtectedPaths(scriptPath, protectedPatterns) {
+  let content;
   try {
     if (!fs.existsSync(scriptPath)) return { found: false, matches: [] };
-    const content = fs.readFileSync(scriptPath, 'utf8');
-    const matches = [];
-    for (const pattern of protectedPatterns) {
-      if (pattern instanceof RegExp) {
-        if (pattern.test(content)) matches.push(pattern.toString());
-      } else if (content.includes(pattern)) {
-        matches.push(pattern);
-      }
-    }
-    return { found: matches.length > 0, matches };
+    content = fs.readFileSync(scriptPath, 'utf8');
   } catch {
     return { found: false, matches: [] };
   }
+  const matches = protectedPatterns
+    .map((pattern) => patternMatchLabel(content, pattern))
+    .filter((label) => label !== null);
+  return { found: matches.length > 0, matches };
 }
 
 /**
@@ -64,11 +80,15 @@ function scriptReferencesProtectedPaths(scriptPath, protectedPatterns) {
  * @returns {{found: boolean, scriptPath: string|null, matches: string[]}}
  */
 function commandAccessesProtectedPaths(command, protectedPatterns) {
-  for (const scriptPath of extractScriptPaths(command)) {
-    const result = scriptReferencesProtectedPaths(scriptPath, protectedPatterns);
-    if (result.found) return { found: true, scriptPath, matches: result.matches };
-  }
-  return { found: false, scriptPath: null, matches: [] };
+  const hit = extractScriptPaths(command)
+    .map((scriptPath) => ({
+      scriptPath,
+      ...scriptReferencesProtectedPaths(scriptPath, protectedPatterns),
+    }))
+    .find((result) => result.found);
+  return hit
+    ? { found: true, scriptPath: hit.scriptPath, matches: hit.matches }
+    : { found: false, scriptPath: null, matches: [] };
 }
 
 module.exports = {

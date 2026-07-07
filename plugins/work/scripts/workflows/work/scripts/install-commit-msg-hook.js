@@ -26,7 +26,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+// SINGLE SOURCE OF TRUTH for hooks-directory resolution (GH-539): the installer
+// and the validator-detection helper resolve `core.hooksPath` identically, so
+// that logic lives once in `lib/commit-msg-hook.js` and is imported here rather
+// than copied — keeping the installer and detector provably in lockstep.
+const { resolveHooksDir } = require('../../lib/commit-msg-hook');
 
 /** Absolute path to the Task 2 validator the shim delegates to. */
 const VALIDATOR_PATH = path.resolve(__dirname, '..', 'hooks', 'validate-commit-msg.js');
@@ -46,39 +50,6 @@ function assertSafeWorktree(raw) {
     throw new Error(`Refusing unsafe worktree path containing "..": ${raw}`);
   }
   return raw;
-}
-
-/**
- * Read `core.hooksPath` for the worktree, or `null` when unset. Never mutates
- * the value — this is a pure `--get`.
- * @param {string} worktree
- * @returns {string|null}
- */
-function readHooksPath(worktree) {
-  try {
-    const value = execFileSync('git', ['-C', worktree, 'config', '--get', 'core.hooksPath'], {
-      encoding: 'utf-8',
-    }).trim();
-    return value || null;
-  } catch {
-    // `git config --get` exits non-zero when the key is unset — treat as unset.
-    return null;
-  }
-}
-
-/**
- * Resolve the directory the `commit-msg` shim must be written into: the
- * configured `core.hooksPath` when set (relative paths are anchored at the
- * worktree root), else `<worktree>/.git/hooks`.
- * @param {string} worktree
- * @returns {string}
- */
-function resolveHooksDir(worktree) {
-  const configured = readHooksPath(worktree);
-  if (configured) {
-    return path.isAbsolute(configured) ? configured : path.resolve(worktree, configured);
-  }
-  return path.resolve(worktree, '.git', 'hooks');
 }
 
 /**
