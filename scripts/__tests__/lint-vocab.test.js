@@ -26,6 +26,10 @@ const LINT_PATH = path.join(REPO_ROOT, 'scripts', 'lint-vocab.js');
 const { lintFile, SCOPE, EXCEPTIONS } = require(LINT_PATH);
 const { scanStrings } = require(path.join(REPO_ROOT, 'scripts', 'lib', 'js-strings.js'));
 
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function tempJs(source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-vocab-test-'));
   const file = path.join(dir, 'emit.js');
@@ -37,8 +41,7 @@ describe('lint-vocab — real scope files', () => {
   it('exits 0 over the checked-in emitted-instruction surface', () => {
     const res = spawnSync('node', [LINT_PATH], { encoding: 'utf8' });
     assert.strictEqual(res.status, 0, `stderr: ${res.stderr}`);
-    for (const rel of SCOPE)
-      assert.match(res.stdout, new RegExp(`OK ${rel.replace(/[./]/g, '\\$&')}`));
+    for (const rel of SCOPE) assert.match(res.stdout, new RegExp(`OK ${escapeRegExp(rel)}`));
   });
 
   it('work-pr.workflow.js still carries the display labels the exception documents', () => {
