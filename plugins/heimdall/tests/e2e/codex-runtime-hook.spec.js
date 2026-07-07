@@ -204,12 +204,14 @@ describe('heimdall.js claude characterization (byte-identity)', () => {
 });
 
 describe('rewrite emission pairing (C16)', { skip: !shimPath() }, () => {
+  let scriptDir;
   let scriptFile;
   before(() => {
-    scriptFile = path.join(os.tmpdir(), `heimdall-c16-${process.pid}.js`);
-    fs.writeFileSync(scriptFile, "console.log('noop')\n");
+    scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-c16-'));
+    scriptFile = path.join(scriptDir, 'noop.js');
+    fs.writeFileSync(scriptFile, "console.log('noop')\n", { mode: 0o600 });
   });
-  after(() => fs.rmSync(scriptFile, { force: true }));
+  after(() => fs.rmSync(scriptDir, { recursive: true, force: true }));
 
   const bashPayload = () => ({
     cwd: project,
