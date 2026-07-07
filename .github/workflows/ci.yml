@@ -39,6 +39,9 @@ jobs:
       - name: Lint hooks.json (all plugins)
         run: node scripts/lint-hooks-json.js
 
+      - name: Vendored runtime parity
+        run: node scripts/sync-vendored.js --check
+
       - name: Determine touched plugins
         id: scope
         run: |
