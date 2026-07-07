@@ -25,7 +25,14 @@ const PERM_PROMPT_RE =
 // "❯ 1." mid-sentence can't false-positive.
 const OPTION_CURSOR_RE = /^\s*❯\s*[0-9]+\.\s/m;
 
-function detect({ pane }) {
+const { isCodexPaneDialect } = require('../live-spinner');
+
+function detect({ pane, dialect }) {
+  // Codex dialects: the menu/permission grammar below is claude-TUI-only.
+  // Exec-mode questions surface as parked-BLOCKED /work state files (C3), and
+  // codex TUI prompts are unreadable until fixtures exist — report
+  // "unsupported", never a false idle/answer state (WP-09).
+  if (isCodexPaneDialect(dialect)) return { hit: false, capability: 'unsupported' };
   if (!pane) return { hit: false };
   const menuFooter = MENU_FOOTER_RE.test(pane);
   const permPrompt = PERM_PROMPT_RE.test(pane);

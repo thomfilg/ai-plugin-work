@@ -248,6 +248,21 @@ function commandForTask(taskId) {
 }
 
 /**
+ * runtimeForTask — the runtime ('claude' | 'codex') recorded for a ticket in
+ * its owning manifest: task-level `runtime` wins over the pool-level default.
+ * Null when the ticket is untracked or the value is malformed — callers fall
+ * through to the MAESTRO_RUNTIME env / 'claude' default (runtime-profile.js).
+ * Round-trips through syncFromTmux untouched (status/note-only rewrites), so
+ * a mixed claude/codex fleet keeps per-task runtimes across daemon restarts.
+ */
+function runtimeForTask(taskId) {
+  const hit = findTask(taskId);
+  if (!hit) return null;
+  const raw = (hit.task && hit.task.runtime) || (hit.manifest && hit.manifest.runtime) || null;
+  return raw === 'claude' || raw === 'codex' ? raw : null;
+}
+
+/**
  * launchConfigForTask — one manifest lookup returning everything ctxFor needs
  * about how the ticket was launched: the command and the operator-authored
  * command brief (what the command does / what "done" means). The brief rides
@@ -277,5 +292,6 @@ module.exports = {
   poolFullForTask,
   stopOracleForTask,
   commandForTask,
+  runtimeForTask,
   launchConfigForTask,
 };

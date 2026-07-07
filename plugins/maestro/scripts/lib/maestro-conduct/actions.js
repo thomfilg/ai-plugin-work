@@ -24,6 +24,7 @@ const state = require('./state');
 const manifest = require('./manifest');
 const progress = require('./progress');
 const restartLaunch = require('./restart-launch');
+const runtimeProfile = require('./runtime-profile');
 const slotRotation = require('./slot-rotation');
 const deadEndRotation = require('./dead-end-rotation');
 const {
@@ -92,17 +93,17 @@ function msgFor(reason, mode, skill) {
   return row.nudge(reason, mode);
 }
 
-function soft(session, reason, skill) {
-  const delivery = tmux.sendLine(session, msgFor(reason, 'soft', skill));
+function soft(session, reason, skill, dialect) {
+  const delivery = tmux.sendLine(session, msgFor(reason, 'soft', skill), dialect);
   alerts.log(`${session} NUDGE soft [${delivery}]: ${reason}`);
 }
 
-function interrupt(session, reason, skill) {
+function interrupt(session, reason, skill, dialect) {
   tmux.sendKey(session, 'Escape');
   // Brief pause so the TUI registers the Esc before we push text.
   // Use spawnSync('sleep') so we block without pinning a CPU core.
   spawnSync('sleep', ['1.5']);
-  const delivery = tmux.sendLine(session, msgFor(reason, 'interrupt', skill));
+  const delivery = tmux.sendLine(session, msgFor(reason, 'interrupt', skill), dialect);
   alerts.log(`${session} NUDGE interrupt [${delivery}]: ${reason}`);
 }
 
@@ -126,8 +127,27 @@ function killAndBootstrapNext(args) {
  * against the stale state. Eligibility guards and the wedged-loop declaration
  * live in restart-guards.js; launch mechanics in restart-launch.js.
  */
-function autoRestart({ session, ticket, worktree, silenceSec }) {
+// Per-ticket runtime (WP-09): callers that already resolved it (ctxFor) pass
+// it through; direct callers fall back to the profile chain. 'claude'
+// resolves for every pre-WP-09 fleet, keeping those paths byte-identical.
+function resolveRestartRuntime(ticket, runtime) {
+  return runtime || runtimeProfile.runtimeForTicket(ticket);
+}
+
+// The post-restart continuation notice is typed into the composer — a claude
+// surface. Codex resume panes have no composer; the resume prompt itself is
+// the (unverified, WP-12) answer channel, so the typed notice is skipped.
+function maybeSendContinueNotice({ session, mode, runtime, silenceSec }) {
+  if (mode !== 'continue' || runtime === 'codex') return;
+  tmux.sendLine(
+    session,
+    `MAESTRO: your session was auto-restarted after ${silenceSec}s of silence. Continue the task from where you left off; if a subprocess died with the old session, re-run it.`
+  );
+}
+
+function autoRestart({ session, ticket, worktree, silenceSec, runtime }) {
   if (checkRestartGuards({ session, ticket, worktree }).skip) return false;
+  const rt = resolveRestartRuntime(ticket, runtime);
 
   // Progress guard: a "silent" pane with a worktree that changed within the
   // freshness window means the agent is producing. Skip and re-evaluate next tick.
@@ -151,7 +171,7 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
 
   state.write(session, 'restart-loop', { restarts: [...restarts, now] });
   const skill = resolveSkillForRestart(ticket, session); // GH-514 R1/AC2/AC6
-  const mode = restartLaunch.restartModeFor(skill, worktree);
+  const mode = restartLaunch.restartModeFor(skill, worktree, rt);
   // PR #561 follow-up: prefix the production silence log with the skill-aware
   // token from formatLogLine so operators can grep `[<ticket>:<skill>]` in
   // /tmp/maestro-conduct.log — the README's skill-adapter section promised it.
@@ -160,18 +180,13 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
       mode === 'continue' ? 'resuming conversation (--continue)' : `relaunching /${skill} ${ticket}`
     }`
   );
-  const launch = restartLaunch.buildLaunchCommand(mode, skill, ticket);
+  const launch = restartLaunch.buildLaunchCommand(mode, skill, ticket, rt);
   spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
   spawnSync('tmux', ['new-session', '-d', '-s', session, '-c', worktree, launch], {
     stdio: 'ignore',
   });
-  restartLaunch.groomRestartedSession(session, ticket, skill);
-  if (mode === 'continue') {
-    tmux.sendLine(
-      session,
-      `MAESTRO: your session was auto-restarted after ${silenceSec}s of silence. Continue the task from where you left off; if a subprocess died with the old session, re-run it.`
-    );
-  }
+  restartLaunch.groomRestartedSession(session, ticket, skill, rt);
+  maybeSendContinueNotice({ session, mode, runtime: rt, silenceSec });
   return true;
 }
 

@@ -1,7 +1,13 @@
 #!/usr/bin/env node
-// Fail-open SessionStart config nudge for maestro — logic in factories/envConfig.
+// Fail-open SessionStart config nudge for maestro — two-leg require: the
+// vendored runtime lib first (works in cache-isolated installs on both
+// runtimes), full factories/envConfig as the dev-tree fallback.
 try {
-  require('../../../factories/envConfig/sessionHook').tryMain(__dirname, '/maestro:configure');
+  require('../scripts/lib/runtime/envconfig-lite').tryMain(__dirname, '/maestro:configure');
 } catch {
-  process.exit(0);
+  try {
+    require('../../../factories/envConfig/sessionHook').tryMain(__dirname, '/maestro:configure');
+  } catch {
+    process.exit(0);
+  }
 }
