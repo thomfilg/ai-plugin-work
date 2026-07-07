@@ -18,6 +18,7 @@ const { discoverStores, readConfig, getRepoRoot } = require(
   path.join(__dirname, '..', 'lib', 'lock-store')
 );
 const { buildEntries, evaluate } = require(path.join(__dirname, '..', 'lib', 'guard'));
+const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime'));
 
 async function readStdin() {
   let input = '';
@@ -52,33 +53,33 @@ async function main() {
     process.exit(0);
   }
 
-  const cwd = hookData.cwd || process.cwd();
+  const rt = getRuntime(hookData);
+  const evt = rt.normalizeHookPayload(hookData, { event: 'PreToolUse' });
+  const cwd = evt.cwd;
   const locks = collectLocks(cwd);
   if (locks.length === 0) process.exit(0);
 
   const result = evaluate({
-    toolName: hookData.tool_name || '',
-    toolInput: hookData.tool_input || {},
-    transcriptPath: hookData.transcript_path || hookData.transcriptPath || '',
+    toolName: evt.rawToolName || '',
+    toolInput: evt.toolInput || {},
+    transcriptPath: evt.transcriptPath || hookData.transcriptPath || '',
     entries: buildEntries(locks, getRepoRoot(cwd)),
+    runtime: rt.name,
+    mode: rt.mode(),
+    cwd,
   });
 
-  if (result.exitCode === 2) {
-    process.stderr.write(result.message);
-    process.exit(2);
-  }
+  if (result.exitCode === 2) rt.emit.block(result.message);
   // GH-657: allow the command but run it with the runtime write-guard preloaded.
-  // PreToolUse honors hookSpecificOutput.updatedInput to rewrite the tool input.
+  // PreToolUse honors hookSpecificOutput.updatedInput to rewrite the tool input;
+  // codex only accepts updatedInput paired with permissionDecision:'allow' (C16),
+  // while claude keeps the bare form (adding 'allow' would auto-approve past the
+  // user's permission prompt).
   if (result.rewrite) {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          updatedInput: { command: result.rewrite },
-        },
-      })
+    rt.emit.allowWithUpdatedCommand(
+      result.rewrite,
+      'heimdall: runtime write-guard preloaded (best-effort on codex — static analysis is authoritative)'
     );
-    process.exit(0);
   }
   process.exit(0);
 }
