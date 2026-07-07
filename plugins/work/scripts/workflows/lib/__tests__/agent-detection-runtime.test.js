@@ -7,7 +7,7 @@
  * spawn_agent dispatch scan instead of the claude line-scan helpers.
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, before, after, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -15,16 +15,20 @@ const path = require('node:path');
 
 const { isRunningInAgent } = require(path.resolve(__dirname, '..', 'agent-detection.js'));
 
+let tmpDir;
+
 function writeRollout(records) {
   const file = path.join(
-    os.tmpdir(),
+    tmpDir,
     `agent-detect-rt-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
   );
   const meta = {
     type: 'session_meta',
     payload: { id: 's-1', cwd: '/tmp/x', timestamp: '2026-07-07T00:00:00Z' },
   };
-  fs.writeFileSync(file, [meta, ...records].map((r) => JSON.stringify(r)).join('\n'));
+  fs.writeFileSync(file, [meta, ...records].map((r) => JSON.stringify(r)).join('\n'), {
+    mode: 0o600,
+  });
   return file;
 }
 
@@ -44,6 +48,12 @@ describe('agent-detection — dual runtime', () => {
   let savedCurrentAgent;
   const cleanupFiles = [];
 
+  before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-detect-rt-'));
+  });
+  after(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
   beforeEach(() => {
     savedCurrentAgent = process.env.CLAUDE_CURRENT_AGENT;
     delete process.env.CLAUDE_CURRENT_AGENT;
@@ -106,7 +116,7 @@ describe('agent-detection — dual runtime', () => {
 
   it('claude transcript scan still works (characterization: attributionAgent)', () => {
     const file = path.join(
-      os.tmpdir(),
+      tmpDir,
       `agent-detect-claude-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
     );
     fs.writeFileSync(
@@ -116,7 +126,8 @@ describe('agent-detection — dual runtime', () => {
         { type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } },
       ]
         .map((r) => JSON.stringify(r))
-        .join('\n')
+        .join('\n'),
+      { mode: 0o600 }
     );
     cleanupFiles.push(file);
     assert.equal(isRunningInAgent(file, ['code-checker'], {}), true);
