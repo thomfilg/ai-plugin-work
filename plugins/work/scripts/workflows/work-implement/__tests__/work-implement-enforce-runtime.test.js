@@ -58,15 +58,18 @@ function createTestEnv(ticketId, { tddPhase } = {}) {
 }
 
 function writeRollout(records) {
-  const file = path.join(
-    os.tmpdir(),
-    `wie-rt-rollout-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
-  );
+  // mkdtempSync gives a private (0o700) per-call dir, and the explicit 0o600
+  // mode clears group/other bits on the file itself — both required to
+  // satisfy CodeQL js/insecure-temporary-file for writes under os.tmpdir().
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wie-rt-rollout-'));
+  const file = path.join(dir, 'rollout.jsonl');
   const meta = {
     type: 'session_meta',
     payload: { id: 's-1', cwd: '/tmp/x', timestamp: '2026-07-07T00:00:00Z' },
   };
-  fs.writeFileSync(file, [meta, ...records].map((r) => JSON.stringify(r)).join('\n'));
+  fs.writeFileSync(file, [meta, ...records].map((r) => JSON.stringify(r)).join('\n'), {
+    mode: 0o600,
+  });
   return file;
 }
 
@@ -192,7 +195,7 @@ describe('work-implement-enforce — dual runtime', () => {
       assert.equal(r.code, 0);
     } finally {
       t.cleanup();
-      fs.rmSync(rollout, { force: true });
+      fs.rmSync(path.dirname(rollout), { recursive: true, force: true });
     }
   });
 });
