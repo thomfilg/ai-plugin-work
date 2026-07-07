@@ -18,14 +18,12 @@ const path = require('node:path');
 
 const HOOK_PATH = path.resolve(__dirname, '..', 'hooks', 'enforce-coverage-fix.js');
 
-const cleanupFiles = [];
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'covfix-rt-'));
 after(() => {
-  while (cleanupFiles.length > 0) {
-    try {
-      fs.unlinkSync(cleanupFiles.pop());
-    } catch {
-      /* already gone */
-    }
+  try {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  } catch {
+    /* already gone */
   }
 });
 
@@ -45,11 +43,10 @@ function runHook(input, envOverrides = {}) {
 
 function writeTranscript(lines, suffix) {
   const file = path.join(
-    os.tmpdir(),
+    tmpRoot,
     `covfix-rt-${suffix}-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
   );
-  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'));
-  cleanupFiles.push(file);
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'), { mode: 0o600 });
   return file;
 }
 
