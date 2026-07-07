@@ -66,9 +66,15 @@ describe('enforce-env-start-failure — dual runtime', () => {
   }
 
   function writeMarker() {
+    // The marker path is dictated by the hook under test (MARKER_DIR is a
+    // hardcoded '/tmp'), so it cannot live in the mkdtemp dir. Remove any
+    // pre-existing file so the 0o600 mode applies on create (CodeQL
+    // js/insecure-temporary-file: owner-only bits on temp-dir writes).
+    fs.rmSync(markerFile, { force: true });
     fs.writeFileSync(
       markerFile,
-      JSON.stringify({ failedApps: ['web'], ticketId, timestamp: new Date().toISOString() })
+      JSON.stringify({ failedApps: ['web'], ticketId, timestamp: new Date().toISOString() }),
+      { mode: 0o600 }
     );
   }
 
