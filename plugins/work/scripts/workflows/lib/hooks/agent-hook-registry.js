@@ -20,22 +20,10 @@
  */
 
 const REGISTRY = Object.freeze({
-  'commit-writer': Object.freeze({
-    PreToolUse: Object.freeze([
-      Object.freeze({
-        matcher: '.*',
-        type: 'node',
-        command: 'scripts/workflows/work/agents/commit-writer/commit-writer-block-write.js',
-      }),
-    ]),
-    PostToolUse: Object.freeze([
-      Object.freeze({
-        matcher: 'Bash',
-        type: 'node',
-        command: 'scripts/workflows/work/agents/commit-writer/commit-writer-precommit-guard.js',
-      }),
-    ]),
-  }),
+  // GH-539: commit-writer removed. Commits now go through the sanctioned
+  // commit-and-push.js script (format + no-attribution + git-identity guard),
+  // authored by the session agent and forced by enforce-agent-usage — so no
+  // commit-writer agent hooks remain.
   'pr-generator': Object.freeze({
     PreToolUse: Object.freeze([
       Object.freeze({

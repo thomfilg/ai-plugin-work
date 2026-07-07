@@ -32,7 +32,7 @@ Extract task IDs from input. If only numbers provided, prefix with your project 
 
 ### Step 2: For EACH task, execute the following steps
 
-Loop through each task ID and perform Steps 3-6.
+Loop through each task ID and perform Steps 3-7.
 
 ### Step 3: Fetch ticket details
 
