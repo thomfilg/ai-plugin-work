@@ -28,16 +28,30 @@ const fs = require('fs');
 const openQuestions = require('../lib/open-questions');
 
 /**
+ * Maximum number of questions per AskUserQuestion call. The tool enforces a
+ * hard limit of 4 items; exceeding it causes an InputValidationError that
+ * blocks the gate indefinitely (GH-543). We cap each payload to this limit
+ * and rely on iterative planner passes to resolve remaining questions after
+ * the first batch is persisted via applyBriefResolutions.
+ */
+const ASK_USER_QUESTION_MAX = 4;
+
+/**
  * Build the `AskUserQuestion` payload for the RUN action. Kept local so the
  * public surface of this module is just the step function and the
  * post-resolve handler.
  *
+ * Caps the payload at ASK_USER_QUESTION_MAX (4) questions per call to stay
+ * within the tool's array-size constraint. Remaining questions are resolved
+ * in subsequent planner passes once the first batch is persisted.
+ *
  * @param {Array<{questionText: string, rationale: string, scope: string}>} blocking
- * @returns {{questions: Array<object>}}
+ * @returns {{questions: Array<object>, totalBlocking: number}}
  */
 function buildAskUserQuestionPayload(blocking) {
+  const capped = blocking.slice(0, ASK_USER_QUESTION_MAX);
   return {
-    questions: blocking.map((q) => ({
+    questions: capped.map((q) => ({
       questionText: q.questionText,
       scope: q.scope,
       rationale: q.rationale,
@@ -45,6 +59,9 @@ function buildAskUserQuestionPayload(blocking) {
       // the brief.md block identified by `questionText`.
       persistTo: 'brief.md',
     })),
+    // Inform the orchestrator how many total questions remain so it can
+    // display progress (e.g. "resolving 4 of 6 questions").
+    totalBlocking: blocking.length,
   };
 }
 

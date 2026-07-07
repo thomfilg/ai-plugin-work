@@ -86,6 +86,39 @@ const BRIEF_ONE_BLOCKING_ARCH = [
   '',
 ].join('\n');
 
+// GH-543: 5 cross-ticket questions exceeds the AskUserQuestion 4-item limit
+const BRIEF_FIVE_BLOCKING = [
+  '# Brief',
+  '',
+  '## Open Questions',
+  '',
+  '- **Question:** Which queue backend should we adopt?',
+  '  - `scope: cross-ticket`',
+  '  - `rationale: affects sibling tickets`',
+  '  - `resolved: false`',
+  '',
+  '- **Question:** What auth strategy for service-to-service calls?',
+  '  - `scope: architectural`',
+  '  - `rationale: shared infra decision`',
+  '  - `resolved: false`',
+  '',
+  '- **Question:** Should we use a shared DB or per-service DBs?',
+  '  - `scope: cross-ticket`',
+  '  - `rationale: coordination needed`',
+  '  - `resolved: false`',
+  '',
+  '- **Question:** What retry policy for cross-service failures?',
+  '  - `scope: architectural`',
+  '  - `rationale: consistency across services`',
+  '  - `resolved: false`',
+  '',
+  '- **Question:** Which observability stack for distributed tracing?',
+  '  - `scope: cross-ticket`',
+  '  - `rationale: all siblings need aligned tracing`',
+  '  - `resolved: false`',
+  '',
+].join('\n');
+
 function makeTmpTasksDir(briefContent) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brief-gate-test-'));
   if (briefContent !== null) {
@@ -240,6 +273,27 @@ describe('brief-gate step', () => {
       entry.postResolveCommand.includes(expectedBriefPath),
       `postResolveCommand must include briefPath: ${expectedBriefPath}`
     );
+  });
+
+  it('caps askUserQuestionPayload.questions at 4 even when 5+ blocking questions exist (GH-543)', () => {
+    const dir = makeTmpTasksDir(BRIEF_FIVE_BLOCKING);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.command, 'AskUserQuestion');
+    const payload = entry.askUserQuestionPayload;
+    assert.ok(payload, 'must have askUserQuestionPayload');
+    assert.ok(
+      payload.questions.length <= 4,
+      `questions array must have at most 4 items, got ${payload.questions.length}`
+    );
+    assert.equal(payload.questions.length, 4, 'should include exactly 4 (the cap) questions');
+    assert.equal(payload.totalBlocking, 5, 'totalBlocking must reflect the true count');
+    // Verify the reason still mentions the full count
+    assert.match(entry.reason, /5/, 'reason should mention all 5 unresolved questions');
   });
 
   it('emits RUN (not SKIP) when brief.md is unreadable so planner shows gate needs attention', () => {
