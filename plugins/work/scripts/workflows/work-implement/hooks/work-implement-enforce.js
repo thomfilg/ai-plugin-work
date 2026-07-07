@@ -23,6 +23,14 @@
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+// Vendored dual-runtime adapter: runtime detection (per-runtime block text),
+// apply_patch target parsing, and the dual-format transcript reader for the
+// developer-invocation scan.
+const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
+const { parseApplyPatch } = require(path.join(__dirname, '..', '..', 'lib', 'runtime', 'tools'));
+const { sniffFormat, readToolEvents } = require(
+  path.join(__dirname, '..', '..', 'lib', 'runtime', 'transcript')
+);
 
 // --- Task 12 import: task-readiness path gate (R6, R12) ---
 const { isWriteAllowedPath } = require(path.join(__dirname, '..', '..', 'lib', 'preflight'));
@@ -83,13 +91,55 @@ function isImplementActive(ctx) {
 }
 
 /**
+ * Payload-first developer identification (design C12): when the hook fires
+ * inside a subagent, the payload's `agent_type` names it on both runtimes —
+ * codex sets no CLAUDE_* env vars and its rollout transcript is unreadable
+ * by the claude scan below.
+ */
+function payloadIsDeveloperAgent(hookData) {
+  const agentType = String(hookData?.agent_type || '')
+    .replace(/^[\w-]+:/, '')
+    .toLowerCase();
+  if (!agentType) return false;
+  return DEVELOPER_AGENTS.some((agent) => agent.toLowerCase() === agentType);
+}
+
+/** Matches an inline persona adoption: a shell read of agents/developer-*.md. */
+const CODEX_PERSONA_READ_RE = /agents\/(?:[\w-]+:)?(?:developer-[\w-]+|code-architect)\.md/;
+
+/**
+ * Codex leg of the developer-invocation scan: the rollout transcript has no
+ * Task tool_use records. Count either a spawn_agent dispatch naming a
+ * developer agent (TUI escape hatch) or an inline persona adoption — a shell
+ * command reading a developer agents/*.md file (design C1: subagents run
+ * INLINE on codex; reading the persona file is the observable dispatch).
+ */
+function codexDeveloperInvocation(transcriptPath) {
+  try {
+    for (const event of readToolEvents(transcriptPath)) {
+      const input = JSON.stringify(event.input || '');
+      if (event.rawName === 'spawn_agent' && /developer-/i.test(input)) return true;
+      if (event.name === 'Bash' && CODEX_PERSONA_READ_RE.test(input)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check if a developer agent has been invoked (transcript-based).
  * This remains transcript-based because agent invocation is a session-level
- * signal, not a persisted state.
+ * signal, not a persisted state. The claude scan is byte-for-byte the
+ * historical one; codex rollouts route through the vendored reader.
  */
 function hasDeveloperAgentBeenInvoked(transcriptPath) {
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
     return false;
+  }
+
+  if (sniffFormat(transcriptPath) === 'codex') {
+    return codexDeveloperInvocation(transcriptPath);
   }
 
   try {
@@ -438,12 +488,14 @@ async function main() {
   }
 
   const hookData = JSON.parse(input);
+  const rt = getRuntime(hookData);
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
   const transcriptPath = hookData.transcript_path;
 
-  // Only check blocked tools
-  if (!BLOCKED_TOOLS.includes(toolName)) {
+  // Only check blocked tools. The Edit|Write matcher lanes alias-fire for
+  // apply_patch on codex (the payload is a raw patch, no file_path).
+  if (!BLOCKED_TOOLS.includes(toolName) && toolName !== 'apply_patch') {
     process.exit(0);
   }
 
@@ -493,115 +545,159 @@ async function main() {
     process.exit(0);
   }
 
-  // Get the file path being edited
-  const filePath = toolInput.file_path || toolInput.path || '';
+  // Write targets. Claude tools carry a single file_path; a codex apply_patch
+  // lists its targets in the patch headers — EVERY parsed path runs the same
+  // gate chain (a multi-file patch with one gated file blocks). Unparseable
+  // targets (ok:false) are dropped: this is the advisory workflow gate, the
+  // fail-closed lane for unparseable patches is heimdall's (C6).
+  const filePaths =
+    toolName === 'apply_patch'
+      ? parseApplyPatch(toolInput.command)
+          .filter((t) => t.ok && t.path)
+          .map((t) => t.path)
+      : [toolInput.file_path || toolInput.path || ''];
 
-  // tdd-phase.json is NOT allowed via the generic .json allowlist
-  if (filePath && /tdd-phase\.json$/.test(filePath)) {
-    process.stderr.write(
-      'Direct edit of tdd-phase.json is blocked.\n' +
-        'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
-    );
-    // Audit the block (R13)
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'deny', reasons: ['TDD_STATE_DIRECT_EDIT'], origin: ctx.origin });
-    process.exit(2);
-  }
+  // Developer identification: payload agent_type first (both runtimes), then
+  // the transcript scan (claude Task dispatch grep / codex rollout reader).
+  const developerInvoked =
+    payloadIsDeveloperAgent(hookData) || hasDeveloperAgentBeenInvoked(transcriptPath);
 
-  // ── TDD Phase enforcement (BEFORE allowlist) ─────────────────────────
-  const tddPhaseResult = checkTddPhase(filePath, ticketId);
-  if (tddPhaseResult === 'block') {
-    // Audit the block (R13)
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'deny', reasons: ['TDD_PHASE_VIOLATION'], origin: ctx.origin });
-    process.exit(2);
-  }
-  // GH-570 (W1×W8): audit the machine-verified ablation-RED source-edit
-  // allowance so every fired escape hatch is visible in .work-actions.json.
-  // The remaining gates (agent delegation, R6 path gate) still apply below.
-  if (tddPhaseResult === 'ablation-allow') {
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'allow', reasons: ['ABLATION_RED_SOURCE_EDIT'], origin: ctx.origin });
-  }
-  // Defense-in-depth: if TDD state doesn't exist and this is a production file,
-  // block until TDD is initialized.
-  if (
-    tddPhaseResult === 'no-file' &&
-    !isFileAllowed(filePath) &&
-    hasDeveloperAgentBeenInvoked(transcriptPath)
-  ) {
-    // Message sweep (bugs review, W1 follow-up): this hook is now LIVE, so it
-    // must not point agents at the OPERATOR-ONLY `exception` subcommand
-    // (WORK_OPERATOR_TOKEN-gated — agents following that advice dead-end).
-    // Point at the single task entrypoint + the planner Type taxonomy, and
-    // the W3 BLOCKED report for tasks that genuinely cannot be test-driven.
-    const taskNextScript = path.join(__dirname, '..', 'task-next.js');
-    const msg =
-      'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
-      'Run the single task entrypoint (it initializes state and dictates the phase):\n' +
-      `  node ${taskNextScript} <TICKET_ID> task<N>\n` +
-      "TDD exemptions come ONLY from the planner's `### Type` line in tasks.md\n" +
-      '(tests-only/docs/config/ci/mechanical-refactor/file-move/checkpoint).\n' +
-      'If this task cannot be test-driven and its Type does not exempt it, STOP\n' +
-      'and report `BLOCKED (planner-defect): <one-line reason>` back to the\n' +
-      'orchestrator.\n';
-    process.stderr.write(msg);
-    // Audit the block (R13)
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'deny', reasons: ['TDD_NOT_INITIALIZED'], origin: ctx.origin });
-    process.exit(2);
-  }
-
-  // Allow config/non-code files
-  if (isFileAllowed(filePath)) {
-    process.exit(0);
-  }
-
-  // Check if a developer agent has been invoked
-  if (hasDeveloperAgentBeenInvoked(transcriptPath)) {
-    // -- R6: Task-readiness path gate (when task-aware) --
-    // If WORK_TASK_NUM is set, enforce write paths via isWriteAllowedPath.
-    // Legacy mode (no WORK_TASK_NUM) skips the path gate.
-    const allowedPaths = buildAllowedPaths(resolveTaskBase(), resolveSafeTicketId(ticketId));
-    if (allowedPaths && filePath && !isWriteAllowedPath(filePath, allowedPaths)) {
+  for (const filePath of filePaths) {
+    // tdd-phase.json is NOT allowed via the generic .json allowlist
+    if (filePath && /tdd-phase\.json$/.test(filePath)) {
       process.stderr.write(
-        'Write to "' +
-          filePath +
-          '" is outside the allowed path set.\n' +
-          'Allowed: PR{N}/, task{N}/, shared whitelist at ticket root.\n' +
-          'Verify the file path falls under the claimed worker or task directory.\n'
+        'Direct edit of tdd-phase.json is blocked.\n' +
+          'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
       );
+      // Audit the block (R13)
       const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-      auditCb({ decision: 'deny', reasons: ['PATH_NOT_ALLOWED'], origin: ctx.origin });
+      auditCb({ decision: 'deny', reasons: ['TDD_STATE_DIRECT_EDIT'], origin: ctx.origin });
       process.exit(2);
     }
 
-    process.exit(0);
+    // ── TDD Phase enforcement (BEFORE allowlist) ─────────────────────────
+    const tddPhaseResult = checkTddPhase(filePath, ticketId);
+    if (tddPhaseResult === 'block') {
+      // Audit the block (R13)
+      const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+      auditCb({ decision: 'deny', reasons: ['TDD_PHASE_VIOLATION'], origin: ctx.origin });
+      process.exit(2);
+    }
+    // GH-570 (W1×W8): audit the machine-verified ablation-RED source-edit
+    // allowance so every fired escape hatch is visible in .work-actions.json.
+    // The remaining gates (agent delegation, R6 path gate) still apply below.
+    if (tddPhaseResult === 'ablation-allow') {
+      const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+      auditCb({ decision: 'allow', reasons: ['ABLATION_RED_SOURCE_EDIT'], origin: ctx.origin });
+    }
+    // Defense-in-depth: if TDD state doesn't exist and this is a production file,
+    // block until TDD is initialized.
+    if (tddPhaseResult === 'no-file' && !isFileAllowed(filePath) && developerInvoked) {
+      // Message sweep (bugs review, W1 follow-up): this hook is now LIVE, so it
+      // must not point agents at the OPERATOR-ONLY `exception` subcommand
+      // (WORK_OPERATOR_TOKEN-gated — agents following that advice dead-end).
+      // Point at the single task entrypoint + the planner Type taxonomy, and
+      // the W3 BLOCKED report for tasks that genuinely cannot be test-driven.
+      const taskNextScript = path.join(__dirname, '..', 'task-next.js');
+      const msg =
+        'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
+        'Run the single task entrypoint (it initializes state and dictates the phase):\n' +
+        `  node ${taskNextScript} <TICKET_ID> task<N>\n` +
+        "TDD exemptions come ONLY from the planner's `### Type` line in tasks.md\n" +
+        '(tests-only/docs/config/ci/mechanical-refactor/file-move/checkpoint).\n' +
+        'If this task cannot be test-driven and its Type does not exempt it, STOP\n' +
+        'and report `BLOCKED (planner-defect): <one-line reason>` back to the\n' +
+        'orchestrator.\n';
+      process.stderr.write(msg);
+      // Audit the block (R13)
+      const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+      auditCb({ decision: 'deny', reasons: ['TDD_NOT_INITIALIZED'], origin: ctx.origin });
+      process.exit(2);
+    }
+
+    // Allow config/non-code files
+    if (isFileAllowed(filePath)) {
+      continue;
+    }
+
+    // Check if a developer agent has been invoked
+    if (developerInvoked) {
+      // -- R6: Task-readiness path gate (when task-aware) --
+      // If WORK_TASK_NUM is set, enforce write paths via isWriteAllowedPath.
+      // Legacy mode (no WORK_TASK_NUM) skips the path gate.
+      const allowedPaths = buildAllowedPaths(resolveTaskBase(), resolveSafeTicketId(ticketId));
+      if (allowedPaths && filePath && !isWriteAllowedPath(filePath, allowedPaths)) {
+        process.stderr.write(
+          'Write to "' +
+            filePath +
+            '" is outside the allowed path set.\n' +
+            'Allowed: PR{N}/, task{N}/, shared whitelist at ticket root.\n' +
+            'Verify the file path falls under the claimed worker or task directory.\n'
+        );
+        const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+        auditCb({ decision: 'deny', reasons: ['PATH_NOT_ALLOWED'], origin: ctx.origin });
+        process.exit(2);
+      }
+
+      continue;
+    }
+
+    // Block the operation — audit (R13)
+    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+    auditCb({ decision: 'deny', reasons: ['AGENT_DELEGATION_REQUIRED'], origin: ctx.origin });
+
+    process.stderr.write(delegationBlockMessage(toolName, rt.name));
+    process.exit(2);
   }
 
-  // Block the operation — audit (R13)
-  const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-  auditCb({ decision: 'deny', reasons: ['AGENT_DELEGATION_REQUIRED'], origin: ctx.origin });
+  process.exit(0);
+}
 
+/**
+ * Delegation block text, per runtime. The claude literal is byte-identical to
+ * the historical message; codex has no Task tool (design C1) — the persona
+ * runs INLINE, and reading the persona file is the observable dispatch this
+ * hook accepts (see codexDeveloperInvocation).
+ */
+function delegationBlockMessage(toolName, runtime) {
+  if (runtime === 'codex') {
+    const architectLine =
+      process.env.WORK_ARCHITECT_ENABLED === '1'
+        ? `  agents/code-architect.md            // Architecture\n`
+        : '';
+    return (
+      `/work-implement requires developer-persona execution\n\n` +
+      `Direct ${toolName} blocked. [work:codex-degraded] subagents run INLINE — ` +
+      `codex has no Task tool.\n\n` +
+      `Read ONE developer persona file from the work plugin's agents/ dir, adopt it,\n` +
+      `then re-apply this change inline (the persona read satisfies this gate):\n` +
+      `  agents/developer-nodejs-tdd.md      // Backend\n` +
+      `  agents/developer-react-senior.md    // React logic\n` +
+      `  agents/developer-react-ui-architect.md // UI design\n` +
+      `  agents/developer-devops.md          // Infrastructure\n` +
+      architectLine +
+      `\nOr for simple config changes, edit allowed files:\n` +
+      `(.md, .json, .yml, .env, package.json, tsconfig.*, etc.)\n`
+    );
+  }
   const architectLine =
     process.env.WORK_ARCHITECT_ENABLED === '1'
       ? `  subagent_type: "code-architect",            // Architecture\n`
       : '';
-  process.stderr.write(
+  return (
     `/work-implement requires agent delegation\n\n` +
-      `Direct ${toolName} blocked. Use a developer agent first:\n\n` +
-      `Task({\n` +
-      `  subagent_type: "developer-nodejs-tdd",      // Backend\n` +
-      `  subagent_type: "developer-react-senior",    // React logic\n` +
-      `  subagent_type: "developer-react-ui-architect", // UI design\n` +
-      `  subagent_type: "developer-devops",          // Infrastructure\n` +
-      architectLine +
-      `  prompt: "Implement: <your task>"\n` +
-      `})\n\n` +
-      `Or for simple config changes, edit allowed files:\n` +
-      `(.md, .json, .yml, .env, package.json, tsconfig.*, etc.)\n`
+    `Direct ${toolName} blocked. Use a developer agent first:\n\n` +
+    `Task({\n` +
+    `  subagent_type: "developer-nodejs-tdd",      // Backend\n` +
+    `  subagent_type: "developer-react-senior",    // React logic\n` +
+    `  subagent_type: "developer-react-ui-architect", // UI design\n` +
+    `  subagent_type: "developer-devops",          // Infrastructure\n` +
+    architectLine +
+    `  prompt: "Implement: <your task>"\n` +
+    `})\n\n` +
+    `Or for simple config changes, edit allowed files:\n` +
+    `(.md, .json, .yml, .env, package.json, tsconfig.*, etc.)\n`
   );
-  process.exit(2);
 }
 
 main().catch((err) => {

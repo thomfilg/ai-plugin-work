@@ -22,8 +22,23 @@ const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 const { consumeTasksMdWriteToken } = require('../../lib/tasks-md-write-token');
+// Vendored dual-runtime adapter: codex apply_patch payloads carry a raw patch
+// (no file_path); parseApplyPatch extracts the touched paths from its headers.
+const { parseApplyPatch } = require(path.join(__dirname, '..', '..', 'lib', 'runtime', 'tools'));
 
 const ALLOWED_STEPS = new Set(['tasks', 'tasks_gate', 'complete']);
+
+/**
+ * Parsed apply_patch targets resolved against the payload cwd. Unparseable
+ * targets (ok:false) are dropped — this hook fails open on them (C6:
+ * advisory protector; heimdall owns the fail-closed lane).
+ */
+function applyPatchTargets(toolInput, hookData) {
+  const cwd = (hookData && hookData.cwd) || process.cwd();
+  return parseApplyPatch(toolInput?.command)
+    .filter((t) => t.ok && t.path)
+    .map((t) => (path.isAbsolute(t.path) ? t.path : path.resolve(cwd, t.path)));
+}
 
 /**
  * Basename-boundary matcher for `tasks.md` references inside a Bash command.
@@ -181,13 +196,27 @@ function classifyBashTokenRefs(cmd, ticketId, tasksBase) {
 }
 
 /**
+ * GH-309 apply_patch leg: true when the patch references tasks.md ONLY at
+ * subfolder depth (no root-level ref) — those are user-created artifacts the
+ * step gate must not block.
+ */
+function patchTouchesOnlySubfolderTasksMd(toolInput, hookData, ticketId, tasksBase) {
+  const refs = applyPatchTargets(toolInput, hookData).filter(
+    (p) => path.basename(p) === 'tasks.md'
+  );
+  if (refs.length === 0) return false;
+  const depths = refs.map((p) => isRootLevelTasksMd(p, ticketId, tasksBase));
+  return depths.includes(false) && !depths.includes(true);
+}
+
+/**
  * GH-309: Early exit for subfolder tasks.md files.
  * Only the root-level <ticketId>/tasks.md is the workflow artifact that needs
  * step-gated protection. Subfolder tasks.md files (e.g. flaky-tests/tasks.md)
  * are user-created and should not be blocked. Returns true when the tool call
  * only touches subfolder tasks.md files and must be allowed unconditionally.
  */
-function isSubfolderOnlyReference(toolName, toolInput, cmd, ticketId) {
+function isSubfolderOnlyReference(toolName, toolInput, cmd, ticketId, hookData) {
   try {
     const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
     const tasksBase = getConfig.require('TASKS_BASE');
@@ -197,6 +226,16 @@ function isSubfolderOnlyReference(toolName, toolInput, cmd, ticketId) {
       if (isRootLevelTasksMd(toolInput.file_path, ticketId, tasksBase) === false) {
         return true; // Subfolder tasks.md — allow unconditionally
       }
+    }
+
+    // For codex apply_patch: classify every tasks.md target by depth. Allow
+    // unconditionally only when subfolder refs exist and no root-level ref
+    // does (same GH-309 rule as the Write/Bash vectors above/below).
+    if (
+      toolName === 'apply_patch' &&
+      patchTouchesOnlySubfolderTasksMd(toolInput, hookData, ticketId, tasksBase)
+    ) {
+      return true;
     }
 
     // For Bash: extract all target paths from the command and check depth.
@@ -303,11 +342,14 @@ async function main() {
   const ticketId = getTicketId(hookData);
   const targetBasename = toolInput.file_path ? path.basename(toolInput.file_path) : '';
   const hasTasksMdReference =
-    targetBasename === 'tasks.md' || (toolName === 'Bash' && bashReferencesTasksMd(cmd));
+    targetBasename === 'tasks.md' ||
+    (toolName === 'Bash' && bashReferencesTasksMd(cmd)) ||
+    (toolName === 'apply_patch' &&
+      applyPatchTargets(toolInput, hookData).some((p) => path.basename(p) === 'tasks.md'));
   if (
     ticketId &&
     hasTasksMdReference &&
-    isSubfolderOnlyReference(toolName, toolInput, cmd, ticketId)
+    isSubfolderOnlyReference(toolName, toolInput, cmd, ticketId, hookData)
   ) {
     process.exit(0);
   }

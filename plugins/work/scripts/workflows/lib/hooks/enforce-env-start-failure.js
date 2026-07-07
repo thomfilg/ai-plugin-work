@@ -24,6 +24,18 @@ const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 const { ACCESS_FAILED } = require(
   path.join(__dirname, '..', '..', 'check', 'lib', 'app-access-status')
 );
+// Vendored dual-runtime adapter: runtime detection (codex reads tool output
+// from the payload, not the claude transcript) + instruction vocabulary
+// (AskUserQuestion → request_user_input in emitted guidance).
+const { getRuntime } = require(path.join(__dirname, '..', 'runtime'));
+const { renderInstruction } = require(path.join(__dirname, '..', 'runtime', 'vocab'));
+
+// Both runtimes' question tools — the hooks.json matcher already carries
+// `AskUserQuestion|request_user_input`; these are the in-code equivalents.
+const QUESTION_TOOLS = new Set(['AskUserQuestion', 'request_user_input']);
+// Agent-dispatch tools gated by phase 2: claude Task/Skill plus the codex
+// spawn_agent (the `Agent` matcher alias selects it — ground truth §2.4.2).
+const GATED_DISPATCH_TOOLS = new Set(['Task', 'Skill', 'spawn_agent']);
 
 let didBlock = false;
 process.on('uncaughtException', (err) => {
@@ -155,16 +167,22 @@ function unlinkMarkerQuiet(mp) {
   }
 }
 
-function getCheckStartEnvOutput(hookData) {
+function getCheckStartEnvOutput(hookData, runtime) {
   const command = hookData.tool_input?.command || '';
   if (!command.includes('check-start-env')) return null;
+  // Codex: the transcript is a session rollout the claude scan below cannot
+  // read, but PostToolUse payloads carry the Bash output directly as a plain
+  // string in tool_response (ground truth §2.5.4).
+  if (runtime === 'codex') {
+    return typeof hookData.tool_response === 'string' ? hookData.tool_response : null;
+  }
   const transcriptPath = hookData.transcript_path;
   if (!transcriptPath || !fs.existsSync(transcriptPath)) return null;
   return readTranscriptOutput(transcriptPath);
 }
 
-function phase1_detectFailure(hookData) {
-  const output = getCheckStartEnvOutput(hookData);
+function phase1_detectFailure(hookData, runtime) {
+  const output = getCheckStartEnvOutput(hookData, runtime);
   if (output === null) return;
 
   const { hasFail, hasEmptyApps } = detectFailureSignals(output);
@@ -180,7 +198,7 @@ function phase1_detectFailure(hookData) {
 
 // ─── PHASE 2: PreToolUse/Task+Skill — block everything until user chooses ───
 
-function phase2_blockUntilUserChoice(hookData) {
+function phase2_blockUntilUserChoice(hookData, runtime) {
   const ticketId = getTicketId();
   const mp = markerPath(ticketId);
 
@@ -194,10 +212,15 @@ function phase2_blockUntilUserChoice(hookData) {
   }
   const appList = (failInfo.failedApps || []).join(', ') || 'apps';
 
+  // renderInstruction is a no-op on claude (byte-identical guidance); on
+  // codex it swaps AskUserQuestion → request_user_input (vocab layer, C13).
   process.stderr.write(
-    `BLOCKED: Dev apps failed to start (${appList}). ` +
-      'Call AskUserQuestion with options: "Retry" | "Start manually" | "Skip QA" | "Abort /check". ' +
-      `Marker: ${mp}\n`
+    renderInstruction(
+      `BLOCKED: Dev apps failed to start (${appList}). ` +
+        'Call AskUserQuestion with options: "Retry" | "Start manually" | "Skip QA" | "Abort /check". ' +
+        `Marker: ${mp}\n`,
+      runtime
+    )
   );
   didBlock = true;
   process.exit(2);
@@ -248,19 +271,20 @@ async function main() {
   }
 
   const hookData = JSON.parse(input);
-  const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
+  const runtime = getRuntime(hookData).name;
+  const hookType = process.env.CLAUDE_HOOK_TYPE || hookData.hook_event_name || 'PostToolUse';
   const toolName = hookData.tool_name;
 
   if (hookType === 'PreToolUse') {
-    // Phase 2: Block Task and Skill while marker exists
-    if (toolName === 'Task' || toolName === 'Skill') {
-      phase2_blockUntilUserChoice(hookData);
+    // Phase 2: Block agent dispatch (Task/Skill/spawn_agent) while marker exists
+    if (GATED_DISPATCH_TOOLS.has(toolName)) {
+      phase2_blockUntilUserChoice(hookData, runtime);
     }
   } else if (hookType === 'PostToolUse') {
     if (toolName === 'Bash') {
       // Phase 1: Detect check-start-env failure
-      phase1_detectFailure(hookData);
-    } else if (toolName === 'AskUserQuestion') {
+      phase1_detectFailure(hookData, runtime);
+    } else if (QUESTION_TOOLS.has(toolName)) {
       // Phase 3: User made a choice, unblock
       phase3_unblockAfterChoice(hookData);
     }

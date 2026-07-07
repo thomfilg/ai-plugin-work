@@ -98,6 +98,21 @@ function _messageText(entry) {
 /** Text of the transcript's FIRST user message, or null when unreadable. */
 function _firstUserMessageText(transcriptPath) {
   if (!transcriptPath || !fs.existsSync(transcriptPath)) return null;
+
+  // Codex rollout transcripts (SubagentStop agent_transcript_path on codex):
+  // the claude line scan below can't read them — take the FIRST authored user
+  // message via the vendored dual-format reader (event_msg/user_message
+  // records only; injected context is never mistaken for the dispatch
+  // prompt). Payload `agent_type` remains the primary identification — this
+  // fallback only runs on payloads without it (see enforce-tdd-on-stop.js).
+  const { sniffFormat, readUserMessages } = require(
+    path.join(__dirname, '..', '..', 'lib', 'runtime', 'transcript')
+  );
+  if (sniffFormat(transcriptPath) === 'codex') {
+    const messages = readUserMessages(transcriptPath, { count: Number.MAX_SAFE_INTEGER });
+    return messages.length > 0 ? messages[0] : null;
+  }
+
   for (const line of fs.readFileSync(transcriptPath, 'utf8').split('\n')) {
     if (!line.trim()) continue;
     let entry;

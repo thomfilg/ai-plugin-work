@@ -29,6 +29,9 @@
  */
 
 const path = require('path');
+// Vendored dual-runtime adapter (see factories/runtime): parses the codex
+// apply_patch payload (`*** Add/Update/Delete File:` headers) into targets.
+const { parseApplyPatch } = require('./runtime/tools');
 
 /** Shell write operators — redirects, tee, cp, mv, dd */
 const BASH_WRITE_OPS = /(?:>{1,2}|\btee\b|\bcp\b|\bmv\b|\bdd\b.*\bof=)/;
@@ -139,9 +142,30 @@ function hasBashWriteVector(cmd) {
   return BASH_WRITE_OPS.test(cmd) || NODE_FS_WRITES.test(cmd) || /\bsed\s+-i\b/.test(cmd);
 }
 
-function matchWriteTarget(artifacts, toolName, toolInput) {
+/**
+ * Codex apply_patch vector: the Edit/Write matcher lanes alias-fire for
+ * apply_patch but the payload is a raw patch (no file_path). Resolve every
+ * parsed target against the payload cwd and match the FIRST artifact rule
+ * hit. Unparseable targets (ok:false) fail open — advisory protector (C6).
+ */
+function matchApplyPatchTarget(artifacts, toolInput, hookData) {
+  const cwd = (hookData && hookData.cwd) || process.cwd();
+  for (const target of parseApplyPatch(toolInput?.command)) {
+    if (!target.ok || !target.path) continue;
+    const resolved = path.isAbsolute(target.path) ? target.path : path.resolve(cwd, target.path);
+    const bn = path.basename(resolved);
+    const rule = artifacts.find((a) => matchesRule(bn, a));
+    if (rule) return { bn, filePath: resolved, rule };
+  }
+  return null;
+}
+
+function matchWriteTarget(artifacts, toolName, toolInput, hookData) {
   if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
     return matchDirectWriteTarget(artifacts, toolInput);
+  }
+  if (toolName === 'apply_patch') {
+    return matchApplyPatchTarget(artifacts, toolInput, hookData);
   }
   if (toolName !== 'Bash') return null;
   const cmd = String(toolInput?.command || '');
@@ -208,6 +232,8 @@ function loadPerTaskContext(ticketId) {
 /** Determine the actual file path — for Bash, extract from command string. */
 function resolveActualFilePath(toolName, filePath, bn) {
   if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) return filePath;
+  // apply_patch: filePath already carries the cwd-resolved patch target.
+  if (toolName === 'apply_patch') return filePath;
   // If we can't extract a reliable path, fail-open (skip per-task check)
   if (toolName === 'Bash') return extractBashTargetPath(filePath, bn);
   return null;
@@ -362,7 +388,7 @@ function createArtifactProtector(opts) {
   const { artifacts, getStepInProgress, isRunningInAgent = () => true, getTicketId } = opts;
 
   function check(toolName, toolInput, hookData) {
-    const target = matchWriteTarget(artifacts, toolName, toolInput);
+    const target = matchWriteTarget(artifacts, toolName, toolInput, hookData);
     if (!target) return { blocked: false };
     const { bn, filePath, rule } = target;
 

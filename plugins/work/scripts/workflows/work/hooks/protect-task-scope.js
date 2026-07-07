@@ -68,8 +68,23 @@ const { matchesTypeScope, scopeRulesFor, isTestFilePath } = require(
 const { appendEnforcementAudit } = require(
   path.join(__dirname, '..', '..', 'work', 'lib', 'work-actions')
 );
+// Vendored dual-runtime adapter: codex apply_patch payloads carry a raw patch
+// (no file_path); parseApplyPatch extracts the touched paths from its headers.
+const { parseApplyPatch } = require(path.join(__dirname, '..', '..', 'lib', 'runtime', 'tools'));
 
 const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
+/**
+ * Parsed apply_patch write targets (paths as written in the patch headers —
+ * decideEdit relativizes against workDir the same way it does for Bash
+ * targets). Unparseable targets (ok:false) are dropped: Gate D is an
+ * advisory scope gate and fails open on them (C6).
+ */
+function extractApplyPatchWriteTargets(toolInput) {
+  return parseApplyPatch(toolInput?.command)
+    .filter((t) => t.ok && t.path)
+    .map((t) => t.path);
+}
 
 // GH-528 round-2 ITEM 1: WORK_OPERATOR_TOKEN gate on env-bypass.
 // Centralised so all three bypass call sites stay in lockstep.
@@ -523,6 +538,21 @@ function typesEqual(a, b) {
   return true;
 }
 
+/** First blocking scope decision across a list of write targets, or null. */
+function decideForTargets(targets, active, workDir) {
+  for (const tgt of targets) {
+    const d = decideEdit({
+      filePath: tgt,
+      workDir,
+      filesInScope: active.filesInScope,
+      filesOutOfScope: active.filesOutOfScope,
+      activeTask: active.label,
+    });
+    if (d.blocked) return d;
+  }
+  return null;
+}
+
 function evaluateTool(toolName, toolInput, active, workDir) {
   if (FILE_WRITE_TOOLS.has(toolName)) {
     const filePath = toolInput && toolInput.file_path;
@@ -535,20 +565,16 @@ function evaluateTool(toolName, toolInput, active, workDir) {
       activeTask: active.label,
     });
   }
+  if (toolName === 'apply_patch') {
+    // Codex write vector: the Edit|Write matcher lanes alias-fire for
+    // apply_patch; every parsed patch target goes through the same scope
+    // decision as a direct file write.
+    return decideForTargets(extractApplyPatchWriteTargets(toolInput), active, workDir);
+  }
   if (toolName === 'Bash') {
     const cmd = toolInput && toolInput.command;
     if (!cmd) return null;
-    const targets = extractBashWriteTargets(String(cmd));
-    for (const tgt of targets) {
-      const d = decideEdit({
-        filePath: tgt,
-        workDir,
-        filesInScope: active.filesInScope,
-        filesOutOfScope: active.filesOutOfScope,
-        activeTask: active.label,
-      });
-      if (d.blocked) return d;
-    }
+    return decideForTargets(extractBashWriteTargets(String(cmd)), active, workDir);
   }
   return null;
 }
@@ -772,6 +798,9 @@ function extractTargetPath(toolName, toolInput) {
   if (FILE_WRITE_TOOLS.has(toolName)) {
     return (toolInput && toolInput.file_path) || '';
   }
+  if (toolName === 'apply_patch') {
+    return extractApplyPatchWriteTargets(toolInput)[0] || '';
+  }
   if (toolName === 'Bash') {
     const cmd = toolInput && toolInput.command;
     if (!cmd) return '';
@@ -795,6 +824,7 @@ if (require.main === module) {
 module.exports = {
   evaluateTool,
   extractBashWriteTargets,
+  extractApplyPatchWriteTargets,
   getTicketId,
   getActiveTask,
   typeAllowlistDecision,

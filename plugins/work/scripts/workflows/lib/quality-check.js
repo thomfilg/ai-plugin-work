@@ -29,9 +29,13 @@ const { resolvePluginRootHonouringEnv } = require('../work/lib/resolve-plugin-ro
 // BUNDLED_DEV_CHECK below is derived from PLUGIN_ROOT, so the user's
 // CLAUDE_PLUGIN_ROOT must be honoured verbatim when probing lands on an
 // unrelated install. Falls back to __dirname-based resolution otherwise.
-const PLUGIN_ROOT =
-  resolvePluginRootHonouringEnv(__dirname, 2) || path.join(__dirname, '..', '..');
-const BUNDLED_DEV_CHECK = path.join(
+const PLUGIN_ROOT = resolvePluginRootHonouringEnv(__dirname, 2) || path.join(__dirname, '..', '..');
+// Primary: the historical PLUGIN_ROOT-derived path — it resolves through the
+// `workflows -> scripts/workflows` git symlink when PLUGIN_ROOT is the plugin
+// root. Codex installs DROP symlinks from the cache (ground truth §1.7 /
+// design C10), so when that path is missing fall back to the canonical real
+// path relative to this module (<root>/scripts/workflows/lib).
+const SYMLINKED_DEV_CHECK = path.join(
   PLUGIN_ROOT,
   'workflows',
   'lib',
@@ -39,6 +43,10 @@ const BUNDLED_DEV_CHECK = path.join(
   'dev-check',
   'dev-check.sh'
 );
+const CANONICAL_DEV_CHECK = path.join(__dirname, 'scripts', 'dev-check', 'dev-check.sh');
+const BUNDLED_DEV_CHECK = fs.existsSync(SYMLINKED_DEV_CHECK)
+  ? SYMLINKED_DEV_CHECK
+  : CANONICAL_DEV_CHECK;
 
 /**
  * Read scripts from a repo's package.json

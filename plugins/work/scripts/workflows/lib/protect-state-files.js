@@ -27,6 +27,9 @@
 
 const fs = require('fs');
 const path = require('path');
+// Vendored dual-runtime adapter (see factories/runtime): parses the codex
+// apply_patch payload (`*** Add/Update/Delete File:` headers) into targets.
+const { parseApplyPatch } = require('./runtime/tools');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -148,6 +151,33 @@ function createFileProtector(opts) {
   const fmt = formatMessage || defaultMessage;
 
   function check(toolName, toolInput, hookData) {
+    // ── Vector 1b: codex apply_patch (write-kind, no file_path field) ─────
+    // The Edit/Write matcher lanes alias-fire for apply_patch on codex, but
+    // the payload carries a raw patch instead of file_path. Check EVERY
+    // parsed target; a multi-file patch touching one protected file blocks.
+    // Unparseable targets (ok:false) fail OPEN here — these are advisory
+    // workflow protectors, not the heimdall security boundary (design C6).
+    if (toolName === 'apply_patch') {
+      const cwd = (hookData && hookData.cwd) || process.cwd();
+      for (const target of parseApplyPatch(toolInput?.command)) {
+        if (!target.ok || !target.path) continue;
+        const resolved = path.isAbsolute(target.path)
+          ? target.path
+          : path.resolve(cwd, target.path);
+        const match = isProtected(resolved);
+        if (match && !isExempt(toolName, toolInput, hookData)) {
+          return {
+            blocked: true,
+            match,
+            vector: 'apply_patch',
+            message: fmt(match, 'apply_patch'),
+            skipRemainingChecks: true,
+          };
+        }
+      }
+      return { blocked: false, skipRemainingChecks: true };
+    }
+
     // ── Vector 1: Edit / Write / MultiEdit ────────────────────────────────
     if (FILE_WRITE_TOOLS.has(toolName)) {
       const filePath = toolInput?.file_path || '';
