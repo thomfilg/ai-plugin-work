@@ -22,28 +22,22 @@ const { transcriptIsDeveloperDispatch } = require(
 const DISPATCH_PROMPT =
   'You are a self-paced TDD agent. Run node task-next.js TEST-1 task1 and follow it.';
 
-const cleanupFiles = [];
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-stop-rt-'));
 after(() => {
-  while (cleanupFiles.length > 0) {
-    try {
-      fs.unlinkSync(cleanupFiles.pop());
-    } catch {
-      /* already gone */
-    }
-  }
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+let fileCounter = 0;
+
 function writeRollout(records) {
-  const file = path.join(
-    os.tmpdir(),
-    `tdd-stop-rt-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
-  );
+  const file = path.join(tmpDir, `rollout-${(fileCounter += 1)}.jsonl`);
   const meta = {
     type: 'session_meta',
     payload: { id: 's-1', cwd: '/tmp/x', timestamp: '2026-07-07T00:00:00Z' },
   };
-  fs.writeFileSync(file, [meta, ...records].map((r) => JSON.stringify(r)).join('\n'));
-  cleanupFiles.push(file);
+  fs.writeFileSync(file, [meta, ...records].map((r) => JSON.stringify(r)).join('\n'), {
+    mode: 0o600,
+  });
   return file;
 }
 
@@ -78,10 +72,7 @@ describe('transcriptIsDeveloperDispatch — codex rollout leg', () => {
   });
 
   it('claude transcript first-user-message detection unchanged (characterization)', () => {
-    const file = path.join(
-      os.tmpdir(),
-      `tdd-stop-claude-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
-    );
+    const file = path.join(tmpDir, 'claude-transcript.jsonl');
     fs.writeFileSync(
       file,
       [
@@ -89,9 +80,9 @@ describe('transcriptIsDeveloperDispatch — codex rollout leg', () => {
         { type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } },
       ]
         .map((r) => JSON.stringify(r))
-        .join('\n')
+        .join('\n'),
+      { mode: 0o600 }
     );
-    cleanupFiles.push(file);
     assert.equal(transcriptIsDeveloperDispatch(file), true);
   });
 });
