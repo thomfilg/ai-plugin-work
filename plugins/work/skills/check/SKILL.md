@@ -42,3 +42,16 @@ The canonical step order lives in `scripts/workflows/check/lib/step-registry.js`
 - Each phase-1 report MUST carry the canonical line `**Head:** <sha>` (the ticket worktree's `git rev-parse HEAD` at verification time) directly under the Status line. Sibling agents may commit fixes mid-review (GH-308): the orchestrator re-dispatches a FAILING report anchored to an older HEAD, so agents must re-check HEAD right before writing and re-verify findings if it moved. PASS reports and reports without a Head line are accepted as-is.
 - If the orchestrator returns `action: "blocked"` naming a missing/empty report after repeated dispatches, do NOT re-dispatch: recover the verdict from the agent's transcript, write the report yourself with the Write tool (including the changes hash), then re-run check-next.js.
 - Never run two check-next.js invocations concurrently — the orchestrator holds a per-ticket lock and reports `action: "locked"` if you try; just wait and re-run.
+
+## Under Codex
+
+- **Invocation**: mention `$check` (work-workflow:check); the ticket id is the
+  text after the skill mention (no `$ARGUMENTS` substitution on codex).
+- **Phase 1 / Phase 2 delegates**: there is no Task tool — parallel dispatch is
+  serialized. Execute each delegate's `prompt` INLINE, one after another (the
+  instruction's `[work:codex-degraded]` note says the same). All report rules
+  above still apply, including the `**Head:** <sha>` line.
+- **Report writes**: there is no Write tool — create each `*.check.md` report
+  with a normal file edit (codex applies it as `apply_patch`), then verify it
+  exists and is non-empty (`wc -c <file>`) before finishing. The bash-heredoc
+  warning above still stands.

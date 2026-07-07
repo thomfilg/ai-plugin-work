@@ -1,8 +1,9 @@
 /**
- * Tests for factories/runtime/vocab.js — the claude renderings are pinned to
- * the ACTUAL literals in the emitting source files (instruction-builder.js,
- * step-enrichments/implement.js), so the vocabulary layer is provably inert
- * on Claude; codex renderings honor the degradation contract (C1/C13).
+ * Tests for factories/runtime/vocab.js — the claude renderings are pinned
+ * byte-for-byte to the literals the emitting sources produced at HEAD before
+ * the vocabulary port (WP-08), so the layer is provably inert on Claude. The
+ * source files now ROUTE those strings through the tokens (asserted below);
+ * codex renderings honor the degradation contract (C1/C13).
  *
  * Run: node --test factories/runtime/__tests__/vocab.spec.js
  */
@@ -34,28 +35,29 @@ describe('T — claude snapshots equal the HEAD literals', () => {
       'Pass the prompt directly to the agent. Do NOT read brief/spec/tasks files yourself — the agent reads them.'
     );
     assert.ok(
-      INSTRUCTION_BUILDER.includes(rendered),
-      'literal must exist in instruction-builder.js'
+      INSTRUCTION_BUILDER.includes("T('delegate.task.note'"),
+      'instruction-builder.js must route the note through the vocab token'
     );
   });
 
   it('delegate.task.note.short is the implement.js parallel note, byte-identical', () => {
     const rendered = T('delegate.task.note.short', {}, 'claude');
     assert.equal(rendered, 'Pass the prompt directly to the agent.');
-    assert.ok(IMPLEMENT.includes(`'${rendered}'`), 'literal must exist in implement.js');
+    assert.ok(
+      IMPLEMENT.includes("T('delegate.task.note.short'"),
+      'implement.js must route the note through the vocab token'
+    );
   });
 
-  it('parallel.dispatch matches the implement.js:147 template, byte-identical', () => {
+  it('parallel.dispatch matches the historical implement.js template, byte-identical', () => {
     const rendered = T('parallel.dispatch', { count: 3 }, 'claude');
     assert.equal(
       rendered,
       'Launch ALL 3 agents IN PARALLEL (single message, multiple Task tool calls). Each task is independent.'
     );
-    // The source renders the same template with ${delegates.length} — pin the
-    // invariant halves around the interpolation.
-    assert.ok(IMPLEMENT.includes('Launch ALL ${delegates.length} agents IN PARALLEL'));
     assert.ok(
-      IMPLEMENT.includes('(single message, multiple Task tool calls). Each task is independent.')
+      IMPLEMENT.includes("T('parallel.dispatch'"),
+      'implement.js must route the dispatch line through the vocab token'
     );
   });
 

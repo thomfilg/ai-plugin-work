@@ -20,6 +20,7 @@ function stepProgress(name) {
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { T, getRuntime } = require('../../../lib/instruction-vocab');
 
 // True when the code review flags unresolved IMPORTANT/CRITICAL items and is
 // not already APPROVED. Missing/unreadable report → no suggestions (skip).
@@ -78,7 +79,8 @@ function buildDevFixDelegate(state, crPath, developerAgent) {
       agentType: developerAgent,
       description: `Fix code review suggestions (round ${state.consensusIteration + 1})`,
       prompt: `Fix code review suggestions for ${state.ticketId}. Read ${crPath}. For each suggestion: IMPLEMENT if valid, SKIP with reason if not.`,
-      note: 'Pass the prompt directly to the agent.',
+      // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+      note: T('delegate.task.note.short', {}, getRuntime().name),
     },
   };
 }
@@ -105,7 +107,8 @@ function buildFreshReviewDelegate(state, crPath, changesHash) {
         'previous run or from memory; the cited code may no longer exist.',
         `End the report with the footer line: \`Verified at ${changesHash}\`.`,
       ].join(' '),
-      note: 'Pass the prompt directly to the agent.',
+      // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+      note: T('delegate.task.note.short', {}, getRuntime().name),
     },
   };
 }

@@ -56,8 +56,15 @@ async function main() {
     process.exit(2);
   }
 
-  // Check if this is a developer agent
-  const agentName = (hookData.agent_name || hookData.subagent_type || '').toLowerCase();
+  // Check if this is a developer agent — payload agent_type first (the
+  // documented SubagentStop field on both runtimes; codex sets no legacy
+  // agent_name), then the legacy fields.
+  const agentName = (
+    hookData.agent_type ||
+    hookData.agent_name ||
+    hookData.subagent_type ||
+    ''
+  ).toLowerCase();
 
   // Skip if no code changes to validate
   if (!hasCodeChanges()) {
@@ -65,7 +72,9 @@ async function main() {
   }
 
   // Run quality checks (3-tier fallback: project dev:check → bundled scripts → standard scripts)
-  const cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // cwd via payload where present (design C12): CLAUDE_PROJECT_DIR is never
+  // set on codex; the payload's cwd is authoritative on both runtimes.
+  const cwd = hookData.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const result = runQualityCheck({ cwd, timeout: 120000 });
   const strategyLabel = describeStrategy(result.strategy);
 

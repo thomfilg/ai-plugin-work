@@ -2,10 +2,21 @@
  * Instruction builder for work-next.js.
  *
  * Converts a plan entry into a work_instruction JSON object
- * with the appropriate delegation type.
+ * with the appropriate delegation type. Delegates render through the
+ * instruction vocabulary (design §F): on claude the output is byte-identical
+ * to the historical literals (pinned by the runtime characterization tests);
+ * on codex `task` delegates become `inline-agent` persona executions with a
+ * `howTo` + degradation notices and `skill` delegates gain a mention-based
+ * `howTo` — additive fields only, the claude schema is unchanged.
  */
 
 'use strict';
+
+const path = require('path');
+
+const { T, renderDelegateForRuntime, getRuntime } = require(
+  path.join(__dirname, '..', '..', 'lib', 'instruction-vocab')
+);
 
 /**
  * Build a work_instruction from a plan entry.
@@ -14,6 +25,7 @@
  * @returns {object} work_instruction JSON
  */
 function buildInstruction(entry, stateCtx) {
+  const rt = getRuntime();
   const instruction = {
     type: 'work_instruction',
     action: 'execute',
@@ -70,10 +82,14 @@ function buildInstruction(entry, stateCtx) {
         agentType: entry.agentType,
         description: `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80),
         prompt,
-        note: 'Pass the prompt directly to the agent. Do NOT read brief/spec/tasks files yourself — the agent reads them.',
+        note: T('delegate.task.note', {}, rt.name),
       };
     }
   }
+
+  // Runtime-correct delegate rendering (claude: same reference back — inert).
+  // Every branch above sets a delegate; renderDelegate passes falsy through.
+  instruction.delegate = renderDelegateForRuntime(instruction.delegate, rt);
 
   return instruction;
 }

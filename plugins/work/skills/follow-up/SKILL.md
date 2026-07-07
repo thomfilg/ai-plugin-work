@@ -75,3 +75,21 @@ from the GitHub review API: a bot review is "done" when it is no longer in
 `pendingBots` (its review is submitted, not in-progress) and its blocking
 comments are present. While a bot review is still running, comments are held
 (the bot may dismiss them on completion) and the workflow keeps waiting.
+
+## Under Codex
+
+- **Invocation**: mention `$follow-up` (work-workflow:follow-up); the ticket id
+  is the text after the skill mention (no `$ARGUMENTS` substitution on codex).
+- **Delegates**: there is no Task tool — a `delegate.type: "task"` block means
+  read the persona file at `personaPath` (when given), adopt it, and execute
+  the `prompt` INLINE in this session, then re-run follow-up-next.js.
+- **Background mode**: `run_in_background`/`BashOutput` do not exist. For long
+  CI waits run the script detached — `nohup node ".../follow-up-next.js"
+  <TICKET> >/tmp/follow-up-<TICKET>.log 2>&1 &` — then poll the state files
+  above (`.follow-up-next.json` / `.follow-up-state.json`); the
+  state-file-first design is unchanged.
+- **Ambiguous review comments** ("ask the user"): interactive sessions use
+  `request_user_input`; unattended exec parks the question — answers arrive
+  via the maestro `/signal` inbox or `codex exec resume --last "<answer>"`.
+- `[work:codex-degraded]` notices in instructions are informational fallback
+  notes, not errors.

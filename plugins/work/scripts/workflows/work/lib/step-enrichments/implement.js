@@ -19,6 +19,9 @@ const path = require('path');
 
 const { resolveTaskType } = require(path.join(__dirname, '..', 'resolve-task-type'));
 const { findReadyTasks } = require(path.join(__dirname, '..', 'task-graph'));
+const { T, renderDelegateForRuntime, getRuntime } = require(
+  path.join(__dirname, '..', '..', '..', 'lib', 'instruction-vocab')
+);
 
 const TASK_NEXT_SCRIPT = path.resolve(
   __dirname,
@@ -124,17 +127,21 @@ module.exports = function registerImplement(register) {
         );
         const allTasks = parseFullTasks(tasksDir) || [];
 
+        const rt = getRuntime();
         const delegates = parallelTasks.map((num) => {
           const task = allTasks.find((t) => t.num === num);
           const title = task?.title || 'Implementation';
           const agentType = resolveAgentType(tasksDir, num);
-          return {
-            type: 'task',
-            agentType,
-            description: `Task ${num}/${totalTasks} — ${title}`,
-            prompt: buildSelfPacedPrompt(ticket, num, totalTasks, title),
-            note: 'Pass the prompt directly to the agent.',
-          };
+          return renderDelegateForRuntime(
+            {
+              type: 'task',
+              agentType,
+              description: `Task ${num}/${totalTasks} — ${title}`,
+              prompt: buildSelfPacedPrompt(ticket, num, totalTasks, title),
+              note: T('delegate.task.note.short', {}, rt.name),
+            },
+            rt
+          );
         });
 
         entry._overrideInstruction = {
@@ -144,7 +151,7 @@ module.exports = function registerImplement(register) {
           continue: true,
           parallel: true,
           delegates,
-          note: `Launch ALL ${delegates.length} agents IN PARALLEL (single message, multiple Task tool calls). Each task is independent.`,
+          note: T('parallel.dispatch', { count: delegates.length }, rt.name),
         };
         return;
       }

@@ -26,6 +26,7 @@
 
 const fs = require('fs');
 const openQuestions = require('../lib/open-questions');
+const { T, renderQuestionText, getRuntime } = require('../../lib/instruction-vocab');
 
 /**
  * Build the `AskUserQuestion` payload for the RUN action. Kept local so the
@@ -91,14 +92,20 @@ function briefGateStep(add, s, ctx) {
     return;
   }
 
+  // The question renderer keeps claude byte-identical and swaps the codex
+  // vocabulary (request_user_input prose / parked-gate notice per mode, C3).
+  const rt = getRuntime();
   add(
     STEPS.brief_gate,
     'RUN',
-    'AskUserQuestion',
+    T('tool.question', {}, rt.name),
     `Resolve ${blocking.length} unresolved cross-ticket/architectural question(s)`,
     {
       agentType: 'general-purpose',
-      agentPrompt: `Use AskUserQuestion to resolve ${blocking.length} unresolved open question(s) in brief.md, then call applyBriefResolutions() to persist the answers.`,
+      agentPrompt: renderQuestionText(
+        `Use AskUserQuestion to resolve ${blocking.length} unresolved open question(s) in brief.md, then call applyBriefResolutions() to persist the answers.`,
+        rt
+      ),
       askUserQuestionPayload: buildAskUserQuestionPayload(blocking),
       onResolve: 'rewrite brief.md',
       postResolveCommand: `node -e "var r=process.argv[3];if(!r)process.exit(0);require(process.argv[1]).applyBriefResolutions(process.argv[2],JSON.parse(r))" "${path.join(__dirname, 'brief-gate.js')}" "${briefPath}" "$RESOLUTIONS_JSON"`,

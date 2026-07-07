@@ -20,6 +20,7 @@ const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
 const { computeTaskDiff } = require('../gates/task-review-gate');
 const { taskSegment } = require('../../lib/allocate-output-folder');
+const { T, renderQuestionText, getRuntime } = require('../../lib/instruction-vocab');
 
 /**
  * @param {Function} add
@@ -63,16 +64,22 @@ module.exports = function taskReviewStep(add, s, ctx) {
   const parsed = parseInt(process.env.TASK_REVIEW_MAX_FIXES, 10);
   const maxFixRounds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
 
-  // Decision 4: fix rounds exhausted -- escalate to user
+  // Decision 4: fix rounds exhausted -- escalate to user. The question
+  // renderer keeps claude byte-identical and swaps the codex vocabulary
+  // (request_user_input prose / parked-gate notice per mode, C3).
   if (fixRounds >= maxFixRounds) {
+    const rt = getRuntime();
     add(
       STEPS.task_review,
       'RUN',
-      'AskUserQuestion',
+      T('tool.question', {}, rt.name),
       `Task ${currentIdx + 1}/${totalTasks} fix rounds exhausted (${fixRounds}/${maxFixRounds}) -- escalating to user`,
       {
         agentType: 'general-purpose',
-        agentPrompt: `Task ${currentIdx + 1} has exhausted ${fixRounds}/${maxFixRounds} fix rounds. Use AskUserQuestion to ask the user whether to continue fixing, skip the review, or abort.`,
+        agentPrompt: renderQuestionText(
+          `Task ${currentIdx + 1} has exhausted ${fixRounds}/${maxFixRounds} fix rounds. Use AskUserQuestion to ask the user whether to continue fixing, skip the review, or abort.`,
+          rt
+        ),
       }
     );
     appendAction(ctx.ticket, {

@@ -15,6 +15,8 @@ Run the driver script. Execute what it says. Do not improvise.
 **Step 0 — open the monitor channel for this ticket FIRST.** This must be
 the first tool call in the session. Each new line in the inbox file becomes
 a task-notification that resumes you mid-idle — no polling, no manual nudges.
+(Codex runtime: SKIP this step — there is no Monitor tool; see "Under Codex"
+below. Step 0.5 still applies.)
 
 ```
 Monitor(node ${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js <TICKET>)
@@ -88,6 +90,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js "$ARGUMENTS" --in
 | `task` | `Task(agentType)` with the `prompt` field. Do NOT read files yourself. |
 | `skill` | `Skill(name)` with the `prompt` field |
 | `commit` | YOU (the session agent) do it — do NOT dispatch a subagent. Follow the `prompt`: author a concise semantic commit message for the staged changes (`type(scope): description`, referencing the ticket, **no AI attribution**), then run the sanctioned commit script from the `prompt` — `node "<…>/commit-and-push.js" -m "<your message>"` — which stages, validates, commits, and pushes. A raw `git commit` is blocked by `enforce-agent-usage`; the script is the only path. If it rejects the message (format, attribution, or an AI git identity), fix it and re-run. |
+| `inline-agent` | (codex only) There is no Task tool. Read the persona file at `personaPath` (when given), adopt it, execute the `prompt` INLINE in this session per the `howTo`, then re-run the driver. Never spawn anything. |
 
 If the instruction has `parallel: true` with `delegates` array: launch ALL agents as parallel Task() calls in a single message.
 
@@ -97,3 +100,31 @@ If the instruction has `parallel: true` with `delegates` array: launch ALL agent
 - If `action: "blocked"` → show the reason to the user and wait. Do NOT re-run automatically.
 - **Some steps take a long time (CI monitoring can take 20+ minutes). This is normal. Do NOT cancel, interrupt, or give up.**
 - Never stop until `action: "complete"`.
+
+## Under Codex
+
+Codex has no `Monitor`, `Task`, or `Skill` tools, no `/plugin:skill` slash
+commands, and no `$ARGUMENTS` substitution. The driver loop is identical —
+only the dispatch surface changes:
+
+- **Invocation**: mention `$work` (work-workflow:work); the ticket id is the
+  text after the skill mention. NOTE: the UserPromptSubmit plan-injection hook
+  fires only on the literal `/work <TICKET>` prompt text — the `$work` mention
+  path relies on THIS file's driver instructions instead, so follow the
+  Start/Loop sections verbatim.
+- **Step 0 (Monitor)**: skip it — no Monitor tool exists. Inbox messages are
+  relayed by a PostToolUse hook (`[work:codex-degraded] inbox relayed via
+  PostToolUse hook`). Step 0.5 (tmux listener pane) still applies and is the
+  human channel.
+- **Delegates**: instructions render `type: "inline-agent"` instead of `task`
+  (see the table row above). `parallel: true` fan-out is serialized — execute
+  the delegates one after another, in order, each inline.
+- **`skill` delegates**: no Skill tool. Follow the delegate's `howTo`: invoke
+  the `$<name>` mention; if it doesn't trigger, open the SKILL.md at the path
+  given and follow it inline.
+- **Question gates** (`action: "blocked"` with user questions): AskUserQuestion
+  does not exist. Interactive sessions use `request_user_input`; unattended
+  exec parks the gate — answers arrive via the maestro `/signal` inbox or
+  `codex exec resume --last "<answer>"`.
+- Instructions carrying `[work:codex-degraded]` notices are informational —
+  they explain the fallback in effect, not an error.
