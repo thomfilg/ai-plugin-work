@@ -7,6 +7,8 @@
  * stays under the quality gate's max-lines budget.
  */
 
+const { extractWriteContent } = require('./runtime/tools');
+
 function extractMultiEditContent(edits) {
   if (!Array.isArray(edits)) return null;
   const strings = edits
@@ -16,11 +18,21 @@ function extractMultiEditContent(edits) {
   return strings.join('\n');
 }
 
+// Codex apply_patch (WP-05): the written content is the '+'-prefixed lines of
+// the raw patch payload (ground truth §2.5.5) — the codex analog of Edit's
+// new_string / Write's content. Returns null when the patch adds nothing so
+// content-gated memories fail closed, same as the Claude extractors.
+function extractApplyPatchContent(toolInput) {
+  const lines = extractWriteContent('apply_patch', toolInput);
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
 const PRETOOL_CONTENT_EXTRACTORS = {
   Edit: (i) => (typeof i.new_string === 'string' ? i.new_string : null),
   Write: (i) => (typeof i.content === 'string' ? i.content : null),
   MultiEdit: (i) => extractMultiEditContent(i.edits),
   NotebookEdit: (i) => (typeof i.new_source === 'string' ? i.new_source : null),
+  apply_patch: (i) => extractApplyPatchContent(i),
 };
 
 function extractPretoolContent(toolName, toolInput) {

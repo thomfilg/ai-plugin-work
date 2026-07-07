@@ -85,6 +85,7 @@ function parsePayload(raw) {
 }
 
 const { getSessionStartHint } = require(path.join(__dirname, '..', 'lib', 'setup-hints'));
+const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime', 'index'));
 
 // Build the activeDomains opts for selectForEvent. Delegates to the
 // shared resolver so synapsys-explain stays in lockstep. Uses the
@@ -254,7 +255,7 @@ async function dispatch() {
   // output (consumes + deletes the background recall cache).
   const autoBlock = event === 'UserPromptSubmit' ? consumeAutoRecall(payload) : '';
 
-  const sessionHint = getSessionStartHint(event, stores, memories);
+  const sessionHint = getSessionStartHint(event, stores, memories, getRuntime(payload).name);
   if (sessionHint) {
     process.stdout.write(sessionHint);
     process.exit(0);

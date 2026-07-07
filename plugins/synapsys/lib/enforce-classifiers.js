@@ -30,7 +30,9 @@ const os = require('node:os');
 const path = require('node:path');
 const sessionIdLib = require('./session-id');
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+// apply_patch is the codex file-edit tool (ground truth §2.5.3); Claude never
+// sends it, so the claude path is unchanged.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch']);
 const TOOLS_CAP = 200;
 
 // ---------------------------------------------------------------------------
