@@ -36,6 +36,22 @@ const CATALOG = [
     ],
   },
   {
+    id: 'codex-config',
+    label: 'Codex config directory',
+    description:
+      'Codex trust store, hooks, rules, agents, plugin cache — config.toml holds ' +
+      '[hooks.state]: an agent that edits it can self-trust malicious hooks. ' +
+      '~/.codex/auth.json is conceal-grade: hide it with /heimdall:conceal, not a phrase lock.',
+    defaultPhrase: 'edit .codex',
+    targets: [
+      { path: '~/.codex/config.toml', anchor: 'home' },
+      { path: '~/.codex/hooks.json', anchor: 'home' },
+      { path: '~/.codex/rules', anchor: 'home' },
+      { path: '~/.codex/agents', anchor: 'home' },
+      { path: '~/.codex/plugins', anchor: 'home' },
+    ],
+  },
+  {
     id: 'root-package-json',
     label: 'Root package.json',
     description:

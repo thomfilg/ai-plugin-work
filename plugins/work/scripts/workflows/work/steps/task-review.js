@@ -20,70 +20,65 @@ const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
 const { computeTaskDiff } = require('../gates/task-review-gate');
 const { taskSegment } = require('../../lib/allocate-output-folder');
+const { T, renderQuestionText, getRuntime } = require('../../lib/instruction-vocab');
 
 /**
- * @param {Function} add
- * @param {object} s
- * @param {object} ctx
+ * Decisions 1-3: DEFER reason, or null when an intermediate task needs review.
  */
-module.exports = function taskReviewStep(add, s, ctx) {
-  const { STEPS } = ctx;
-
+function deferReason(s, ctx) {
   // Decision 1: disabled via env
   if (process.env.TASK_REVIEW_ENABLED === '0') {
-    add(STEPS.task_review, 'DEFER', null, 'Task review disabled (TASK_REVIEW_ENABLED=0)');
-    return;
+    return 'Task review disabled (TASK_REVIEW_ENABLED=0)';
   }
-
-  // Gather task metadata from implement step and state
-  const taskData = ctx._taskData;
-  const tasksMeta = s?.workState?.tasksMeta;
-
-  // Decision 2: no tasks
-  if (!s?.hasTasks || !taskData || !tasksMeta) {
-    add(STEPS.task_review, 'DEFER', null, 'No tasks');
-    return;
+  // Decision 2: no tasks (gathered from implement step and state)
+  if (!s?.hasTasks || !ctx._taskData || !s?.workState?.tasksMeta) {
+    return 'No tasks';
   }
-
-  const currentIdx = ctx._currentTaskIdx ?? 0;
-  const totalTasks = taskData.length;
-
   // Decision 3: final task -- /check handles the full review
-  if (currentIdx >= totalTasks - 1) {
-    add(STEPS.task_review, 'DEFER', null, 'Final task -- /check handles review');
-    return;
+  const currentIdx = ctx._currentTaskIdx ?? 0;
+  if (currentIdx >= ctx._taskData.length - 1) {
+    return 'Final task -- /check handles review';
   }
+  return null;
+}
 
-  // Read fix-round state from tasksMeta.
-  // Note: taskReviewFixRounds is incremented by the orchestrator when it loops back
-  // to implement after a failed review (see work-state.js incrementTaskReviewFixRounds).
-  // This step only reads the counter to decide whether to escalate.
-  const currentTaskMeta = tasksMeta.tasks?.[currentIdx];
-  const fixRounds = currentTaskMeta?.taskReviewFixRounds || 0;
+function resolveMaxFixRounds() {
   const parsed = parseInt(process.env.TASK_REVIEW_MAX_FIXES, 10);
-  const maxFixRounds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
+}
 
-  // Decision 4: fix rounds exhausted -- escalate to user
-  if (fixRounds >= maxFixRounds) {
-    add(
-      STEPS.task_review,
-      'RUN',
-      'AskUserQuestion',
-      `Task ${currentIdx + 1}/${totalTasks} fix rounds exhausted (${fixRounds}/${maxFixRounds}) -- escalating to user`,
-      {
-        agentType: 'general-purpose',
-        agentPrompt: `Task ${currentIdx + 1} has exhausted ${fixRounds}/${maxFixRounds} fix rounds. Use AskUserQuestion to ask the user whether to continue fixing, skip the review, or abort.`,
-      }
-    );
-    appendAction(ctx.ticket, {
-      step: STEPS.task_review,
-      what: `task ${currentIdx + 1}/${totalTasks} fix rounds exhausted (${fixRounds}/${maxFixRounds}) -- escalating`,
-    });
-    return;
-  }
+/**
+ * Decision 4: fix rounds exhausted -- escalate to user. The question
+ * renderer keeps claude byte-identical and swaps the codex vocabulary
+ * (request_user_input prose / parked-gate notice per mode, C3).
+ */
+function addEscalation(add, ctx, { currentIdx, totalTasks, fixRounds, maxFixRounds }) {
+  const { STEPS } = ctx;
+  const rt = getRuntime();
+  add(
+    STEPS.task_review,
+    'RUN',
+    T('tool.question', {}, rt.name),
+    `Task ${currentIdx + 1}/${totalTasks} fix rounds exhausted (${fixRounds}/${maxFixRounds}) -- escalating to user`,
+    {
+      agentType: 'general-purpose',
+      agentPrompt: renderQuestionText(
+        `Task ${currentIdx + 1} has exhausted ${fixRounds}/${maxFixRounds} fix rounds. Use AskUserQuestion to ask the user whether to continue fixing, skip the review, or abort.`,
+        rt
+      ),
+    }
+  );
+  appendAction(ctx.ticket, {
+    step: STEPS.task_review,
+    what: `task ${currentIdx + 1}/${totalTasks} fix rounds exhausted (${fixRounds}/${maxFixRounds}) -- escalating`,
+  });
+}
 
-  // Decision 5: intermediate task -- run parallel tests-review + code-review
-  const currentTask = taskData[currentIdx];
+/**
+ * Decision 5: intermediate task -- run parallel tests-review + code-review.
+ */
+function addReviewRun(add, ctx, { currentIdx, totalTasks, currentTask }) {
+  const { STEPS } = ctx;
   // Override tasksDir to per-task subfolder when task context is available.
   // ctx._currentTaskIdx is set by the implement step; when present (not undefined/null),
   // use taskSegment() to construct the per-task path for artifact resolution.
@@ -117,6 +112,40 @@ module.exports = function taskReviewStep(add, s, ctx) {
     step: STEPS.task_review,
     what: `task ${currentIdx + 1}/${totalTasks} review scheduled for "${currentTask?.title || 'unknown'}"`,
   });
+}
+
+/**
+ * @param {Function} add
+ * @param {object} s
+ * @param {object} ctx
+ */
+module.exports = function taskReviewStep(add, s, ctx) {
+  const { STEPS } = ctx;
+
+  const defer = deferReason(s, ctx);
+  if (defer) {
+    add(STEPS.task_review, 'DEFER', null, defer);
+    return;
+  }
+
+  const taskData = ctx._taskData;
+  const currentIdx = ctx._currentTaskIdx ?? 0;
+  const totalTasks = taskData.length;
+
+  // Read fix-round state from tasksMeta.
+  // Note: taskReviewFixRounds is incremented by the orchestrator when it loops back
+  // to implement after a failed review (see work-state.js incrementTaskReviewFixRounds).
+  // This step only reads the counter to decide whether to escalate.
+  const currentTaskMeta = s.workState.tasksMeta.tasks?.[currentIdx];
+  const fixRounds = currentTaskMeta?.taskReviewFixRounds || 0;
+  const maxFixRounds = resolveMaxFixRounds();
+
+  if (fixRounds >= maxFixRounds) {
+    addEscalation(add, ctx, { currentIdx, totalTasks, fixRounds, maxFixRounds });
+    return;
+  }
+
+  addReviewRun(add, ctx, { currentIdx, totalTasks, currentTask: taskData[currentIdx] });
 };
 
 module.exports.taskReviewStep = module.exports;

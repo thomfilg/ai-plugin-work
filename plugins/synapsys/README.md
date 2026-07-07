@@ -237,6 +237,18 @@ node plugins/synapsys/scripts/synapsys-explain.js \
 
 A working exclude shows `excluded_pattern` in the explainer output. If the memory still fires, double-check the preset name spelling and the regex flavor (presets are case-sensitive on their literal patterns).
 
+## Codex CLI
+
+Synapsys runs on Codex CLI from the same install (`codex plugin add
+synapsys@work-workflow` + one-time TUI `/hooks` trust review — codex silently
+skips untrusted hooks). Memories keep firing with zero data migration:
+`Edit`/`Write` tool triggers alias-match codex `apply_patch` events (parsed
+write targets), UserPromptSubmit/Stop matchers are re-applied in-script, and
+the replay walker reads codex rollout transcripts. Accepted losses (design §M):
+`/clear`-rotation semantics and crystallize-from-codex-history; replay's judge
+leg auto-downgrades to `--no-judge`. See the repo-root `README.md` for the
+install matrix and degradation table.
+
 ## Files
 
 - `hooks/synapsys.js` — single dispatcher; routes SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop (PreToolUse and PostToolUse output is wrapped in the `hookSpecificOutput.additionalContext` JSON envelope)

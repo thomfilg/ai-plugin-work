@@ -1,0 +1,24 @@
+
+═══════════════════════════════════════════════════════════════════
+  WORK2 ORCHESTRATOR PLAN: TBD-CHAR
+  Mode: new | Current Step: ticket
+═══════════════════════════════════════════════════════════════════
+
+  STATE:
+    Worktree: NOT FOUND
+
+  PLAN:
+    🔄 ticket               RUN     start → node work-next.js
+    ⏭️ brief                SKIP    disabled
+    🔮 implement            DEFER   later
+
+  SUMMARY: 1 RUN, 1 DEFER, 1 SKIP, 0 PENDING
+  FIRST ACTION: ticket
+  STEPS TO RUN: ticket
+  STEPS DEFERRED: implement
+
+═══════════════════════════════════════════════════════════════════
+  INSTRUCTIONS: Execute RUN steps in order. DEFER steps: re-run plan first to resolve to RUN/SKIP.
+  TRANSITION: node __PLUGIN_ROOT__/scripts/workflows/work/engine/work.workflow.js transition TBD-CHAR <step>
+═══════════════════════════════════════════════════════════════════
+

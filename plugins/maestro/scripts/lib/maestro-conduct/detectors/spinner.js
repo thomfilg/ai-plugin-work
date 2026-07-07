@@ -27,7 +27,7 @@ const THRESHOLD_MIN = parseInt(process.env.SPINNER_THRESHOLD_MIN || '15', 10);
 // Single source of truth so the two detectors can't drift on what counts as
 // "spinning" (drift makes silence auto-restart fire on a session the spinner
 // detector still considers active, and vice versa).
-const { LIVE_SPINNER_RE } = require('../live-spinner');
+const { LIVE_SPINNER_RE, isCodexPaneDialect } = require('../live-spinner');
 
 // Match a trailing elapsed-time token like "40m 35s" or "1h 5m".
 const TIMER_RE = /(?:(\d+)h\s+)?(\d+)m(?:\s+(\d+)s)?/;
@@ -40,7 +40,10 @@ function elapsedMinFromLine(line) {
   return h * 60 + mm;
 }
 
-function detect({ pane }) {
+function detect({ pane, dialect }) {
+  // Codex dialects have no known spinner grammar (exec streams JSONL; TUI
+  // fixtures pending) — "unsupported", never a hang verdict (WP-09).
+  if (isCodexPaneDialect(dialect)) return { hit: false, capability: 'unsupported' };
   if (!pane) return { hit: false };
   const lines = pane.split('\n').filter((l) => LIVE_SPINNER_RE.test(l));
   if (!lines.length) return { hit: false };

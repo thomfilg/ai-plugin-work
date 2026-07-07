@@ -10,11 +10,20 @@
 'use strict';
 
 function sleepSync(ms) {
-  try {
-    const sab = new SharedArrayBuffer(4);
-    Atomics.wait(new Int32Array(sab), 0, 0, ms);
-  } catch {
-    /* sleep best-effort */
+  // Atomics.wait timeouts can undershoot by a few ms under scheduler load
+  // (observed on WSL2 during parallel test runs), so loop on a deadline and
+  // re-wait the remainder until the full duration has elapsed.
+  const deadline = Date.now() + ms;
+  let remaining = ms;
+  while (remaining > 0) {
+    try {
+      const sab = new SharedArrayBuffer(4);
+      Atomics.wait(new Int32Array(sab), 0, 0, remaining);
+    } catch {
+      /* sleep best-effort — bail rather than busy-spin */
+      return;
+    }
+    remaining = deadline - Date.now();
   }
 }
 
