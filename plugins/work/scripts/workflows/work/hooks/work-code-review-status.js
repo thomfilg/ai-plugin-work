@@ -14,6 +14,14 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
+
+// hooks.json Stop matcher, re-applied in-code: codex ignores Stop matchers
+// entirely and fires this hook on every stop, so the script gates itself on
+// last_assistant_message there. Claude keeps matcher-side gating (its Stop
+// payload has no last_assistant_message to re-check).
+const STOP_MATCHER_RE =
+  /.*(\/check|code.?review|quality.?check|APPROVED|PASS|tests?.?md|code-review.?md|qa.?md).*/;
 
 let didBlock = false;
 process.on('uncaughtException', (err) => {
@@ -333,6 +341,13 @@ async function main() {
   }
 
   const hookData = JSON.parse(input);
+
+  const rt = getRuntime(hookData);
+  const evt = rt.normalizeHookPayload(hookData, { event: 'Stop' });
+  if (rt.name === 'codex' && !STOP_MATCHER_RE.test(evt.lastAssistantText || '')) {
+    process.exit(0);
+  }
+
   const cwd = process.cwd();
 
   // Get current task ID

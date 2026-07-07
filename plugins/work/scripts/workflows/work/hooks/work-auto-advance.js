@@ -28,9 +28,20 @@ function main() {
     process.exit(0);
   }
 
+  const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
+  const rt = getRuntime(hookData);
+  const evt = rt.normalizeHookPayload(hookData, { event: 'PostToolUse' });
+
   // Guard: do NOT fire inside sub-agents (would advance state while agent is working)
-  const transcriptPath = hookData?.transcript_path || '';
-  if (transcriptPath.includes('/subagents/')) process.exit(0);
+  if (rt.isSubagentContext(evt)) process.exit(0);
+
+  // Bridge runtime identity to the work-next child (and any libs reading env):
+  // codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a runtime
+  // pin, so children would misclassify without this.
+  if (!process.env.AGENT_RUNTIME) process.env.AGENT_RUNTIME = rt.name;
+  if (!process.env.AGENT_SESSION_ID && evt.sessionId) {
+    process.env.AGENT_SESSION_ID = evt.sessionId;
+  }
 
   // Guard: find active /work session via marker file
   const { resolvePluginPaths } = require(path.join(__dirname, '..', 'lib', 'resolve-plugin-root'));
@@ -52,8 +63,10 @@ function main() {
   const markerAge = Date.now() - new Date(marker.startedAt).getTime();
   if (markerAge > 12 * 60 * 60 * 1000) process.exit(0);
 
-  // Call work-next.js
-  const workNextPath = path.join(__dirname, '..', 'work-next.js');
+  // Call work-next.js. Test seam: an absolute path override lets tests stub
+  // work-next.js without staging the entire plugin tree. Production code never
+  // sets WORK_NEXT_PATH; default resolves the sibling as before.
+  const workNextPath = process.env.WORK_NEXT_PATH || path.join(__dirname, '..', 'work-next.js');
   let result;
   try {
     result = execFileSync(process.execPath, [workNextPath, marker.ticket], {
@@ -73,25 +86,21 @@ function main() {
     process.exit(0);
   }
 
-  // Output the instruction for the AI to see
-  if (instruction.action === 'execute') {
-    console.log('');
-    console.log('═══ WORK2: NEXT STEP ═══');
-    console.log(JSON.stringify(instruction, null, 2));
-    console.log('════════════════════════');
-    console.log('');
-  } else if (instruction.action === 'complete') {
-    console.log('');
-    console.log('═══ WORK2: COMPLETE ═══');
-    console.log(JSON.stringify(instruction, null, 2));
-    console.log('═══════════════════════');
-    console.log('');
-  } else if (instruction.action === 'blocked') {
-    console.log('');
-    console.log('═══ WORK2: BLOCKED ═══');
-    console.log(JSON.stringify(instruction, null, 2));
-    console.log('══════════════════════');
-    console.log('');
+  // Output the instruction for the AI to see. On claude the emitted bytes
+  // match the previous console.log sequence exactly; on codex the same text
+  // rides the additionalContext envelope (plain PostToolUse stdout is not
+  // injected there).
+  const BANNERS = {
+    execute: ['═══ WORK2: NEXT STEP ═══', '════════════════════════'],
+    complete: ['═══ WORK2: COMPLETE ═══', '═══════════════════════'],
+    blocked: ['═══ WORK2: BLOCKED ═══', '══════════════════════'],
+  };
+  const banner = BANNERS[instruction.action];
+  if (banner) {
+    rt.emit.context(
+      'PostToolUse',
+      ['', banner[0], JSON.stringify(instruction, null, 2), banner[1], ''].join('\n')
+    );
   }
 
   process.exit(0);

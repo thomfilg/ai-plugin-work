@@ -7,6 +7,7 @@
  * when /work is invoked, injecting the plan into the context.
  */
 
+const fs = require('fs');
 const path = require('path');
 // Resolve paths via the canonical scripts/workflows/... layout. The plugin root
 // historically also exposed `workflows -> scripts/workflows` as a committed
@@ -25,6 +26,9 @@ const { safeExec } = require(
 );
 const { resolvePluginRootHonouringEnv } = require(
   path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'resolve-plugin-root')
+);
+const { getRuntime } = require(
+  path.join(__dirname, '..', 'scripts', 'workflows', 'lib', 'runtime')
 );
 
 // ORCHESTRATOR_PATH below is derived from PLUGIN_ROOT, so the user's
@@ -48,14 +52,42 @@ function tokenizeArgs(rawArgs) {
   return rawArgs.split(/\s+/).filter((token) => token.length > 0);
 }
 
+// Parse the UserPromptSubmit payload from stdin. Codex never sets
+// CLAUDE_USER_PROMPT, so payload.prompt is the only prompt source there;
+// on claude the env leg stays first (byte-identity).
+function readStdinPayload() {
+  try {
+    return JSON.parse(fs.readFileSync(0, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
 function main() {
-  const userPrompt = process.env.CLAUDE_USER_PROMPT || '';
+  const payload = readStdinPayload();
+  const payloadPrompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+  const userPrompt = process.env.CLAUDE_USER_PROMPT || payloadPrompt;
 
   // Check if this is a /work invocation. Match /work followed by whitespace
-  // (so /work-implement, /work-pr, /work2 don't trigger this hook).
+  // (so /work-implement, /work-pr, /work2 don't trigger this hook). This
+  // in-code check is also the self-filter on codex, where UserPromptSubmit
+  // matchers are ignored and the hook fires on every prompt.
   const workMatch = userPrompt.match(/^\s*\/work\s+(.+)/i);
   if (!workMatch) {
     process.exit(0);
+  }
+
+  // Bridge runtime identity to the orchestrator child (and any libs reading
+  // env): codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a
+  // runtime pin, so children would misclassify without this.
+  const rt = getRuntime(payload);
+  if (!process.env.AGENT_RUNTIME) process.env.AGENT_RUNTIME = rt.name;
+  if (
+    !process.env.AGENT_SESSION_ID &&
+    typeof payload.session_id === 'string' &&
+    payload.session_id
+  ) {
+    process.env.AGENT_SESSION_ID = payload.session_id;
   }
 
   const args = workMatch[1].trim();

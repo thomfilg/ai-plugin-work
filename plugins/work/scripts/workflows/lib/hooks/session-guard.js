@@ -157,21 +157,28 @@ function getTicketId() {
 }
 
 /**
- * Resolve the Claude session id that owns the current terminal.
+ * Resolve the session id that owns the current terminal.
  * Claude Code exports this as CLAUDE_CODE_SESSION_ID and passes the same value
  * as `session_id` in hook payloads, so the two are directly comparable.
+ * AGENT_SESSION_ID is the runtime-neutral bridge set by hook processes for
+ * their children (codex sets no CLAUDE_* vars).
  * Returns null when unavailable (e.g. plain CLI runs / older harness).
  */
 function getOwnerSessionId() {
-  return process.env.CLAUDE_CODE_SESSION_ID || null;
+  return process.env.CLAUDE_CODE_SESSION_ID || process.env.AGENT_SESSION_ID || null;
 }
 
 /**
  * The session id of the terminal firing the current hook. Prefer the hook
- * payload's session_id (authoritative), falling back to the env var.
+ * payload's session_id (authoritative), falling back to the env vars.
  */
 function currentSessionId(hookData) {
-  return hookData?.session_id || process.env.CLAUDE_CODE_SESSION_ID || null;
+  return (
+    hookData?.session_id ||
+    process.env.CLAUDE_CODE_SESSION_ID ||
+    process.env.AGENT_SESSION_ID ||
+    null
+  );
 }
 
 /**
