@@ -75,7 +75,8 @@ matrix and `docs/hooks.md` → "Dual runtime".
 | Command | Description |
 |---------|-------------|
 | `/bootstrap <TICKET_IDs...>` | Setup multiple Jira tasks: creates worktrees, symlinks configs, opens draft PRs |
-| `/orchestrate <TICKET_IDs...>` | Runs `/work` for multiple Jira tasks sequentially in isolated worktrees |
+
+> **Running `/work` for multiple tickets?** Use the maestro plugin's `/orchestrate` skill — it owns multi-agent orchestration (parallel tmux sessions per ticket, auto-restart, operator hand-off). The work plugin no longer ships a duplicate `/orchestrate`.
 
 ### CI/CD
 
