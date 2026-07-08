@@ -21,7 +21,6 @@ function appliesTo(ctx) {
   return changed.some(isFrontendFile) && changed.some(isBackendFile);
 }
 
-
 function validate(ctx) {
   const fr = frontend.validate(ctx);
   const be = backend.validate(ctx);

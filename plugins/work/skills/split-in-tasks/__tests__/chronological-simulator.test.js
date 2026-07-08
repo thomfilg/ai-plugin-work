@@ -120,7 +120,11 @@ describe('chronological-simulator — Pass A', () => {
       const { tasks, initialTree } = loadFixture('echo-5361');
       const result = simulate({ tasks, initialTree });
       const rendered = formatWarnings(result.warnings);
-      assert.match(rendered, /^> ⚠️ SPLIT-WARNING:/m, 'rendered output must use SPLIT-WARNING blockquote');
+      assert.match(
+        rendered,
+        /^> ⚠️ SPLIT-WARNING:/m,
+        'rendered output must use SPLIT-WARNING blockquote'
+      );
       assert.match(rendered, /Pass A/, 'rendered output must cite Pass A');
     });
   });

@@ -18,7 +18,7 @@ describe('filterToTestFiles (P0 #2 — CHANGED_FILES sanitized in RED)', () => {
     assert.equal(
       typeof taskNext.filterToTestFiles,
       'function',
-      'filterToTestFiles must be a named export of task-next.js',
+      'filterToTestFiles must be a named export of task-next.js'
     );
   });
 

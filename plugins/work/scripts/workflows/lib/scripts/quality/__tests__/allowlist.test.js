@@ -62,10 +62,7 @@ test('allowlist: normalizes paths via path.normalize', () => {
   const { AllowlistLoader } = loadAllowlist();
   const repo = mkRepo();
   try {
-    fs.writeFileSync(
-      path.join(repo, '.quality-exceptions'),
-      'scripts//foo/./bar.js\n'
-    );
+    fs.writeFileSync(path.join(repo, '.quality-exceptions'), 'scripts//foo/./bar.js\n');
     const result = AllowlistLoader.load(repo);
     // path.normalize('scripts//foo/./bar.js') === 'scripts/foo/bar.js'
     assert.ok(result.has(path.normalize('scripts/foo/bar.js')));
@@ -78,14 +75,8 @@ test('allowlist: rejects entries containing ".."', () => {
   const { AllowlistLoader } = loadAllowlist();
   const repo = mkRepo();
   try {
-    fs.writeFileSync(
-      path.join(repo, '.quality-exceptions'),
-      '../escape.js\n'
-    );
-    assert.throws(
-      () => AllowlistLoader.load(repo),
-      /\.\./
-    );
+    fs.writeFileSync(path.join(repo, '.quality-exceptions'), '../escape.js\n');
+    assert.throws(() => AllowlistLoader.load(repo), /\.\./);
   } finally {
     cleanup(repo);
   }
@@ -95,14 +86,8 @@ test('allowlist: rejects absolute paths', () => {
   const { AllowlistLoader } = loadAllowlist();
   const repo = mkRepo();
   try {
-    fs.writeFileSync(
-      path.join(repo, '.quality-exceptions'),
-      '/etc/passwd\n'
-    );
-    assert.throws(
-      () => AllowlistLoader.load(repo),
-      /absolute/i
-    );
+    fs.writeFileSync(path.join(repo, '.quality-exceptions'), '/etc/passwd\n');
+    assert.throws(() => AllowlistLoader.load(repo), /absolute/i);
   } finally {
     cleanup(repo);
   }

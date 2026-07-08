@@ -119,7 +119,9 @@ describe('transition-step gateFingerprints (GH-398 Task 7)', () => {
     const fp = savedRef.ws.gateFingerprints.brief_gate;
     assert.ok(fp, 'fingerprint for brief_gate must exist');
     // __dirname = plugins/work/scripts/workflows/work/engine/__tests__ → repo root is 7 levels up
-    const pkg = require(path.join(__dirname, '..', '..', '..', '..', '..', '..', '..', 'package.json'));
+    const pkg = require(
+      path.join(__dirname, '..', '..', '..', '..', '..', '..', '..', 'package.json')
+    );
     assert.equal(fp.pluginVersion, pkg.version, 'pluginVersion must equal package.json version');
     assert.match(
       fp.satisfiedAt,

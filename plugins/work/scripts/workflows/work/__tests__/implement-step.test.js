@@ -447,7 +447,10 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
 
       const taskInit = calls.find((c) => Array.isArray(c.args) && c.args.includes('task-init'));
       assert.ok(taskInit, 'task-init invocation should occur');
-      assert.ok(typeof taskInit.input === 'string' && taskInit.input.length > 0, 'task-init must receive descriptor JSON via stdin');
+      assert.ok(
+        typeof taskInit.input === 'string' && taskInit.input.length > 0,
+        'task-init must receive descriptor JSON via stdin'
+      );
       const parsed = JSON.parse(taskInit.input);
       assert.ok(Array.isArray(parsed));
       assert.equal(parsed.length, 2);

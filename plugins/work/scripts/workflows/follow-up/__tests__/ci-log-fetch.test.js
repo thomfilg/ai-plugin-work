@@ -286,8 +286,7 @@ describe('monitor CI log fetch — j.url field + broadened conclusion filter', (
     setGhMocks({
       checks: [{ name: 'Run Lint', bucket: 'fail', link: null }],
     });
-    apiOutForCheckRuns =
-      'Run Lint\thttps://github.com/test/repo/actions/runs/888222333/job/4\n';
+    apiOutForCheckRuns = 'Run Lint\thttps://github.com/test/repo/actions/runs/888222333/job/4\n';
 
     delete require.cache[followUpPrPath];
     delete require.cache[monitorPath];

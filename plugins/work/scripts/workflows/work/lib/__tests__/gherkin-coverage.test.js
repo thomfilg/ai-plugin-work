@@ -18,9 +18,33 @@ const { validateTaskCoverage, validateTestCoverage } = require('../gherkin-cover
 describe('gherkin-coverage: validateTaskCoverage', () => {
   it('detects uncovered scenarios', () => {
     const scenarios = [
-      { name: 'Scenario A', tags: ['@integration'], steps: [{ keyword: 'Given', text: 'x' }, { keyword: 'When', text: 'y' }, { keyword: 'Then', text: 'z' }] },
-      { name: 'Scenario B', tags: ['@unit'], steps: [{ keyword: 'Given', text: 'a' }, { keyword: 'When', text: 'b' }, { keyword: 'Then', text: 'c' }] },
-      { name: 'Scenario C', tags: ['@e2e'], steps: [{ keyword: 'Given', text: 'd' }, { keyword: 'When', text: 'e' }, { keyword: 'Then', text: 'f' }] },
+      {
+        name: 'Scenario A',
+        tags: ['@integration'],
+        steps: [
+          { keyword: 'Given', text: 'x' },
+          { keyword: 'When', text: 'y' },
+          { keyword: 'Then', text: 'z' },
+        ],
+      },
+      {
+        name: 'Scenario B',
+        tags: ['@unit'],
+        steps: [
+          { keyword: 'Given', text: 'a' },
+          { keyword: 'When', text: 'b' },
+          { keyword: 'Then', text: 'c' },
+        ],
+      },
+      {
+        name: 'Scenario C',
+        tags: ['@e2e'],
+        steps: [
+          { keyword: 'Given', text: 'd' },
+          { keyword: 'When', text: 'e' },
+          { keyword: 'Then', text: 'f' },
+        ],
+      },
     ];
     const tasksContent = [
       '## Task 1',
@@ -38,13 +62,26 @@ describe('gherkin-coverage: validateTaskCoverage', () => {
 
   it('passes when all scenarios are covered', () => {
     const scenarios = [
-      { name: 'Scenario A', tags: ['@integration'], steps: [{ keyword: 'Given', text: 'x' }, { keyword: 'When', text: 'y' }, { keyword: 'Then', text: 'z' }] },
-      { name: 'Scenario B', tags: ['@unit'], steps: [{ keyword: 'Given', text: 'a' }, { keyword: 'When', text: 'b' }, { keyword: 'Then', text: 'c' }] },
+      {
+        name: 'Scenario A',
+        tags: ['@integration'],
+        steps: [
+          { keyword: 'Given', text: 'x' },
+          { keyword: 'When', text: 'y' },
+          { keyword: 'Then', text: 'z' },
+        ],
+      },
+      {
+        name: 'Scenario B',
+        tags: ['@unit'],
+        steps: [
+          { keyword: 'Given', text: 'a' },
+          { keyword: 'When', text: 'b' },
+          { keyword: 'Then', text: 'c' },
+        ],
+      },
     ];
-    const tasksContent = [
-      '## Task 1',
-      'Covers Scenario A and Scenario B',
-    ].join('\n');
+    const tasksContent = ['## Task 1', 'Covers Scenario A and Scenario B'].join('\n');
 
     const result = validateTaskCoverage(scenarios, tasksContent);
     assert.equal(result.valid, true);
@@ -56,7 +93,8 @@ describe('gherkin-coverage: validateTaskCoverage', () => {
       { name: 'User Can Login', tags: ['@integration'] },
       { name: 'Admin Dashboard Loads', tags: ['@e2e'] },
     ];
-    const tasksContent = '## Task 1\nImplement user can login\n## Task 2\nImplement admin dashboard loads';
+    const tasksContent =
+      '## Task 1\nImplement user can login\n## Task 2\nImplement admin dashboard loads';
     const result = validateTaskCoverage(scenarios, tasksContent);
     assert.equal(result.valid, true);
     assert.deepEqual(result.uncovered, []);
@@ -68,10 +106,21 @@ describe('gherkin-coverage: validateTaskCoverage', () => {
 describe('gherkin-coverage: validateTestCoverage', () => {
   it('matches scenario to correct test type with tag match', () => {
     const scenarios = [
-      { name: 'Request password reset email', tags: ['@e2e'], steps: [{ keyword: 'Given', text: 'x' }, { keyword: 'When', text: 'y' }, { keyword: 'Then', text: 'z' }] },
+      {
+        name: 'Request password reset email',
+        tags: ['@e2e'],
+        steps: [
+          { keyword: 'Given', text: 'x' },
+          { keyword: 'When', text: 'y' },
+          { keyword: 'Then', text: 'z' },
+        ],
+      },
     ];
     const testFiles = [
-      { path: 'src/__tests__/password-reset.e2e.test.js', content: 'test("Request password reset email", () => {})' },
+      {
+        path: 'src/__tests__/password-reset.e2e.test.js',
+        content: 'test("Request password reset email", () => {})',
+      },
     ];
 
     const result = validateTestCoverage(scenarios, testFiles);
@@ -83,7 +132,10 @@ describe('gherkin-coverage: validateTestCoverage', () => {
   it('matches scenario to correct test type with @integration tag', () => {
     const scenarios = [{ name: 'Data persists after save', tags: ['@integration'] }];
     const testFiles = [
-      { path: 'src/__tests__/save.integration.test.js', content: 'test("Data persists after save", () => {})' },
+      {
+        path: 'src/__tests__/save.integration.test.js',
+        content: 'test("Data persists after save", () => {})',
+      },
     ];
     const result = validateTestCoverage(scenarios, testFiles);
     assert.equal(result.valid, true);
@@ -93,10 +145,21 @@ describe('gherkin-coverage: validateTestCoverage', () => {
 
   it('rejects wrong test type for tag — @e2e scenario only in unit test file', () => {
     const scenarios = [
-      { name: 'Request password reset email', tags: ['@e2e'], steps: [{ keyword: 'Given', text: 'x' }, { keyword: 'When', text: 'y' }, { keyword: 'Then', text: 'z' }] },
+      {
+        name: 'Request password reset email',
+        tags: ['@e2e'],
+        steps: [
+          { keyword: 'Given', text: 'x' },
+          { keyword: 'When', text: 'y' },
+          { keyword: 'Then', text: 'z' },
+        ],
+      },
     ];
     const testFiles = [
-      { path: 'src/__tests__/password-reset.test.js', content: 'test("Request password reset email", () => {})' },
+      {
+        path: 'src/__tests__/password-reset.test.js',
+        content: 'test("Request password reset email", () => {})',
+      },
     ];
 
     const result = validateTestCoverage(scenarios, testFiles);

@@ -100,10 +100,7 @@ function writeState(tmpBase, ticket, overrides = {}) {
     ...overrides,
     stepStatus,
   };
-  fs.writeFileSync(
-    pathMod.join(ticketDir, '.work-state.json'),
-    JSON.stringify(state, null, 2)
-  );
+  fs.writeFileSync(pathMod.join(ticketDir, '.work-state.json'), JSON.stringify(state, null, 2));
   return state;
 }
 
@@ -166,10 +163,7 @@ describe('work-next.js — dispatcher early-return on terminal completed state (
           // intentionally NO 'complete' key
         },
       };
-      fs.writeFileSync(
-        pathMod.join(ticketDir, '.work-state.json'),
-        JSON.stringify(state, null, 2)
-      );
+      fs.writeFileSync(pathMod.join(ticketDir, '.work-state.json'), JSON.stringify(state, null, 2));
 
       const { parsed } = runWorkNext('ECHO-4666', tmpBase);
       assert.ok(parsed, 'expected JSON output');

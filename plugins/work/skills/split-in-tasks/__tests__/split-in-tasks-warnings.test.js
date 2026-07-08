@@ -70,7 +70,11 @@ describe('split-in-tasks warnings — Pass A integration', () => {
     const { tasks, initialTree } = loadChronoFixture('echo-5361');
     const result = simulate({ tasks, initialTree });
     assert.ok(Array.isArray(result.warnings), 'warnings must be an array');
-    assert.equal(result.warnings.length, 1, `expected 1 Pass A warning, got ${result.warnings.length}`);
+    assert.equal(
+      result.warnings.length,
+      1,
+      `expected 1 Pass A warning, got ${result.warnings.length}`
+    );
     const w = result.warnings[0];
     assert.equal(w.kind, 'A', 'expected kind=A');
     const blob = `${w.message} ${w.hint} ${w.file}`;
@@ -120,7 +124,10 @@ describe('split-in-tasks warnings — Pass C integration', () => {
       lintCommand: null,
       filesInScope: new Set(),
     });
-    assert.ok(Array.isArray(out.warnings) && out.warnings.length >= 1, 'expected ≥1 Pass C warning');
+    assert.ok(
+      Array.isArray(out.warnings) && out.warnings.length >= 1,
+      'expected ≥1 Pass C warning'
+    );
     const w = out.warnings[0];
     assert.equal(w.kind, 'C');
     const blob = `${w.message} ${w.hint}`;
@@ -148,7 +155,12 @@ describe('split-in-tasks warnings — dedupe across passes', () => {
     const sharedFile = 'shared/contract.ts';
     const warnings = [
       { kind: 'A', file: sharedFile, message: 'empty RED', hint: 'merge-or-checkpoint' },
-      { kind: 'B', file: sharedFile, message: 'contract mismatch', hint: 'coordinate-with-siblings' },
+      {
+        kind: 'B',
+        file: sharedFile,
+        message: 'contract mismatch',
+        hint: 'coordinate-with-siblings',
+      },
       { kind: 'C', file: sharedFile, message: 'lint violation', hint: '(a)/(b)/(c)' },
       { kind: 'A', file: 'other/path.ts', message: 'distinct', hint: 'distinct' },
     ];
@@ -156,7 +168,11 @@ describe('split-in-tasks warnings — dedupe across passes', () => {
     assert.equal(merged.length, 2, `expected 2 entries after dedupe, got ${merged.length}`);
     const sharedEntry = merged.find((w) => w.file === sharedFile);
     assert.ok(sharedEntry, 'expected merged entry for the shared file');
-    assert.match(sharedEntry.kind, /A.*B.*C|A\+B\+C/, `expected union kind A+B+C; got ${sharedEntry.kind}`);
+    assert.match(
+      sharedEntry.kind,
+      /A.*B.*C|A\+B\+C/,
+      `expected union kind A+B+C; got ${sharedEntry.kind}`
+    );
     assert.match(sharedEntry.message, /empty RED/);
     assert.match(sharedEntry.message, /contract mismatch/);
     assert.match(sharedEntry.message, /lint violation/);
@@ -205,8 +221,20 @@ describe('split-in-tasks warnings — operator end-to-end (combined synthetic fi
     // sub-fixture so an operator can trace which pass any warning came
     // from (Scenario 8 traceability requirement).
     const combinedMd = fs.readFileSync(path.join(COMBINED, 'tasks.md'), 'utf8');
-    assert.match(combinedMd, /echo-5361/i, 'combined tasks.md must reference echo-5361 sub-fixture');
-    assert.match(combinedMd, /echo-5362/i, 'combined tasks.md must reference echo-5362 sub-fixture');
-    assert.match(combinedMd, /echo-5353/i, 'combined tasks.md must reference echo-5353 sub-fixture');
+    assert.match(
+      combinedMd,
+      /echo-5361/i,
+      'combined tasks.md must reference echo-5361 sub-fixture'
+    );
+    assert.match(
+      combinedMd,
+      /echo-5362/i,
+      'combined tasks.md must reference echo-5362 sub-fixture'
+    );
+    assert.match(
+      combinedMd,
+      /echo-5353/i,
+      'combined tasks.md must reference echo-5353 sub-fixture'
+    );
   });
 });

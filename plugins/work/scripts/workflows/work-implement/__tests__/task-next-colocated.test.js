@@ -23,36 +23,27 @@ test('P0 #1 — colocated test discovery: finds <basename>.test.js next to sourc
   assert.equal(
     typeof findTestFilesInScope,
     'function',
-    'findTestFilesInScope must be exported from task-next.js',
+    'findTestFilesInScope must be exported from task-next.js'
   );
 
   const tmp = makeTmp();
   try {
     fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
     fs.writeFileSync(path.join(tmp, 'src', 'foo.js'), '// source\n');
-    fs.writeFileSync(
-      path.join(tmp, 'src', 'foo.test.js'),
-      "require('node:test');\n",
-    );
+    fs.writeFileSync(path.join(tmp, 'src', 'foo.test.js'), "require('node:test');\n");
 
     const result = findTestFilesInScope(tmp, ['src/foo.js']);
 
-    assert.ok(
-      result instanceof Set,
-      'findTestFilesInScope must return a Set',
-    );
+    assert.ok(result instanceof Set, 'findTestFilesInScope must return a Set');
 
     const colocated = path.join(tmp, 'src', 'foo.test.js');
     const source = path.join(tmp, 'src', 'foo.js');
 
     assert.ok(
       result.has(colocated),
-      `expected result to contain colocated test ${colocated}, got ${[...result].join(', ')}`,
+      `expected result to contain colocated test ${colocated}, got ${[...result].join(', ')}`
     );
-    assert.ok(
-      !result.has(source),
-      'result must not include the non-test source file',
-    );
+    assert.ok(!result.has(source), 'result must not include the non-test source file');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -70,7 +61,7 @@ test('P0 #1 — colocated test discovery: also supports .spec.ts colocated along
     const colocated = path.join(tmp, 'pkg', 'bar.spec.ts');
     assert.ok(
       result.has(colocated),
-      `expected colocated .spec.ts at ${colocated}, got ${[...result].join(', ')}`,
+      `expected colocated .spec.ts at ${colocated}, got ${[...result].join(', ')}`
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -82,10 +73,7 @@ test('P0 #1 control case — existing __tests__/ sibling walk still works', () =
   try {
     fs.mkdirSync(path.join(tmp, 'src', '__tests__'), { recursive: true });
     fs.writeFileSync(path.join(tmp, 'src', 'baz.js'), '// source\n');
-    fs.writeFileSync(
-      path.join(tmp, 'src', '__tests__', 'baz.test.js'),
-      '// test\n',
-    );
+    fs.writeFileSync(path.join(tmp, 'src', '__tests__', 'baz.test.js'), '// test\n');
 
     // Scope on the directory exercises the directory-walk branch, which
     // must continue to find tests under __tests__/.
@@ -94,7 +82,7 @@ test('P0 #1 control case — existing __tests__/ sibling walk still works', () =
     const walked = path.join(tmp, 'src', '__tests__', 'baz.test.js');
     assert.ok(
       result.has(walked),
-      `expected directory walk to find ${walked}, got ${[...result].join(', ')}`,
+      `expected directory walk to find ${walked}, got ${[...result].join(', ')}`
     );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

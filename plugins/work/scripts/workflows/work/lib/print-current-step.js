@@ -66,7 +66,7 @@ try {
   const num = Number(raw);
   if (!Number.isFinite(num) || num < 1) process.exit(0);
   const idx = num - 1;
-  const stepName = (idx >= 0 && idx < ALL_STEPS.length) ? ALL_STEPS[idx] : '';
+  const stepName = idx >= 0 && idx < ALL_STEPS.length ? ALL_STEPS[idx] : '';
   if (stepName) process.stdout.write(stepName);
 } catch {
   // Any unexpected error → fail silent, statusline must never break.

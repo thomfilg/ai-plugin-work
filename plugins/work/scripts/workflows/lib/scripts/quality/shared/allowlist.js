@@ -37,9 +37,7 @@ const AllowlistLoader = {
       if (trimmed.startsWith('#')) continue;
 
       if (path.isAbsolute(trimmed)) {
-        throw new Error(
-          `AllowlistLoader: absolute paths are not allowed (got "${trimmed}")`
-        );
+        throw new Error(`AllowlistLoader: absolute paths are not allowed (got "${trimmed}")`);
       }
       if (trimmed.split(/[\\/]/).includes('..')) {
         throw new Error(

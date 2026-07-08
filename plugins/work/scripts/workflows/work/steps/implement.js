@@ -215,7 +215,12 @@ module.exports = function implementStep(add, s, ctx) {
         const statePath = pathMod.join(tasksDir, '.work-state.json');
         const raw = fs.readFileSync(statePath, 'utf8');
         const st = JSON.parse(raw);
-        if (st && st.tasksMeta && Array.isArray(st.tasksMeta.tasks) && st.tasksMeta.tasks.length > 0) {
+        if (
+          st &&
+          st.tasksMeta &&
+          Array.isArray(st.tasksMeta.tasks) &&
+          st.tasksMeta.tasks.length > 0
+        ) {
           alreadyInitialized = true;
         }
       } catch {
@@ -227,7 +232,8 @@ module.exports = function implementStep(add, s, ctx) {
       // and that has security implications for auto-completion. The audit
       // row goes through appendAction so it shares schema + concurrency
       // handling with the rest of the workflow's audit trail.
-      const reason = descriptorErr && descriptorErr.message ? descriptorErr.message : String(descriptorErr);
+      const reason =
+        descriptorErr && descriptorErr.message ? descriptorErr.message : String(descriptorErr);
       try {
         appendAction(safeName, {
           step: 'implement',
@@ -246,11 +252,15 @@ module.exports = function implementStep(add, s, ctx) {
       if (!alreadyInitialized) {
         try {
           const wsPathFallback = ctx.workStatePath;
-          execFileSync(process.execPath, [wsPathFallback, 'task-init', safeName, String(taskData.length)], {
-            encoding: 'utf-8',
-            timeout: 5000,
-            stdio: 'pipe',
-          });
+          execFileSync(
+            process.execPath,
+            [wsPathFallback, 'task-init', safeName, String(taskData.length)],
+            {
+              encoding: 'utf-8',
+              timeout: 5000,
+              stdio: 'pipe',
+            }
+          );
         } catch {
           /* fail-open: task tracking init failure should not block plan */
         }

@@ -186,8 +186,7 @@ async function main() {
             ? toolInput.edits
             : [{ old_string: toolInput.old_string, new_string: toolInput.new_string }];
         const allTagOnly =
-          edits.length > 0 &&
-          edits.every((e) => isTagOnlyGherkinEdit(e.old_string, e.new_string));
+          edits.length > 0 && edits.every((e) => isTagOnlyGherkinEdit(e.old_string, e.new_string));
         if (allTagOnly) {
           process.exit(0);
         }
