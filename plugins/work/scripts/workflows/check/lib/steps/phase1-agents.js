@@ -54,6 +54,7 @@ const {
   reportIsStale,
   annotateStaleAccepted,
 } = require('../report-head-staleness');
+const { T, getRuntime } = require('../../../lib/instruction-vocab');
 
 // Max times we ask the orchestrator to (re-)dispatch an agent for the same
 // missing/empty report before blocking with an actionable error.
@@ -214,7 +215,8 @@ function buildCodeReviewDelegate(state, changesHash, codeReviewReport, dispatchH
       '- Verify your recommendations (echo-5213): any recommended fix that changes types, function signatures, or schemas MUST be verified compilable — run the project typecheck (e.g. `$TYPECHECK_COMMAND` / `tsc --noEmit`) scoped to the touched file with the fix applied in a scratch copy (never leave working-tree modifications behind). If you cannot verify it, mark the recommendation `UNVERIFIED` in the report — an unverified "fix" that breaks 14 call sites costs more dev cycles than no recommendation.',
       ...reportContractLines(codeReviewReport, dispatchHead),
     ].join('\n'),
-    note: 'Pass the prompt directly to the agent.',
+    // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+    note: T('delegate.task.note.short', {}, getRuntime().name),
   };
 }
 
@@ -256,7 +258,8 @@ function buildCompletionDelegate(
       'Mark INCOMPLETE if any P0 requirement lacks code evidence.',
       ...reportContractLines(completionReport, dispatchHead),
     ].join('\n'),
-    note: 'Pass the prompt directly to the agent.',
+    // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+    note: T('delegate.task.note.short', {}, getRuntime().name),
   };
 }
 
@@ -360,16 +363,32 @@ module.exports = function registerPhase1(register) {
       continue: true,
       parallel: delegates.length > 1,
       delegates,
-      note:
-        `Launch EXACTLY these ${delegates.length} agent(s)` +
-        (delegates.length > 1 ? ' IN PARALLEL (single message, one Task tool call each)' : '') +
-        `. Launch them in the FOREGROUND (never run_in_background — background agent writes have ` +
-        `silently disappeared, GH-343). Do NOT add any other agents — tests are handled by a ` +
-        `deterministic script.` +
-        retryNote,
+      note: buildLaunchNote(delegates.length, retryNote, getRuntime()),
     };
   });
 };
+
+// Per-runtime launch note. The claude branch is byte-identical to the
+// historical literal (characterization-pinned); codex has no Task tool nor
+// run_in_background, so parallel dispatch is serialized inline (C1).
+function buildLaunchNote(count, retryNote, rt) {
+  if (rt.name === 'codex') {
+    return (
+      `[work:codex-degraded] parallel dispatch serialized — execute EXACTLY these ${count} ` +
+      `task prompt(s) INLINE, one after another (no Task tool on codex). Do NOT add any ` +
+      `other agents — tests are handled by a deterministic script.` +
+      retryNote
+    );
+  }
+  return (
+    `Launch EXACTLY these ${count} agent(s)` +
+    (count > 1 ? ' IN PARALLEL (single message, one Task tool call each)' : '') +
+    `. Launch them in the FOREGROUND (never run_in_background — background agent writes have ` +
+    `silently disappeared, GH-343). Do NOT add any other agents — tests are handled by a ` +
+    `deterministic script.` +
+    retryNote
+  );
+}
 
 module.exports.MAX_DISPATCH_ATTEMPTS = MAX_DISPATCH_ATTEMPTS;
 module.exports.REPORTS = REPORTS;

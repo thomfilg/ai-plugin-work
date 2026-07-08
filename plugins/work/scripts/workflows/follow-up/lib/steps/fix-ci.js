@@ -10,6 +10,7 @@
 const { execFileSync } = require('child_process');
 const { buildChildEnv } = require('../../../work/scripts/gh-exec');
 const { filterLogs } = require('../log-utils');
+const { T, getRuntime } = require('../../../lib/instruction-vocab');
 
 function shellSafe(s) {
   return String(s || '')
@@ -209,7 +210,8 @@ function buildExecuteInstruction(state, prNum, isConflict, monitorOutput, ciLogs
       prompt: isConflict
         ? buildConflictPrompt(prNum, monitorOutput)
         : buildCiFailurePrompt(prNum, ciStatusLine, ciStatusDetail, ciLogs),
-      note: 'Pass the prompt directly to the agent.',
+      // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+      note: T('delegate.task.note.short', {}, getRuntime().name),
     },
   };
 }

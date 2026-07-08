@@ -12,27 +12,16 @@
  * The AI then re-runs the corrected command — zero guessing needed.
  */
 
-const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
-const { resolvePluginRootHonouringEnv } = require('../../work/lib/resolve-plugin-root');
+const { installFailOpenHandlers, resolveHookPluginRoot, runHookMain } = require('./hook-bootstrap');
 
-// Fail-open: unexpected errors should never block unrelated commands
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+installFailOpenHandlers(__filename);
 
 // Hook lives at <root>/scripts/workflows/lib/hooks — 3 levels up reaches the
 // plugin-scripts root. The env-honouring variant prefers a known-layout probe
 // when it derives from the env value, falls back to env verbatim when the
 // probe lands on an unrelated install, and only uses the literal path.resolve
 // chain when both the env var is unset and __dirname probing fails.
-const PLUGIN_ROOT =
-  resolvePluginRootHonouringEnv(__dirname, 3) || path.resolve(__dirname, '..', '..', '..');
+const PLUGIN_ROOT = resolveHookPluginRoot(__dirname, 3);
 
 async function main() {
   let input = ''; // read hook JSON from stdin
@@ -61,7 +50,4 @@ async function main() {
   process.exit(2);
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+runHookMain(main, __filename);

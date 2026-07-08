@@ -311,6 +311,86 @@ live tmux once, without a daemon.
 
 Ask the operator. Do not invent state. Do not edit `.work-state.json` directly. Do not call `work-state.js set-step`. Those are bypass attempts and the next bypass-check will catch them.
 
+## Codex fleets (exec-json conducting)
+
+Maestro can drive Codex CLI agents next to Claude ones — one conductor, mixed fleet. Runtime
+is resolved **per ticket**: `tasks/<ticket>/.maestro-runtime` (written by
+`maestro-bootstrap.sh --runtime=codex GH-N`) → manifest `runtime` field (task-level, then
+pool-level) → `MAESTRO_RUNTIME` env → `claude`. Zero config keeps today's Claude behavior
+byte-for-byte.
+
+### How a codex agent launches
+
+```
+AGENT_RUNTIME=codex codex exec --json \
+  --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust \
+  "Use the work skill for GH-N" </dev/null | tee -a <STATE_DIR>/<TICKET>.exec.jsonl
+```
+
+Both bypass flags are **mandatory** for unattended fleets: the sandbox flag for state writes,
+the hook-trust flag because codex silently skips untrusted hooks — without it the whole /work
+enforcement layer is off with zero signal. `</dev/null` because `codex exec` hangs on piped
+stdin. The prompt is a skill *mention* (codex has no `/work` slash surface).
+
+### What the detectors can and cannot see
+
+| Signal | claude pane | codex exec fleet | codex TUI (operator-attached) |
+|---|---|---|---|
+| Silence / aliveness | pane-hash | bytes appended to `<TICKET>.exec.jsonl` | **unsupported** |
+| Questions | pane glyphs | /work BLOCKED state files | **unsupported** |
+| Spinner / stuck-input | pane glyphs | JSONL event stream | **unsupported** |
+| Restart | `claude --continue` | `codex exec resume --last --json …` | DEAD-END-HOLD |
+
+An operator-attached codex **TUI** pane is conservative territory: detectors return
+unsupported-capability verdicts and the restart policy is DEAD-END-HOLD — alert you, never
+auto-kill. Conduct codex agents in exec-json mode; treat codex TUI panes as yours to read.
+
+### Answering a parked question (the resume-answer channel)
+
+Codex exec has no question UI. When a /work gate needs an answer, the step parks BLOCKED and
+the agent's exec loop ends. Two channels reach it:
+
+1. `/signal <TICKET> "<answer>"` — lands in the file mailbox; the hook relay injects it on the
+   next turn (context pointers travel this way too: codex has no composer, so `/rename` and
+   typed nudges are skipped).
+2. `codex exec resume <SESSION_ID> "<answer>"` — **live-verified on 0.142.5** (WP-12,
+   design §0 C3 RESOLVED): the answer is a positional `[PROMPT]` argument
+   (`Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]`) and the resumed turn
+   re-fires SessionStart/UserPromptSubmit/Stop hooks, so unlock phrases land in the
+   rollout. `--last` works too but is **cwd-filtered** (newest session recorded for the
+   invoking directory, not globally) — run it from the agent's worktree or read the
+   session id from `<STATE_DIR>/<TICKET>.exec.jsonl`. `exec resume` REJECTS `-s`/`-C`;
+   set the sandbox via `-c 'sandbox_mode="workspace-write"'`. The bare
+   `codex exec resume --last` restart form auto-restart uses is safe because the
+   conductor launches it inside the worktree, where the cwd filter picks the right
+   session.
+
+### Trust story (once per release)
+
+`codex plugin add` does NOT trust hooks. After every install/upgrade run the codex TUI
+`/hooks` review once (hooks.json changes are batched so a release costs one cycle). Fleet
+launches carry `--dangerously-bypass-hook-trust` per invocation regardless. Audit anytime with
+`node scripts/runtime-doctor.js` from the repo root. Never write `[hooks.state]`
+`trusted_hash` entries yourself.
+
+### Unsupported on codex (verbatim from the adapter design §0)
+
+1. Statusline features (`install-followup-statusline`, `maestro:install`) — no surface.
+2. `Monitor` tool step in /work — hook relay + tmux listener instead.
+3. Parallel subagent fan-out — serialized inline.
+4. Forced-choice `AskUserQuestion` UI — plain-chat numbered options (TUI; `request_user_input` is Plan-mode-only per openai/codex#10384) / parked+resume (exec).
+5. `Skill()`-tool dispatch — mention text only; **no argument substitution** (probe: `argument-hint` stripped; `$ARGUMENTS` never expands in exec).
+6. Plugin `agents/*.md` as real subagents (until U8/U4; `.codex/agents/*.toml` generation deferred).
+7. Synapsys `/clear`-rotation semantics; crystallize from codex history.
+8. Heimdall fsguard shim as a guarantee (static analysis is authoritative on codex).
+9. Anything driven by `~/.claude/settings.json`.
+10. Claude-TUI pane question/spinner detection for codex TUI sessions (exec-json is the supported conducting path).
+11. Skill `allowed-tools` restriction — **probe-verified NOT enforced by codex** (a `Read`-only skill ran the shell); never rely on it for enforcement on either runtime going forward.
+
+The maestro statusline (`maestro:install`) is item 1: under codex the installer prints a
+`[maestro:codex-degraded]` notice with a tmux `status-right` recipe and exits 0. Watch the
+fleet via `/tmp/maestro-conduct.log`, `/tmp/maestro-alerts.jsonl`, and `/pulse` instead.
+
 ## Tuning
 
 All thresholds are env-tunable — see `skills/orchestrate/SKILL.md` for the full table. The defaults are conservative; loosen them in CI / dev shells and tighten them in long-running sessions.

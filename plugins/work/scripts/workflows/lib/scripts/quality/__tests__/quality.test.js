@@ -187,3 +187,20 @@ test('Duplicate code blocks above 50 tokens are flagged', (t) => {
     `expected at least one duplicate-blocks violation, got ${JSON.stringify(parsed.violations)}`
   );
 });
+
+test('Vendored runtime dirs are excluded from the gate (parity-checked duplication)', (t) => {
+  const repo = mkRepo(t);
+  const tokens = [];
+  for (let i = 0; i < 60; i++) tokens.push(`token${i}`);
+  const block = tokens.join('\n');
+  // Byte-identical clones across two vendored runtime dirs would trip
+  // duplicate-blocks if the dirs were scanned; sync-vendored parity owns them.
+  write(repo, 'plugins/heimdall/lib/runtime/index.js', `'use strict';\n${block}\n`);
+  write(repo, 'plugins/synapsys/lib/runtime/index.js', `'use strict';\n${block}\n`);
+  write(repo, '.quality-exceptions', '');
+
+  const res = runCli(repo, ['--json']);
+  assert.equal(res.status, 0, `stdout=${res.stdout}\nstderr=${res.stderr}`);
+  const parsed = JSON.parse(res.stdout);
+  assert.deepEqual(parsed.violations, []);
+});

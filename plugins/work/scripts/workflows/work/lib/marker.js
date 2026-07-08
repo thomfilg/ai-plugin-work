@@ -25,8 +25,11 @@ function ownerStamp() {
   const { resolveWorktreeRoot } = require(
     path.join(__dirname, '..', '..', 'lib', 'ticket-validation')
   );
+  // AGENT_SESSION_ID is the runtime-neutral bridge set by hook processes for
+  // their children from payload.session_id (codex sets no CLAUDE_* vars) —
+  // same fallback leg session-guard.js uses, so markers and the guard agree.
   return {
-    sessionId: process.env.CLAUDE_CODE_SESSION_ID || null,
+    sessionId: process.env.CLAUDE_CODE_SESSION_ID || process.env.AGENT_SESSION_ID || null,
     worktreeRoot: resolveWorktreeRoot(),
   };
 }

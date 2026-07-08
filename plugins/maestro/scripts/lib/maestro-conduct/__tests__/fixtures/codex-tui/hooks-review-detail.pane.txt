@@ -1,0 +1,62 @@
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-wp12-home2"))
+
+  Hooks need review
+  59 hooks are new or changed.
+  Hooks can run outside the sandbox after you trust them.
+
+› 1. Review hooks
+  2. Trust all and continue
+  3. Continue without trusting (hooks won't run)
+
+  Press enter to confirm or esc to go back
+
+⚠ Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled
+  bubblewrap in the meantime.
+
+╭───────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.142.5)                │
+│                                           │
+│ model:     gpt-5.5 low   /model to change │
+│ directory: /tmp/codex-wp12-ws             │
+╰───────────────────────────────────────────╯
+
+  Tip: GPT-5.5 is now available in Codex. It's our strongest agentic coding model yet, built to reason through large codebases, check assumptions with tools, and keep going until the work is done.
+
+  Learn more: https://openai.com/index/introducing-gpt-5-5/
+
+• You have 3 usage limit resets available. Run /usage to use one.
+
+
+  PreToolUse hooks
+  28 hooks need review before they can run.
+
+  [!] Hook 1 · new
+  [!] Hook 2 · new
+  [!] Hook 3 · new
+  [!] Hook 4 · new
+  [!] Hook 5 · new
+  [!] Hook 6 · new
+  [!] Hook 7 · new
+  [!] Hook 8 · new
+
+  Event     PreToolUse
+  Matcher   Edit|Write|MultiEdit
+  Source    Plugin - heimdall@work-workflow
+  Command   node "/tmp/codex-wp12-home2/plugins/cache/work-workflow/heimdall/3.58.0/hooks/heimdall.js"
+  Timeout   600s
+  Trust     New hook - review required
+
+  Press t to trust; esc to go back
+
+
+
+
+
+
+
+
+
+
+
+
+

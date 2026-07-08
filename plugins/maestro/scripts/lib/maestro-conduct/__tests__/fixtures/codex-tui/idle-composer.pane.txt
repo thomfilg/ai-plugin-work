@@ -1,0 +1,50 @@
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("/tmp/codex-wp12-home"))
+⚠ Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled
+  bubblewrap in the meantime.
+
+⚠ `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.
+
+╭───────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.142.5)                │
+│                                           │
+│ model:     gpt-5.5 low   /model to change │
+│ directory: /tmp/codex-wp12-ws             │
+╰───────────────────────────────────────────╯
+
+  Tip: GPT-5.5 is now available in Codex. It's our strongest agentic coding model yet, built to reason through large codebases, check assumptions with tools, and keep going until the work is done.
+
+  Learn more: https://openai.com/index/introducing-gpt-5-5/
+
+⚠ `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.
+
+• You have 3 usage limit resets available. Run /usage to use one.
+
+
+› Summarize recent commits
+
+  gpt-5.5 low · /tmp/codex-wp12-ws
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -112,7 +112,12 @@ function runSpinnerDetector(ctx) {
   }
   state.write(ctx.session, 'spinner', { lastInterruptAt: state.now() });
   if (SPINNER_AUTO_INTERRUPT) {
-    actions.interrupt(ctx.session, `spinner stuck ${sHit.elapsedMin}m: ${sHit.line}`, ctx.skill);
+    actions.interrupt(
+      ctx.session,
+      `spinner stuck ${sHit.elapsedMin}m: ${sHit.line}`,
+      ctx.skill,
+      ctx.dialect
+    );
     return true;
   }
   emitSpinnerHangAlert(ctx, sHit);
@@ -173,6 +178,7 @@ function runSilenceDetector(ctx, { restartEligible }) {
     ticket: ctx.ticket,
     worktree: ctx.worktree,
     silenceSec: sHit.silenceSec,
+    runtime: ctx.runtime,
   });
   if (ok) {
     // After a restart, wipe both per-SESSION markers (silence/spinner/question
@@ -346,9 +352,9 @@ function handlePhaseStall(ctx, stallHit, { maybeEscalateToDeadEnd }) {
     });
     maybeEscalateToDeadEnd(ctx, 'nudges-exhausted', r.count, ctx.phase);
   } else if (escalation === 'interrupt') {
-    actions.interrupt(ctx.session, reason, ctx.skill);
+    actions.interrupt(ctx.session, reason, ctx.skill, ctx.dialect);
   } else {
-    actions.soft(ctx.session, reason, ctx.skill);
+    actions.soft(ctx.session, reason, ctx.skill, ctx.dialect);
   }
   bumpMarker(ctx.ticket, 'phase', marker, escalation === 'alert');
 }

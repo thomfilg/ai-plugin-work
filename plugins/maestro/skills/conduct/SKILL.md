@@ -35,8 +35,7 @@ Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs th
 ## Env
 
 Full tunables table (progress gating, question cooldowns, restart modes, branch
-template, heartbeat cadence, and the `CONDUCT_WAKE_EVENTS` wake filter):
-`skills/orchestrate/reference/env-vars.md`. The core ones:
+template): `skills/orchestrate/SKILL.md` → "Env". The core ones:
 
 | Var | Default | Effect |
 |-----|---------|--------|
@@ -55,18 +54,28 @@ Concurrent instances: see the "Running concurrent maestro instances" section in
 `docs/OPERATOR_PLAYBOOK.md` for the one-conductor rule and the `MAESTRO_NS`
 isolation recipe.
 
-## Anti-pattern — don't re-confirm what the state file already answers
+## Under Codex
 
-Every conductor wake burns a model turn. The daemon has already done the polling
-for you: the alert line, the `_heartbeat.json` marker, and the state file under
-`STATE_DIR` carry the current fleet answer (PR status, mergeState, phase, attempt
-counts). Do **not** re-run `gh pr view` / `gh pr checks` or `tmux capture-pane`
-just to re-confirm a fact the emitted event already stated — that is a redundant
-confirmation that costs a turn and adds no signal. Act on the state you were
-woken with; only capture the pane when the event itself tells you to look
-(`QUESTION-DETECTED`, `spinner-hang`, `no-progress`, `stuck-input`) or when the
-state file is genuinely stale/absent. See the wake-filter and anti-pattern notes
-in `docs/OPERATOR_PLAYBOOK.md`.
+- **Invocation**: mention `$conduct` (maestro:conduct) — codex has no
+  `/plugin:skill` slash commands.
+- **Per-session runtime**: the daemon resolves each ticket's runtime
+  independently (`.maestro-runtime` file → manifest task/pool `runtime` keys
+  via `manifest.runtimeForTask` → `MAESTRO_RUNTIME` → `claude`), so one
+  conductor watches a mixed claude/codex fleet.
+- **Codex exec sessions** (launched with `--runtime=codex`) are detected via
+  their teed `<state>/<TICKET>.exec.jsonl` stream — bytes appended = alive,
+  `turn.completed` = progress, process exit = done — not pane regexes.
+  Restarts resume via `codex exec resume` (probe:
+  `transcript.listSessionsForCwd(worktree)`).
+- **Codex TUI panes** (no exec stream) run the `codex-tui-conservative`
+  dialect: spinner/question/stuck-input detectors report
+  unsupported-capability instead of guessing, and the session is NEVER
+  auto-killed or auto-restarted on pane-glyph evidence (DEAD-END-HOLD keeps it
+  alive for the operator).
+- **No Monitor tool**: run the daemon detached instead of piping through
+  Monitor — `nohup node plugins/maestro/scripts/maestro-conduct.js --daemon
+  >/tmp/maestro-conduct-daemon.log 2>&1 &` — and poll `LOG_FILE` /
+  `/tmp/maestro-alerts.jsonl` with `tail`.
 
 ## Stop
 

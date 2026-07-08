@@ -8,12 +8,27 @@
  *
  * Resolution order:
  *   TICKET_PROVIDER env var -> ticket-providers.json -> legacy detection -> unconfigured
+ *
+ * The remote-URL key normalization lives in the vendored runtime lib
+ * (./runtime/tickets) so maestro's ticket-prefix.js reads back the exact keys
+ * this module writes (byte-parity contract, no cross-plugin requires).
+ * Provider-specific prompt builders live in ./ticket-provider-prompts and are
+ * re-exported here so callers keep a single require surface.
  */
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const os = require('os');
+
+const { normalizeRemoteUrl, remoteOriginKey } = require('./runtime/tickets');
+const {
+  getFetchTicketPrompt,
+  getRelatedTicketsPrompt,
+  getTransitionPrompt,
+  getCreateTicketPrompt,
+  getAllowedMcpTools,
+  getCreateTicketAgentType,
+} = require('./ticket-provider-prompts');
 
 const HOME_DIR = os.homedir() || process.env.HOME || '/home/node';
 const CLAUDE_DIR = path.join(HOME_DIR, '.cl' + 'aude');
@@ -21,27 +36,7 @@ const PROVIDERS_FILE = path.join(CLAUDE_DIR, 'ticket-providers.json');
 const VALID_PROVIDERS = ['jira', 'linear', 'github', 'none'];
 
 function getRemoteOriginUrl(cwd = process.cwd()) {
-  try {
-    const url = execSync('git remote get-url origin', {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    return normalizeRemoteUrl(url);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeRemoteUrl(url) {
-  if (!url) return null;
-  return url
-    .replace(/^git@/, '')
-    .replace(/^https?:\/\//, '')
-    .replace(/:/, '/')
-    .replace(/\.git$/, '')
-    .toLowerCase();
+  return remoteOriginKey(cwd);
 }
 
 function loadProvidersFile() {
@@ -135,6 +130,16 @@ function sanitizeTicketIdForPath(ticketId, providerConfig) {
   return ticketId;
 }
 
+/** Validated { ticketBase, suffix, separator } once a suffix form is matched. */
+function parsedSuffix(ticketBase, suffix, separator) {
+  if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
+    throw new Error(
+      `invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`
+    );
+  }
+  return { ticketBase, suffix, separator };
+}
+
 /**
  * Parse ticket input with optional suffix/phase syntax.
  * "JUL-1397-bugfix" → { ticketBase: "JUL-1397", suffix: "bugfix", separator: "-" }
@@ -147,28 +152,14 @@ function parseTicketInput(raw) {
     return { ticketBase: raw, suffix: null };
   // Hyphenated suffix: PROJ-123-suffix
   const hyphenMatch = raw.match(/^([A-Z]+-\d+)-(.+)$/i);
-  if (hyphenMatch) {
-    const suffix = hyphenMatch[2];
-    if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
-      throw new Error(
-        `invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`
-      );
-    }
-    return { ticketBase: hyphenMatch[1], suffix, separator: '-' };
-  }
+  if (hyphenMatch) return parsedSuffix(hyphenMatch[1], hyphenMatch[2], '-');
   // Slash suffix: PROJ-123/phase1
   const slashIdx = raw.indexOf('/');
   if (slashIdx === -1) return { ticketBase: raw, suffix: null };
   const ticketBase = raw.substring(0, slashIdx);
-  const suffix = raw.substring(slashIdx + 1);
   const looksLikeTicket = /^[A-Z]+-\d+$/i.test(ticketBase) || /^#\d+$/.test(ticketBase);
   if (!looksLikeTicket) return { ticketBase: raw, suffix: null };
-  if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
-    throw new Error(
-      `invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`
-    );
-  }
-  return { ticketBase, suffix, separator: '/' };
+  return parsedSuffix(ticketBase, raw.substring(slashIdx + 1), '/');
 }
 
 /**
@@ -186,34 +177,33 @@ function normalizeTicketId(raw) {
   return base + parsed.separator + parsed.suffix;
 }
 
-/**
- * Strict validator for raw ticket arguments at the entry points of /work and
- * /work-implement. Rejects malformed input BEFORE any filesystem side effects.
- *
- * Returns { ticketBase, suffix, separator, canonical }. Throws Error on invalid.
- * `canonical` is the post-normalization handle used as the session identity.
- */
-function validateRawTicketInput(raw, providerConfig) {
+/** Reject null/undefined/empty and non-string raw ticket arguments. */
+function assertRawTicketString(raw) {
   if (raw === null || raw === undefined || raw === '') {
     throw new Error('Ticket ID is required.');
   }
   if (typeof raw !== 'string') {
     throw new Error(`Ticket ID must be a string (received ${typeof raw}).`);
   }
-  // URL form: handle BEFORE the structured validator (URLs contain ':' which would
-  // otherwise trip the unsafe-char check).
-  if (raw.startsWith('http://') || raw.startsWith('https://')) {
-    const parsed = parseGitHubUrl(raw);
-    if (!parsed) {
-      throw new Error(`Unrecognized ticket URL: ${raw}`);
-    }
-    const canonical = 'GH-' + parsed.number;
-    return { ticketBase: canonical, suffix: null, separator: null, canonical };
+}
+
+/** URL-form validation: only GitHub issue URLs are recognized. */
+function validateTicketUrl(raw) {
+  const parsed = parseGitHubUrl(raw);
+  if (!parsed) {
+    throw new Error(`Unrecognized ticket URL: ${raw}`);
   }
-  // Delegate the path-safety subset to the shared structured validator
-  // (covers ../, backslash, colon, NUL, leading slash, multi-slash, leading/trailing
-  // whitespace, bare dot). It does NOT reject internal whitespace, so we check that
-  // explicitly below.
+  const canonical = 'GH-' + parsed.number;
+  return { ticketBase: canonical, suffix: null, separator: null, canonical };
+}
+
+/**
+ * Path-safety subset shared with the structured validator (covers ../,
+ * backslash, colon, NUL, leading slash, multi-slash, leading/trailing
+ * whitespace, bare dot). It does NOT reject internal whitespace, so that is
+ * checked explicitly here.
+ */
+function assertTicketPathSafe(raw) {
   let structErr = null;
   try {
     const { validateTicketIdStructured } = require('./ticket-validation');
@@ -232,24 +222,43 @@ function validateRawTicketInput(raw, providerConfig) {
       `Ticket ID ${JSON.stringify(raw)} contains whitespace. Expected format: PROJ-123 or PROJ-123-suffix (no spaces).`
     );
   }
-  const parsed = parseTicketInput(raw);
-  const ticketBase = parsed.ticketBase;
-  const isGitHub = providerConfig && providerConfig.provider === 'github';
+}
+
+/** Provider-aware base format check: #N / N / GH-N on GitHub, PROJ-123 elsewhere. */
+function assertTicketBaseFormat(ticketBase, isGitHub) {
   const baseOk = isGitHub
     ? /^#?\d+$/.test(ticketBase) || /^GH-\d+$/i.test(ticketBase)
     : /^[A-Z]+-\d+$/i.test(ticketBase);
-  if (!baseOk) {
-    const expected = isGitHub ? '#N, N, or GH-N' : 'PROJ-123';
-    throw new Error(
-      `Invalid ticket ID base ${JSON.stringify(ticketBase)} — expected ${expected} format.`
-    );
+  if (baseOk) return;
+  const expected = isGitHub ? '#N, N, or GH-N' : 'PROJ-123';
+  throw new Error(
+    `Invalid ticket ID base ${JSON.stringify(ticketBase)} — expected ${expected} format.`
+  );
+}
+
+/**
+ * Strict validator for raw ticket arguments at the entry points of /work and
+ * /work-implement. Rejects malformed input BEFORE any filesystem side effects.
+ *
+ * Returns { ticketBase, suffix, separator, canonical }. Throws Error on invalid.
+ * `canonical` is the post-normalization handle used as the session identity.
+ */
+function validateRawTicketInput(raw, providerConfig) {
+  assertRawTicketString(raw);
+  // URL form: handle BEFORE the structured validator (URLs contain ':' which would
+  // otherwise trip the unsafe-char check).
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    return validateTicketUrl(raw);
   }
-  const canonical = normalizeTicketId(raw);
+  assertTicketPathSafe(raw);
+  const parsed = parseTicketInput(raw);
+  const isGitHub = providerConfig && providerConfig.provider === 'github';
+  assertTicketBaseFormat(parsed.ticketBase, isGitHub);
   return {
-    ticketBase: String(ticketBase).toUpperCase(),
+    ticketBase: String(parsed.ticketBase).toUpperCase(),
     suffix: parsed.suffix || null,
     separator: parsed.separator || null,
-    canonical,
+    canonical: normalizeTicketId(raw),
   };
 }
 
@@ -304,245 +313,6 @@ function getTicketPattern(providerConfig) {
       return /#?(\d+)/;
     default:
       return /([A-Z]+-\d+)/i;
-  }
-}
-
-function getFetchTicketPrompt(ticketId, providerConfig) {
-  if (!providerConfig) return null;
-  switch (providerConfig.provider) {
-    case 'jira':
-      return (
-        'Fetch Jira ticket ' +
-        ticketId +
-        ' using mcp__atlassian__jira_get_issue with issue_key "' +
-        ticketId +
-        '". Return the ticket summary, description, status, and acceptance criteria.'
-      );
-    case 'linear':
-      return (
-        'Fetch Linear issue ' +
-        ticketId +
-        ' using mcp__linear__get_issue with id "' +
-        ticketId +
-        '". Return the issue title, description, status, and any labels or acceptance criteria.'
-      );
-    case 'github':
-      return (
-        'Fetch GitHub issue ' +
-        ticketId +
-        ' by running: gh issue view ' +
-        ticketId.replace(/^#/, '') +
-        ' --json title,body,state,labels. Return the issue title, body, state, and labels.'
-      );
-    case 'none':
-      return null;
-    default:
-      return null;
-  }
-}
-
-function getRelatedTicketsPrompt(ticketId, providerConfig, manifestPath) {
-  if (!providerConfig) return null;
-  const schemaBlock =
-    'Schema (write this exact shape; arrays may be empty but must exist):\n' +
-    '{\n' +
-    '  "self":      { "id": "' +
-    ticketId +
-    '", "title": "...", "status": "..." },\n' +
-    '  "parent":    { "id": "...", "title": "...", "status": "...", "scope": "..." } | null,\n' +
-    '  "siblings":  [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": 1234, "surfaces": ["lib/x.ts", "app/api/.../y.ts"] } ],\n' +
-    '  "blockedBy": [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": null } ],\n' +
-    '  "dependsOn": [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": null } ],\n' +
-    '  "relatedTo": [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": null } ],\n' +
-    '  "fetchedAt": "<ISO-8601 timestamp NOW>"\n' +
-    '}\n' +
-    '\n' +
-    'Rules:\n' +
-    '- **Exclude the current ticket (' +
-    ticketId +
-    ') from every bucket — siblings, blockedBy, dependsOn, relatedTo, and parent.** A ticket is never its own sibling, blocker, dependency, related-to, or parent. Likewise, never write `_related/' +
-    ticketId +
-    '.md` — a ticket has no related-file representation of itself.\n' +
-    '- `parent` is null when this ticket has no parent. Otherwise populate from the parent link (and it must not be ' +
-    ticketId +
-    ').\n' +
-    '- `siblings` = children of the same parent, EXCLUDING ' +
-    ticketId +
-    '. If there is no parent, leave it [].\n' +
-    '- `blockedBy` / `dependsOn` / `relatedTo` come from the ticket-system link types, each EXCLUDING ' +
-    ticketId +
-    '.\n' +
-    "- **`scope` (REQUIRED on every linked entry):** read each linked ticket's full description, then distill it into a focused one-to-three-sentence summary of WHAT THAT TICKET OWNS — files, endpoints, schemas, layers. This is the field downstream agents use to decide sibling ownership when no PR is merged yet.\n" +
-    '  - Good: `"scope": "Owns the new `externalAssets.listDownstreamDashboards` tRPC procedure on viewsRouter and its Zod schema. Adds `select`+`where` for Dashboard rows. No UI changes."`\n' +
-    '  - Bad (too vague): `"scope": "Backend work for downstream dashboards"`\n' +
-    '  - Bad (full body): pasting the entire ticket description verbatim.\n' +
-    '  - Bad (too narrow): `"scope": "Wire to explore.list"` without naming any concrete surface.\n' +
-    '  - Keep `scope` ≤ ~400 characters. Strip implementation noise (deadlines, status updates, side-comments) — keep only ownership signals.\n' +
-    '- For every sibling AND parent with a merged PR, populate `surfaces` with the list of files changed in that PR (run `gh pr diff <N> --name-only` and copy the file paths). For unshipped tickets, leave `surfaces: []` — `scope` is what carries ownership info in that case.\n' +
-    '- Write the JSON to: ' +
-    manifestPath +
-    '\n' +
-    '- After writing, validate by reading it back and parsing.';
-  switch (providerConfig.provider) {
-    case 'jira':
-      return (
-        'Fetch related tickets for Jira issue ' +
-        ticketId +
-        ' and write a related-tickets manifest.\n\n' +
-        'Steps:\n' +
-        '1. Use mcp__atlassian__jira_get_issue with issue_key "' +
-        ticketId +
-        '" and fetch the full payload including the `issuelinks` field and the `parent` field.\n' +
-        '2. Parse:\n' +
-        '   - `parent`: from fields.parent if present.\n' +
-        '   - `siblings`: search for siblings via JQL `parent = "' +
-        ticketId +
-        '"`\'s parent — use mcp__atlassian__jira_search with JQL `parent = "<parent-key>"` and exclude ' +
-        ticketId +
-        '.\n' +
-        '   - `blockedBy`: issuelinks where this issue `is blocked by`.\n' +
-        '   - `dependsOn`: issuelinks where this issue `depends on`.\n' +
-        '   - `relatedTo`: issuelinks where the link type is `relates to`.\n' +
-        "3. For each linked ticket with a merged PR, find the PR number from the issue's remote links or development field, then run `gh pr diff <N> --name-only` to populate `surfaces`.\n\n" +
-        schemaBlock
-      );
-    case 'linear':
-      return (
-        'Fetch related issues for Linear issue ' +
-        ticketId +
-        ' and write a related-tickets manifest.\n\n' +
-        'Steps:\n' +
-        '1. Use mcp__linear__get_issue with id "' +
-        ticketId +
-        '" and capture: `parent`, `children`, and `relations` (each relation has a `type`: `blocks`, `blocked_by`, `duplicate`, `related`, …).\n' +
-        '2. Parse:\n' +
-        '   - `parent`: from the parent field.\n' +
-        '   - `siblings`: if there is a parent, list its other children (use mcp__linear__get_issue on the parent and read `children`, exclude ' +
-        ticketId +
-        ').\n' +
-        '   - `blockedBy`: relations where type is `blocked_by` (or the inverse of `blocks`).\n' +
-        "   - `dependsOn`: relations where type is `blocks` and the target depends on this issue — use the same field interpreted per Linear's schema.\n" +
-        '   - `relatedTo`: relations where type is `related`.\n' +
-        '3. For each linked issue with a merged PR (Linear surfaces these via the `attachments` or external links), run `gh pr diff <N> --name-only` to populate `surfaces`.\n\n' +
-        schemaBlock
-      );
-    case 'github':
-      return (
-        'Fetch related issues for GitHub issue ' +
-        ticketId +
-        ' and write a related-tickets manifest.\n\n' +
-        'Steps:\n' +
-        '1. Run `gh issue view ' +
-        ticketId.replace(/^#/, '') +
-        ' --json title,body,labels,milestone` and capture the body.\n' +
-        '2. Parse the body for these conventions (case-insensitive):\n' +
-        '   - `Parent: #N` or `Parent issue: #N` → `parent`.\n' +
-        '   - `Blocked by: #N, #M` → each goes into `blockedBy`.\n' +
-        '   - `Depends on: #N` → `dependsOn`.\n' +
-        '   - `Related: #N` or `Related to: #N` → `relatedTo`.\n' +
-        '3. For siblings: if there is a parent, run `gh issue view <parent-N> --json body` and parse its body for a checklist of sub-issues (`- [ ] #N`, `- [x] #N`), excluding ' +
-        ticketId +
-        '.\n' +
-        '4. For each linked issue, run `gh issue view <N> --json state,title` to populate status, and `gh pr list --search "linked-issue:<N>" --state merged --json number` to find the merged PR. If a PR exists, run `gh pr diff <N> --name-only` to populate `surfaces`.\n\n' +
-        schemaBlock
-      );
-    case 'none':
-      return null;
-    default:
-      return null;
-  }
-}
-
-function getTransitionPrompt(ticketId, status, providerConfig) {
-  if (!providerConfig) return null;
-  switch (providerConfig.provider) {
-    case 'jira':
-      return (
-        'Transition Jira ticket ' +
-        ticketId +
-        ' to "' +
-        status +
-        '" (idempotent). Use mcp__atlassian__jira_get_transitions to get available transitions for ' +
-        ticketId +
-        ', then use mcp__atlassian__jira_transition_issue to move it to "' +
-        status +
-        '". If already in that status, report success.'
-      );
-    case 'linear':
-      return (
-        'Transition Linear issue ' +
-        ticketId +
-        ' to "' +
-        status +
-        '" using mcp__linear__save_issue with id "' +
-        ticketId +
-        '" and state "' +
-        status +
-        '". If already in that status, report success.'
-      );
-    case 'github':
-    case 'none':
-      return null;
-    default:
-      return null;
-  }
-}
-
-function getCreateTicketPrompt(description, providerConfig) {
-  if (!providerConfig) return null;
-  switch (providerConfig.provider) {
-    case 'jira':
-      return 'Create a Jira ticket from this description: "' + description + '"';
-    case 'linear':
-      return (
-        'Create a Linear issue from this description: "' +
-        description +
-        '" using mcp__linear__save_issue with a clear title and the description as the body.'
-      );
-    case 'github':
-      return (
-        'Create a GitHub issue from this description: "' +
-        description +
-        '" by running: gh issue create --title "<title>" --body "<body>"'
-      );
-    case 'none':
-      return null;
-    default:
-      return null;
-  }
-}
-
-function getAllowedMcpTools(providerConfig) {
-  if (!providerConfig) return [];
-  switch (providerConfig.provider) {
-    case 'jira':
-      return [
-        'mcp__atlassian__jira_get_issue',
-        'mcp__atlassian__jira_get_transitions',
-        'mcp__atlassian__jira_transition_issue',
-      ];
-    case 'linear':
-      return ['mcp__linear__get_issue', 'mcp__linear__save_issue', 'mcp__linear__list_issues'];
-    case 'github':
-    case 'none':
-      return [];
-    default:
-      return [];
-  }
-}
-
-function getCreateTicketAgentType(providerConfig) {
-  if (!providerConfig) return 'general-purpose';
-  switch (providerConfig.provider) {
-    case 'jira':
-      return 'jira-task-creator';
-    case 'linear':
-    case 'github':
-      return 'general-purpose';
-    case 'none':
-      return null;
-    default:
-      return 'general-purpose';
   }
 }
 

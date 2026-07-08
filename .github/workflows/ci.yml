@@ -36,6 +36,24 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts # npm install (not ci) — no lockfile in repo
 
+      - name: Lint hooks.json (all plugins)
+        run: node scripts/lint-hooks-json.js
+
+      - name: Lint SKILL.md frontmatter (strict YAML — codex silently drops offenders)
+        run: node scripts/lint-skill-frontmatter.js
+
+      - name: Lint instruction vocabulary (no un-rendered Claude tool literals)
+        run: node scripts/lint-vocab.js
+
+      - name: Lint symlink paths (static + stripped-tree hook entrypoints)
+        run: node scripts/lint-symlink-paths.js
+
+      - name: PLUGIN_ROOT preamble drift (codemod --check)
+        run: node scripts/codemod-plugin-root-preamble.js --check
+
+      - name: Vendored runtime parity
+        run: node scripts/sync-vendored.js --check
+
       - name: Determine touched plugins
         id: scope
         run: |
