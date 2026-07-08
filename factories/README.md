@@ -57,6 +57,29 @@ fails CI.
 | `registryValidator` | A linear step machine with retry edges and a handler pipeline — every step id is in the step order, every transition target is a forward / backward / terminal-self edge, every pipeline handler with `__factoryMeta` has a registry entry. |
 | `dispatchRegistryValidator` | An event-driven dispatch registry: `{ handlers, dispatch, baseDispatch?, handlerShape?, tagSet?, allowOrphans? }`. Every name in `dispatch[*]` resolves to a registered handler; no duplicates; (optionally) every dispatch key is in `tagSet`; every handler conforms to `handlerShape`. |
 
+### Cross-cutting concern modules (rule 3c)
+
+Dependency-free modules that centralize one cross-cutting concern behind a
+small frozen API, replacing the near-copies each plugin used to hand-roll.
+
+| Module | Concern it centralizes |
+|---|---|
+| `storeDiscovery` | Tiered, marker-gated discovery of `.claude/<folder>` store directories — only explicitly installed locations are ever read. |
+| `safeIO` | Fail-open readers ("anything goes wrong → empty") and Windows-aware atomic writers (no half-written payloads). |
+| `hookEntrypoint` | The hook-script entry protocol: stdin → JSON payload → guarded handler → deliberate exit code, plus `logHookError` file logging. |
+| `safeSubprocess` | Synchronous subprocess wrappers with non-optional timeouts and no shell interpolation. |
+| `pathSafe` | Traversal-safe path joins, canonical home expansion, and structured identifier validation. |
+
+Like `runtime`, these modules are **vendored** into the plugin trees that need
+them: `scripts/sync-vendored.js` holds the multi-master `VENDOR_SETS` table
+(master → vendor dirs) and byte-copies each master's flat `.js` files, with a
+`GENERATED` banner, into every registered vendor dir. Codex cache-isolates
+each plugin, so cross-tree requires would break at install time — the vendored
+copies are deliberate checked-in duplication, kept honest by
+`node scripts/sync-vendored.js --check` in CI and the parity spec
+(`factories/runtime/__tests__/vendored-parity.spec.js`). Edit the master, run
+the sync script; never hand-edit a vendored copy.
+
 ## Enforcement stack
 
 1. **Factories** make the matrix declarative — the LLM fills in a table, the

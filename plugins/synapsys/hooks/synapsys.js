@@ -62,27 +62,10 @@ const VALID_EVENTS = new Set([
   'Stop',
 ]);
 
-async function readStdin() {
-  if (process.stdin.isTTY) return '';
-  return new Promise((resolve) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', () => resolve(''));
-  });
-}
-
-function parsePayload(raw) {
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
+// Entry protocol (stdin read with TTY guard, `{}` on malformed payload,
+// fail-open exit 0 with nothing on stderr) comes from the vendored
+// hookEntrypoint factory — see the runHook call at the bottom of this file.
+const { runHook } = require(path.join(__dirname, '..', 'lib', 'hookEntrypoint'));
 
 const { getSessionStartHint } = require(path.join(__dirname, '..', 'lib', 'setup-hints'));
 const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime', 'index'));
@@ -239,11 +222,10 @@ function emitDeny(deny) {
   process.exit(0);
 }
 
-async function dispatch() {
+async function dispatch(payload) {
   const event = process.argv[2];
   if (!VALID_EVENTS.has(event)) process.exit(0);
 
-  const payload = parsePayload(await readStdin());
   const cwd = payload.cwd || process.cwd();
   const runtimeName = getRuntime(payload).name;
 
@@ -314,10 +296,13 @@ async function dispatch() {
   process.exit(0);
 }
 
-(async () => {
-  try {
-    await dispatch();
-  } catch {
-    process.exit(0);
-  }
-})();
+// Invalid-event guard BEFORE the entry protocol: runHook drains stdin before
+// invoking the handler, so checking only inside dispatch would make bad-argv
+// invocations consume the pipe first. Exit immediately instead — the same
+// ordering the original inline IIFE had.
+if (!VALID_EVENTS.has(process.argv[2])) process.exit(0);
+
+// Fail-open: a handler throw exits 0 with nothing on stderr (memory injection
+// must never block the user's prompt or tool call); the error is appended to
+// the hook error log for post-hoc review.
+runHook(dispatch, { onError: 'open', file: __filename });

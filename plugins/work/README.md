@@ -185,8 +185,8 @@ export ENFORCE_HOOK_DEBUG=1
 **Race conditions:** Each log line includes PID. Writes use `O_APPEND` with short lines (~3.8KB max). On Linux ext4/xfs, these are effectively atomic across concurrent instances.
 
 **Source files:**
-- `scripts/workflows/lib/hook-error-log.js` (plugin hooks)
-- `~/.claude/hooks/lib/hook-error-log.js` (personal hooks — identical copy)
+- `scripts/workflows/lib/hook-error-log.js` (plugin hooks — a delegate re-exporting the vendored `scripts/workflows/lib/hookEntrypoint/logHookError.js` port; the implementation master is `factories/hookEntrypoint/logHookError.js`, kept in sync by `scripts/sync-vendored.js`)
+- `~/.claude/hooks/lib/hook-error-log.js` (personal hooks — standalone copy of the same logger)
 
 ## Prerequisites
 

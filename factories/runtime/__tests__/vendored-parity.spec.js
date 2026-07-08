@@ -1,9 +1,9 @@
 /**
  * Tests for scripts/sync-vendored.js — the vendored-copy parity gate
- * (design §B): every plugin's `runtime/` dir must be a byte-identical,
- * GENERATED-bannered copy of factories/runtime, and each vendored copy must
- * load standalone (no require may escape the plugin dir — codex cache
- * isolation, INV P7).
+ * (design §B): every vendor dir in every VENDOR_SETS entry must be a
+ * byte-identical, GENERATED-bannered copy of its factories/<lib> master, and
+ * each vendored copy must load standalone (no require may escape the plugin
+ * dir — codex cache isolation, INV P7).
  *
  * Run: node --test factories/runtime/__tests__/vendored-parity.spec.js
  */
@@ -22,8 +22,7 @@ const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const SYNC_SCRIPT = path.join(REPO_ROOT, 'scripts', 'sync-vendored.js');
 
 const {
-  MASTER_DIR,
-  VENDOR_DIRS,
+  VENDOR_SETS,
   BANNER_PREFIX,
   banner,
   listMasterFiles,
@@ -32,16 +31,51 @@ const {
   sync,
 } = require(SYNC_SCRIPT);
 
-const MASTER_FILES = listMasterFiles(REPO_ROOT);
+// Exact per-master file lists. Adding a file to any master (or a whole new
+// vendor set) must be a deliberate, loud change here — never a drive-by.
+const EXPECTED_MASTER_FILES = {
+  'factories/runtime': [
+    'doctor.js',
+    'emit.js',
+    'envconfig-lite.js',
+    'index.js',
+    'payload.js',
+    'tickets.js',
+    'tools.js',
+    'transcript-claude.js',
+    'transcript-codex.js',
+    'transcript-shared.js',
+    'transcript.js',
+    'vocab.js',
+  ],
+  'factories/storeDiscovery': ['index.js', 'storeDiscovery.js'],
+  'factories/safeIO': ['index.js', 'safeIO.js'],
+  'factories/hookEntrypoint': ['hookEntrypoint.js', 'index.js', 'logHookError.js'],
+  'factories/safeSubprocess': ['index.js', 'safeSubprocess.js'],
+  'factories/pathSafe': ['index.js', 'pathSafe.js'],
+};
+
+const RUNTIME_SET = VENDOR_SETS.find((set) => set.master === 'factories/runtime');
+
+function masterFilesOf(set) {
+  return listMasterFiles(set.master, REPO_ROOT);
+}
+
+const TOTAL_VENDORED_FILES = VENDOR_SETS.reduce(
+  (n, set) => n + masterFilesOf(set).length * set.vendorDirs.length,
+  0
+);
 
 function sha256(content) {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
 
-function copyMasterInto(root) {
-  fs.mkdirSync(path.join(root, MASTER_DIR), { recursive: true });
-  for (const name of MASTER_FILES) {
-    fs.copyFileSync(path.join(REPO_ROOT, MASTER_DIR, name), path.join(root, MASTER_DIR, name));
+function copyMastersInto(root) {
+  for (const set of VENDOR_SETS) {
+    fs.mkdirSync(path.join(root, set.master), { recursive: true });
+    for (const name of masterFilesOf(set)) {
+      fs.copyFileSync(path.join(REPO_ROOT, set.master, name), path.join(root, set.master, name));
+    }
   }
 }
 
@@ -50,51 +84,94 @@ function makeTempRoot(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `vendored-parity-${label}-`));
 }
 
-describe('vendored copies match factories/runtime (sha256)', () => {
-  it('master dir has the expected module set', () => {
-    assert.deepEqual(MASTER_FILES, [
-      'doctor.js',
-      'emit.js',
-      'envconfig-lite.js',
-      'index.js',
-      'payload.js',
-      'tickets.js',
-      'tools.js',
-      'transcript-claude.js',
-      'transcript-codex.js',
-      'transcript-shared.js',
-      'transcript.js',
-      'vocab.js',
+describe('VENDOR_SETS table shape', () => {
+  it('covers exactly the expected masters (new sets must be registered here)', () => {
+    assert.deepEqual(
+      VENDOR_SETS.map((set) => set.master).sort(),
+      Object.keys(EXPECTED_MASTER_FILES).sort()
+    );
+  });
+
+  it('runtime master keeps its four plugin vendor dirs', () => {
+    assert.ok(RUNTIME_SET, 'factories/runtime must stay in VENDOR_SETS');
+    assert.deepEqual(RUNTIME_SET.vendorDirs, [
+      'plugins/heimdall/lib/runtime',
+      'plugins/maestro/scripts/lib/runtime',
+      'plugins/synapsys/lib/runtime',
+      'plugins/work/scripts/workflows/lib/runtime',
     ]);
   });
 
-  for (const vendorDir of VENDOR_DIRS) {
-    for (const name of MASTER_FILES) {
-      it(`${vendorDir}/${name} is banner + master bytes`, () => {
-        const vendored = fs.readFileSync(path.join(REPO_ROOT, vendorDir, name), 'utf8');
-        assert.equal(sha256(vendored), sha256(expectedContent(name, REPO_ROOT)));
-      });
-    }
+  // Exact vendorDirs pins for the non-runtime sets: silently dropping a table
+  // entry (a vendored dir losing parity coverage) must fail this suite, not
+  // pass quietly because the loop below simply iterates fewer dirs.
+  const EXPECTED_VENDOR_DIRS = {
+    'factories/storeDiscovery': [
+      'plugins/synapsys/lib/storeDiscovery',
+      'plugins/heimdall/lib/storeDiscovery',
+    ],
+    'factories/safeIO': ['plugins/work/scripts/workflows/lib/safeIO'],
+    'factories/hookEntrypoint': [
+      'plugins/synapsys/lib/hookEntrypoint',
+      'plugins/work/scripts/workflows/lib/hookEntrypoint',
+    ],
+    'factories/safeSubprocess': ['plugins/work/scripts/workflows/lib/safeSubprocess'],
+    'factories/pathSafe': ['plugins/heimdall/lib/pathSafe'],
+  };
 
-    it(`${vendorDir} has no stale .js files`, () => {
-      const extras = fs
-        .readdirSync(path.join(REPO_ROOT, vendorDir))
-        .filter((f) => f.endsWith('.js') && !MASTER_FILES.includes(f));
-      assert.deepEqual(extras, []);
+  for (const [master, vendorDirs] of Object.entries(EXPECTED_VENDOR_DIRS)) {
+    it(`${master} keeps its exact vendor dirs`, () => {
+      const set = VENDOR_SETS.find((s) => s.master === master);
+      assert.ok(set, `${master} must stay in VENDOR_SETS`);
+      assert.deepEqual(set.vendorDirs, vendorDirs);
     });
   }
 
-  it('every vendored file carries the GENERATED banner', () => {
-    for (const vendorDir of VENDOR_DIRS) {
-      for (const name of MASTER_FILES) {
-        const vendored = fs.readFileSync(path.join(REPO_ROOT, vendorDir, name), 'utf8');
-        assert.ok(
-          vendored.startsWith(banner(name)),
-          `${vendorDir}/${name} must start with "${BANNER_PREFIX}${MASTER_DIR}/${name} …"`
-        );
-      }
-    }
+  it("quality.js's vendored-dir exclusion list equals the sorted union of all vendor dirs", () => {
+    const { VENDORED_DIRS } = require(
+      path.join(REPO_ROOT, 'plugins/work/scripts/workflows/lib/scripts/quality/quality.js')
+    );
+    const union = [...new Set(VENDOR_SETS.flatMap((set) => set.vendorDirs))].sort();
+    assert.deepEqual(VENDORED_DIRS, union);
   });
+});
+
+describe('vendored copies match their masters (sha256)', () => {
+  for (const set of VENDOR_SETS) {
+    const masterFiles = masterFilesOf(set);
+
+    it(`${set.master} has the expected module set`, () => {
+      assert.deepEqual(masterFiles, EXPECTED_MASTER_FILES[set.master]);
+    });
+
+    for (const vendorDir of set.vendorDirs) {
+      for (const name of masterFiles) {
+        it(`${vendorDir}/${name} is banner + master bytes`, () => {
+          const vendored = fs.readFileSync(path.join(REPO_ROOT, vendorDir, name), 'utf8');
+          assert.equal(sha256(vendored), sha256(expectedContent(set.master, name, REPO_ROOT)));
+        });
+      }
+
+      it(`${vendorDir} has no stale .js files`, () => {
+        const extras = fs
+          .readdirSync(path.join(REPO_ROOT, vendorDir))
+          .filter((f) => f.endsWith('.js') && !masterFiles.includes(f));
+        assert.deepEqual(extras, []);
+      });
+    }
+
+    it(`every ${set.master} vendored file carries the GENERATED banner`, () => {
+      for (const vendorDir of set.vendorDirs) {
+        for (const name of masterFiles) {
+          const vendored = fs.readFileSync(path.join(REPO_ROOT, vendorDir, name), 'utf8');
+          assert.ok(
+            vendored.startsWith(banner(set.master, name)),
+            `${vendorDir}/${name} must start with "${BANNER_PREFIX}${set.master}/${name} …"`
+          );
+        }
+      }
+    });
+  }
 
   it('check(REPO_ROOT) reports parity', () => {
     assert.deepEqual(check(REPO_ROOT), []);
@@ -104,13 +181,13 @@ describe('vendored copies match factories/runtime (sha256)', () => {
 describe('parity self-test — injected drift fails the check', () => {
   it('flags a hand-edited vendored file (module API and --check CLI agree)', () => {
     const root = makeTempRoot('drift');
-    copyMasterInto(root);
+    copyMastersInto(root);
     const { written, stale } = sync(root);
-    assert.equal(written.length, MASTER_FILES.length * VENDOR_DIRS.length);
+    assert.equal(written.length, TOTAL_VENDORED_FILES);
     assert.deepEqual(stale, []);
     assert.deepEqual(check(root), []);
 
-    const drifted = path.join(root, VENDOR_DIRS[0], 'emit.js');
+    const drifted = path.join(root, RUNTIME_SET.vendorDirs[0], 'emit.js');
     fs.appendFileSync(drifted, '\n// hand edit\n');
 
     const problems = check(root);
@@ -126,16 +203,18 @@ describe('parity self-test — injected drift fails the check', () => {
 
   it('flags a missing vendored file', () => {
     const root = makeTempRoot('missing');
-    copyMasterInto(root);
+    copyMastersInto(root);
     sync(root);
     // Recreate the tree minus one file rather than deleting from it.
     const gapped = makeTempRoot('missing-gap');
-    copyMasterInto(gapped);
-    for (const vendorDir of VENDOR_DIRS) {
-      fs.mkdirSync(path.join(gapped, vendorDir), { recursive: true });
-      for (const name of MASTER_FILES) {
-        if (vendorDir === VENDOR_DIRS[1] && name === 'tools.js') continue;
-        fs.copyFileSync(path.join(root, vendorDir, name), path.join(gapped, vendorDir, name));
+    copyMastersInto(gapped);
+    for (const set of VENDOR_SETS) {
+      for (const vendorDir of set.vendorDirs) {
+        fs.mkdirSync(path.join(gapped, vendorDir), { recursive: true });
+        for (const name of masterFilesOf(set)) {
+          if (vendorDir === RUNTIME_SET.vendorDirs[1] && name === 'tools.js') continue;
+          fs.copyFileSync(path.join(root, vendorDir, name), path.join(gapped, vendorDir, name));
+        }
       }
     }
     const problems = check(gapped);
@@ -145,9 +224,9 @@ describe('parity self-test — injected drift fails the check', () => {
 
   it('flags a stale vendored file with no master counterpart', () => {
     const root = makeTempRoot('stale');
-    copyMasterInto(root);
+    copyMastersInto(root);
     sync(root);
-    fs.writeFileSync(path.join(root, VENDOR_DIRS[2], 'orphan.js'), '// leftover\n');
+    fs.writeFileSync(path.join(root, RUNTIME_SET.vendorDirs[2], 'orphan.js'), '// leftover\n');
     const problems = check(root);
     assert.equal(problems.length, 1);
     assert.match(problems[0], /orphan\.js: stale/);
@@ -155,7 +234,7 @@ describe('parity self-test — injected drift fails the check', () => {
 
   it('--check exits 0 and sync is idempotent on a clean tree', () => {
     const root = makeTempRoot('clean');
-    copyMasterInto(root);
+    copyMastersInto(root);
     sync(root);
     const again = sync(root);
     assert.deepEqual(again.written, []);
@@ -168,23 +247,25 @@ describe('parity self-test — injected drift fails the check', () => {
 });
 
 describe('vendored copies load standalone (factories/ absent)', () => {
-  for (const vendorDir of VENDOR_DIRS) {
-    it(`${vendorDir} requires cleanly with no factories/ in the tree`, () => {
-      const root = makeTempRoot('standalone');
-      const target = path.join(root, vendorDir);
-      fs.mkdirSync(target, { recursive: true });
-      for (const name of MASTER_FILES) {
-        fs.copyFileSync(path.join(REPO_ROOT, vendorDir, name), path.join(target, name));
-      }
-      assert.equal(fs.existsSync(path.join(root, 'factories')), false);
-      const script = MASTER_FILES.map(
-        (name) => `require(${JSON.stringify(path.join(target, name))});`
-      ).join('');
-      const res = spawnSync(process.execPath, ['-e', script], {
-        cwd: path.join(root, vendorDir.split('/').slice(0, 2).join(path.sep)),
-        encoding: 'utf8',
+  for (const set of VENDOR_SETS) {
+    for (const vendorDir of set.vendorDirs) {
+      it(`${vendorDir} requires cleanly with no factories/ in the tree`, () => {
+        const root = makeTempRoot('standalone');
+        const target = path.join(root, vendorDir);
+        fs.mkdirSync(target, { recursive: true });
+        for (const name of masterFilesOf(set)) {
+          fs.copyFileSync(path.join(REPO_ROOT, vendorDir, name), path.join(target, name));
+        }
+        assert.equal(fs.existsSync(path.join(root, 'factories')), false);
+        const script = masterFilesOf(set)
+          .map((name) => `require(${JSON.stringify(path.join(target, name))});`)
+          .join('');
+        const res = spawnSync(process.execPath, ['-e', script], {
+          cwd: path.join(root, vendorDir.split('/').slice(0, 2).join(path.sep)),
+          encoding: 'utf8',
+        });
+        assert.equal(res.status, 0, `require failed: ${res.stderr}`);
       });
-      assert.equal(res.status, 0, `require failed: ${res.stderr}`);
-    });
+    }
   }
 });

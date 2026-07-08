@@ -1,13 +1,29 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { execSync } = require('node:child_process');
 // Frontmatter value-coercion machinery lives in a sibling module so this file
 // stays under the quality gate's max-lines budget. Re-exported below so callers
 // and tests that reach for these internals keep working unchanged.
 const { BRACKET_LIST_KEYS, coerceFrontmatterValue, toList } = require('./frontmatter-coerce');
+// Tiered, marker-gated store discovery (local/worktree/global/shared) comes
+// from the vendored storeDiscovery factory. Synapsys dials:
+// - 'git-common-dir': a linked worktree derives the MAIN repo name for the
+//   global tier, not the worktree directory's basename.
+// - ancestorWalkStopsAtHome false: the worktree ancestor walk runs to the
+//   filesystem root (historical synapsys behavior).
+// - SYNAPSYS_DISABLE_HOME_STORES=1 pins discovery to cwd-rooted stores so a
+//   developer's real global/shared memories never leak into fixture tests.
+const { createStoreDiscovery } = require('./storeDiscovery');
+const discovery = createStoreDiscovery({
+  folder: 'synapsys',
+  marker: '.synapsys.json',
+  projectNameStrategy: 'git-common-dir',
+  ancestorWalkStopsAtHome: false,
+  disableHomeStoresEnvVar: 'SYNAPSYS_DISABLE_HOME_STORES',
+});
+const { MARKER, FOLDER, SHARED_FOLDER, getProjectName, candidateStores, discoverStores, safeExec } =
+  discovery;
 // Per-field frontmatter normalization (fire_mode / enforce / signals /
 // telemetry / expiry coercion) lives in a sibling module for the same
 // max-lines reason. Same names, byte-identical behavior.
@@ -24,119 +40,6 @@ const {
   normalizeTelemetry,
   parseExpired,
 } = require('./memory-fields');
-
-const MARKER = '.synapsys.json';
-const FOLDER = 'synapsys';
-// Dedicated directory for the cross-project "shared" tier. It sits OUTSIDE
-// the per-project `~/.claude/synapsys/<project>/` namespace so it can never
-// collide with a project whose name happens to match — git imposes no
-// restriction on directory names, so a sibling under `synapsys/` would not
-// be collision-proof.
-const SHARED_FOLDER = `${FOLDER}-shared`;
-
-// Pass cwd through to execSync so git resolves relative to the caller's path,
-// not the host process's cwd. Mirrors the pattern in
-// scripts/workflows/lib/scripts/get-ticket-id.js — without this, hooks invoked
-// from one cwd but processing a payload with a different cwd resolve to the
-// wrong git toplevel.
-function safeExec(cmd, cwd) {
-  try {
-    return execSync(cmd, {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return '';
-  }
-}
-
-function getProjectName(cwd) {
-  const resolvedCwd = cwd || process.cwd();
-  // Prefer the git COMMON dir: inside a linked worktree, --show-toplevel
-  // returns the worktree directory (e.g. `repo-GH-123`), which would derive a
-  // divergent global-store name. The common dir is `<main-checkout>/.git` for
-  // both the main checkout and every linked worktree, so its parent's basename
-  // is the real repo name. Guarded on the `.git` basename so bare repos and
-  // exotic GIT_DIR layouts fall through to the legacy logic.
-  const commonDir = safeExec('git rev-parse --path-format=absolute --git-common-dir', resolvedCwd);
-  if (commonDir && path.basename(commonDir) === '.git') {
-    return path.basename(path.dirname(commonDir));
-  }
-  const top = safeExec('git rev-parse --show-toplevel', resolvedCwd);
-  if (top) return path.basename(top);
-  return path.basename(resolvedCwd);
-}
-
-function candidateStores(cwd, projectName) {
-  return [
-    { kind: 'local', dir: path.join(cwd, '.claude', FOLDER) },
-    { kind: 'worktree', dir: path.resolve(cwd, '..', '.claude', FOLDER) },
-    { kind: 'global', dir: path.join(os.homedir(), '.claude', FOLDER, projectName) },
-    { kind: 'shared', dir: path.join(os.homedir(), '.claude', SHARED_FOLDER) },
-  ];
-}
-
-// Walk up from startDir looking for the nearest ancestor that carries a
-// store marker at `<ancestor>/.claude/synapsys/.synapsys.json`. Returns the
-// store dir, or '' when none is found before the filesystem root.
-//
-// This is why worktrees nested more than one level below the shared `.claude`
-// base still resolve: the convention puts the store at the worktree base, but
-// a session may run from a sub-directory of the worktree (e.g. packages/app).
-function findAncestorStore(startDir) {
-  let dir = startDir;
-  for (;;) {
-    if (fs.existsSync(path.join(dir, '.claude', FOLDER, MARKER))) {
-      return path.join(dir, '.claude', FOLDER);
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return '';
-    dir = parent;
-  }
-}
-
-function discoverStores(cwd) {
-  const resolved = cwd || process.cwd();
-  const projectName = getProjectName(resolved);
-  const out = [];
-  const seen = new Set();
-
-  const push = (kind, dir) => {
-    const key = path.resolve(dir);
-    if (seen.has(key)) return;
-    if (!fs.existsSync(path.join(dir, MARKER))) return;
-    seen.add(key);
-    // The shared store is cross-project, so it must not be stamped with the
-    // caller's projectName (mirrors the marker written by synapsys-init.js).
-    out.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
-  };
-
-  // local: store inside the cwd itself.
-  push('local', path.join(resolved, '.claude', FOLDER));
-
-  // worktree: nearest ancestor above cwd carrying a store marker. Walking the
-  // tree (not just one level up) keeps discovery working from sub-directories
-  // of a worktree. The local store above already claimed cwd, so an ancestor
-  // hit here is genuinely "up the tree", never the local store.
-  const wt = findAncestorStore(path.dirname(resolved));
-  if (wt) push('worktree', wt);
-
-  // SYNAPSYS_DISABLE_HOME_STORES lets tests pin discovery to the cwd-rooted
-  // local/worktree stores only, so a developer's real global/shared memories
-  // never leak into fixture-based assertions.
-  if (process.env.SYNAPSYS_DISABLE_HOME_STORES !== '1') {
-    // global: per-project store under home.
-    push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
-
-    // shared: cross-project store under home — discovered for every project,
-    // regardless of cwd or project name. Lives outside the per-project
-    // namespace so it can never collide with a same-named project's global store.
-    push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
-  }
-
-  return out;
-}
 
 // Collect the `  - item` lines of a YAML block-list that starts right after a
 // bare `key:` line at index `start`. Blank lines inside the list are tolerated

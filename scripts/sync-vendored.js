@@ -2,16 +2,17 @@
 'use strict';
 
 /**
- * sync-vendored — copies the canonical `factories/runtime` lib into each
- * plugin's vendored `runtime/` dir (design §B).
+ * sync-vendored — copies each canonical `factories/<lib>` master into the
+ * plugin trees that vendor it (design §B).
  *
  * Codex cache-isolates every plugin: `../../../factories/...` requires escape
  * the install snapshot and crash (INV P7), symlinks are dropped at install
- * (GT §1.7), and no build step exists — so the runtime lib is real checked-in
- * duplication, kept byte-identical by this script plus a CI parity gate.
+ * (GT §1.7), and no build step exists — so every vendored lib is real
+ * checked-in duplication, kept byte-identical by this script plus a CI parity
+ * gate.
  *
  * Vendored files are the master bytes prefixed with a GENERATED banner; they
- * must never be edited by hand (edit factories/runtime and re-run this).
+ * must never be edited by hand (edit the master and re-run this).
  *
  * Usage:
  *   node scripts/sync-vendored.js            # write/refresh the vendored copies
@@ -30,33 +31,61 @@ const EXIT_CONFIG_ERROR = 2;
 
 const REPO_ROOT = path.join(__dirname, '..');
 
-// Repo-relative POSIX paths. The master keeps the tests; vendored dirs get
-// modules only. Mirror any change here in the quality-gate ignore list
+// Repo-relative POSIX paths. Each master keeps its tests and README; vendored
+// dirs get the flat .js modules only. Mirror any change here in the
+// quality-gate ignore list
 // (plugins/work/scripts/workflows/lib/scripts/quality/quality.js).
-const MASTER_DIR = 'factories/runtime';
-const VENDOR_DIRS = [
-  'plugins/heimdall/lib/runtime',
-  'plugins/maestro/scripts/lib/runtime',
-  'plugins/synapsys/lib/runtime',
-  'plugins/work/scripts/workflows/lib/runtime',
+const VENDOR_SETS = [
+  {
+    master: 'factories/runtime',
+    vendorDirs: [
+      'plugins/heimdall/lib/runtime',
+      'plugins/maestro/scripts/lib/runtime',
+      'plugins/synapsys/lib/runtime',
+      'plugins/work/scripts/workflows/lib/runtime',
+    ],
+  },
+  {
+    master: 'factories/storeDiscovery',
+    vendorDirs: ['plugins/synapsys/lib/storeDiscovery', 'plugins/heimdall/lib/storeDiscovery'],
+  },
+  {
+    master: 'factories/safeIO',
+    vendorDirs: ['plugins/work/scripts/workflows/lib/safeIO'],
+  },
+  {
+    master: 'factories/hookEntrypoint',
+    vendorDirs: [
+      'plugins/synapsys/lib/hookEntrypoint',
+      'plugins/work/scripts/workflows/lib/hookEntrypoint',
+    ],
+  },
+  {
+    master: 'factories/safeSubprocess',
+    vendorDirs: ['plugins/work/scripts/workflows/lib/safeSubprocess'],
+  },
+  {
+    master: 'factories/pathSafe',
+    vendorDirs: ['plugins/heimdall/lib/pathSafe'],
+  },
 ];
 
 const BANNER_PREFIX = '// GENERATED — edit ';
 
-function banner(name) {
-  return `${BANNER_PREFIX}${MASTER_DIR}/${name} and run scripts/sync-vendored.js\n\n`;
+function banner(masterDir, name) {
+  return `${BANNER_PREFIX}${masterDir}/${name} and run scripts/sync-vendored.js\n\n`;
 }
 
-function listMasterFiles(root = REPO_ROOT) {
+function listMasterFiles(masterDir, root = REPO_ROOT) {
   return fs
-    .readdirSync(path.join(root, MASTER_DIR), { withFileTypes: true })
+    .readdirSync(path.join(root, masterDir), { withFileTypes: true })
     .filter((ent) => ent.isFile() && ent.name.endsWith('.js'))
     .map((ent) => ent.name)
     .sort();
 }
 
-function expectedContent(name, root = REPO_ROOT) {
-  return banner(name) + fs.readFileSync(path.join(root, MASTER_DIR, name), 'utf8');
+function expectedContent(masterDir, name, root = REPO_ROOT) {
+  return banner(masterDir, name) + fs.readFileSync(path.join(root, masterDir, name), 'utf8');
 }
 
 function sha256(content) {
@@ -84,53 +113,68 @@ function readFileOrNull(file) {
   }
 }
 
-function staleVendorFiles(names, root) {
+function staleVendorFiles(set, root) {
+  const names = listMasterFiles(set.master, root);
   const stale = [];
-  for (const vendorDir of VENDOR_DIRS) {
+  for (const vendorDir of set.vendorDirs) {
     for (const extra of listVendorJsFiles(vendorDir, root)) {
       if (!names.includes(extra)) {
-        stale.push(`${vendorDir}/${extra}: stale — no matching master in ${MASTER_DIR}; remove it`);
+        stale.push(`${vendorDir}/${extra}: stale — no matching master in ${set.master}; remove it`);
       }
     }
   }
   return stale;
 }
 
-/** Returns [] when every vendored copy matches banner+master byte-for-byte. */
-function check(root = REPO_ROOT) {
-  const names = listMasterFiles(root);
-  const problems = [];
-  for (const vendorDir of VENDOR_DIRS) {
+function checkSet(set, root, problems) {
+  const names = listMasterFiles(set.master, root);
+  for (const vendorDir of set.vendorDirs) {
     for (const name of names) {
       const actual = readFileOrNull(path.join(root, vendorDir, name));
       if (actual === null) {
         problems.push(`${vendorDir}/${name}: missing — run node scripts/sync-vendored.js`);
-      } else if (sha256(actual) !== sha256(expectedContent(name, root))) {
+      } else if (sha256(actual) !== sha256(expectedContent(set.master, name, root))) {
         problems.push(
-          `${vendorDir}/${name}: drifted from ${MASTER_DIR}/${name} — edit the master and run node scripts/sync-vendored.js`
+          `${vendorDir}/${name}: drifted from ${set.master}/${name} — edit the master and run node scripts/sync-vendored.js`
         );
       }
     }
   }
-  problems.push(...staleVendorFiles(names, root));
+}
+
+/** Returns [] when every vendored copy in every set matches banner+master byte-for-byte. */
+function check(root = REPO_ROOT) {
+  const problems = [];
+  for (const set of VENDOR_SETS) {
+    checkSet(set, root, problems);
+    problems.push(...staleVendorFiles(set, root));
+  }
   return problems;
 }
 
-/** Writes banner+master into every vendor dir. Never deletes; stale files are reported. */
-function sync(root = REPO_ROOT) {
-  const names = listMasterFiles(root);
-  const written = [];
-  for (const vendorDir of VENDOR_DIRS) {
+function syncSet(set, root, written) {
+  const names = listMasterFiles(set.master, root);
+  for (const vendorDir of set.vendorDirs) {
     fs.mkdirSync(path.join(root, vendorDir), { recursive: true });
     for (const name of names) {
       const target = path.join(root, vendorDir, name);
-      const content = expectedContent(name, root);
+      const content = expectedContent(set.master, name, root);
       if (readFileOrNull(target) === content) continue;
       fs.writeFileSync(target, content);
       written.push(`${vendorDir}/${name}`);
     }
   }
-  return { written, stale: staleVendorFiles(names, root) };
+}
+
+/** Writes banner+master into every vendor dir of every set. Never deletes; stale files are reported. */
+function sync(root = REPO_ROOT) {
+  const written = [];
+  const stale = [];
+  for (const set of VENDOR_SETS) {
+    syncSet(set, root, written);
+    stale.push(...staleVendorFiles(set, root));
+  }
+  return { written, stale };
 }
 
 function parseArgs(argv) {
@@ -146,6 +190,16 @@ function parseArgs(argv) {
   return opts;
 }
 
+function countVendored(root) {
+  let files = 0;
+  let dirs = 0;
+  for (const set of VENDOR_SETS) {
+    files += listMasterFiles(set.master, root).length * set.vendorDirs.length;
+    dirs += set.vendorDirs.length;
+  }
+  return { files, dirs };
+}
+
 function runCheck(root) {
   const problems = check(root);
   if (problems.length > 0) {
@@ -153,8 +207,8 @@ function runCheck(root) {
     console.error(`sync-vendored: ${problems.length} problem(s) — vendored copies out of parity`);
     return EXIT_DRIFT;
   }
-  const count = listMasterFiles(root).length * VENDOR_DIRS.length;
-  console.log(`sync-vendored: ${count} vendored files across ${VENDOR_DIRS.length} dirs in parity`);
+  const { files, dirs } = countVendored(root);
+  console.log(`sync-vendored: ${files} vendored files across ${dirs} dirs in parity`);
   return EXIT_OK;
 }
 
@@ -171,9 +225,11 @@ function runSync(root) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  if (!fs.existsSync(path.join(opts.root, MASTER_DIR))) {
-    console.error(`sync-vendored: master dir not found at ${path.join(opts.root, MASTER_DIR)}`);
-    process.exit(EXIT_CONFIG_ERROR);
+  for (const set of VENDOR_SETS) {
+    if (!fs.existsSync(path.join(opts.root, set.master))) {
+      console.error(`sync-vendored: master dir not found at ${path.join(opts.root, set.master)}`);
+      process.exit(EXIT_CONFIG_ERROR);
+    }
   }
   process.exit(opts.check ? runCheck(opts.root) : runSync(opts.root));
 }
@@ -181,8 +237,7 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
-  MASTER_DIR,
-  VENDOR_DIRS,
+  VENDOR_SETS,
   BANNER_PREFIX,
   banner,
   listMasterFiles,

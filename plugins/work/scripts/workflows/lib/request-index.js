@@ -4,7 +4,7 @@
  * Manages `.request-index.json` per ticket directory with collision-safe increments.
  * Format: `{ "userSeq": n, "aiSeq": m, "version": 1 }`
  *
- * Uses the atomic rename pattern (write temp → rename) from session-guard.js.
+ * Uses the vendored safeIO writeJsonAtomic (write temp → rename) for atomic writes.
  *
  * Requirements:
  *   R9:  Out-of-flow user routing — `user-request-${n}`
@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { USER_REQUEST_PREFIX, AI_REQUEST_PREFIX } = require('./allocate-output-folder');
+const { writeJsonAtomic } = require('./safeIO');
 const {
   validateTicketId,
   sanitizeTicketId,
@@ -86,32 +87,6 @@ function readIndex(ticketId) {
 }
 
 /**
- * Write index atomically: write to temp file, then rename.
- * Pattern borrowed from session-guard.js writeSessionAtomic.
- * @param {string} ticketId
- * @param {RequestIndex} data
- */
-function writeIndexAtomic(ticketId, data) {
-  const target = indexPath(ticketId);
-  const dir = path.dirname(target);
-  fs.mkdirSync(dir, { recursive: true });
-
-  const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o644 });
-  try {
-    // rename(2) is atomic on POSIX — overwrites target atomically.
-    fs.renameSync(tmp, target);
-  } catch (renameErr) {
-    try {
-      fs.unlinkSync(tmp);
-    } catch {
-      /* cleanup best-effort */
-    }
-    throw renameErr;
-  }
-}
-
-/**
  * Acquire a simple lock file for the read-modify-write cycle.
  * Uses O_EXCL (wx) for atomic create — fails if lock already exists.
  * Retries a few times with brief delay to handle contention.
@@ -122,36 +97,53 @@ function acquireLock(lockPath) {
   const MAX_RETRIES = 5;
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   for (let i = 0; i < MAX_RETRIES; i++) {
+    let fd = -1;
     try {
-      const fd = fs.openSync(lockPath, 'wx');
-      fs.writeSync(fd, String(process.pid));
-      fs.closeSync(fd);
-      return true;
+      fd = fs.openSync(lockPath, 'wx');
     } catch (err) {
       if (err && err.code === 'EEXIST') {
-        // Check if lock is stale (older than 30s)
-        try {
-          const stat = fs.statSync(lockPath);
-          if (Date.now() - stat.mtimeMs > 30000) {
-            fs.unlinkSync(lockPath);
-            continue; // retry after removing stale lock
-          }
-        } catch {
-          /* lock disappeared — retry */
-        }
-        // Yield briefly before retry — fs.accessSync is a no-op syscall
-        // that yields to the event loop without busy-spinning or sleeping.
-        try {
-          fs.accessSync(lockPath);
-        } catch {
-          /* lock may have been released */
-        }
-        continue; // retry after brief yield
+        // Retry immediately after evicting a stale lock; otherwise yield first.
+        if (!removeStaleLock(lockPath)) yieldOnLock(lockPath);
+        continue;
       }
       throw err;
     }
+    fs.writeSync(fd, String(process.pid));
+    fs.closeSync(fd);
+    return true;
   }
   return false;
+}
+
+/**
+ * Evict a lock file older than 30s.
+ * @param {string} lockPath
+ * @returns {boolean} true if a stale lock was removed
+ */
+function removeStaleLock(lockPath) {
+  try {
+    const stat = fs.statSync(lockPath);
+    if (Date.now() - stat.mtimeMs > 30000) {
+      fs.unlinkSync(lockPath);
+      return true;
+    }
+  } catch {
+    /* lock disappeared or eviction raced — fall through to yield */
+  }
+  return false;
+}
+
+/**
+ * Yield briefly before retry — fs.accessSync is a no-op syscall
+ * that yields to the event loop without busy-spinning or sleeping.
+ * @param {string} lockPath
+ */
+function yieldOnLock(lockPath) {
+  try {
+    fs.accessSync(lockPath);
+  } catch {
+    /* lock may have been released */
+  }
 }
 
 /**
@@ -176,12 +168,15 @@ function releaseLock(lockPath) {
  */
 
 /**
- * Allocate the next user-request folder, incrementing the counter atomically.
+ * Allocate the next request folder for the given sequence field, incrementing
+ * the counter atomically under the index lock.
  *
  * @param {string} ticketId
+ * @param {'userSeq'|'aiSeq'} seqField
+ * @param {string} prefix - Directory segment prefix (e.g. "user-request-")
  * @returns {AllocationResult}
  */
-function nextUserRequest(ticketId) {
+function allocateNext(ticketId, seqField, prefix) {
   validateTicketId(ticketId);
   const lockPath = indexPath(ticketId) + '.lock';
   if (!acquireLock(lockPath)) {
@@ -189,10 +184,9 @@ function nextUserRequest(ticketId) {
   }
   try {
     const current = readIndex(ticketId);
-    const nextSeq = current.userSeq + 1;
-    const updated = { ...current, userSeq: nextSeq };
-    writeIndexAtomic(ticketId, updated);
-    const segment = `${USER_REQUEST_PREFIX}${nextSeq}`;
+    const nextSeq = current[seqField] + 1;
+    writeJsonAtomic(indexPath(ticketId), { ...current, [seqField]: nextSeq }, { mode: 0o644 });
+    const segment = `${prefix}${nextSeq}`;
     const root = path.join(ticketDir(ticketId), segment);
     fs.mkdirSync(root, { recursive: true });
     return { seq: nextSeq, segment, root };
@@ -202,31 +196,23 @@ function nextUserRequest(ticketId) {
 }
 
 /**
+ * Allocate the next user-request folder, incrementing the counter atomically.
+ *
+ * @param {string} ticketId
+ * @returns {AllocationResult}
+ */
+function nextUserRequest(ticketId) {
+  return allocateNext(ticketId, 'userSeq', USER_REQUEST_PREFIX);
+}
+
+/**
  * Allocate the next ai-request folder, incrementing the counter atomically.
  *
  * @param {string} ticketId
  * @returns {AllocationResult}
  */
 function nextAiRequest(ticketId) {
-  validateTicketId(ticketId);
-  const lockPath = indexPath(ticketId) + '.lock';
-  if (!acquireLock(lockPath)) {
-    throw new Error(`Failed to acquire index lock for ${ticketId} — concurrent contention`);
-  }
-  try {
-    const current = readIndex(ticketId);
-    const nextSeq = current.aiSeq + 1;
-    const updated = { ...current, aiSeq: nextSeq };
-    writeIndexAtomic(ticketId, updated);
-
-    const segment = `${AI_REQUEST_PREFIX}${nextSeq}`;
-    const root = path.join(ticketDir(ticketId), segment);
-    fs.mkdirSync(root, { recursive: true });
-
-    return { seq: nextSeq, segment, root };
-  } finally {
-    releaseLock(lockPath);
-  }
+  return allocateNext(ticketId, 'aiSeq', AI_REQUEST_PREFIX);
 }
 
 module.exports = {
