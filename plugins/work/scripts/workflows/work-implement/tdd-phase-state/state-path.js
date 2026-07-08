@@ -5,13 +5,16 @@
  *
  * Ticket-ID sanitization, state-file path resolution, and state read/write
  * extracted from tdd-phase-state.js (GH-610 static-quality refactor).
- * Behavior — including thrown error messages, traversal rejection, atomic
- * write semantics, and the workspace-marker requirement — is unchanged.
+ * Behavior — including thrown error messages, traversal rejection, and the
+ * workspace-marker requirement — is unchanged. The atomic write is delegated
+ * to the vendored safeIO writer (GH-686): direct rename on POSIX replaces the
+ * old pre-unlink, so that failure mode simply no longer exists.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { resolveTasksBaseWithFallback } = require('../../lib/ticket-validation');
+const { writeJsonAtomic } = require('../../lib/safeIO');
 
 function sanitizeId(ticketId) {
   try {
@@ -162,23 +165,15 @@ function readState(ticketId, opts) {
 }
 
 /**
- * Atomic JSON write at an explicit path: tmp file + rename so readers never
- * observe a torn/empty state file. Shared by `writeState` (recorder path,
- * TASKS_BASE-resolved) and the gate-writer (W11 — the implement gate resolves
- * its own evidence path from ctx.tasksDir and must use the SAME atomic
- * semantics instead of a raw writeFileSync).
+ * Atomic JSON write at an explicit path, delegated to the vendored safeIO
+ * writer (tmp file + direct rename) so readers never observe a torn/empty
+ * state file. Shared by `writeState` (recorder path, TASKS_BASE-resolved)
+ * and the gate-writer (W11 — the implement gate resolves its own evidence
+ * path from ctx.tasksDir and must use the SAME atomic semantics instead of
+ * a raw writeFileSync).
  */
 function writeStateAtomic(statePath, state) {
-  const dir = path.dirname(statePath);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
-  try {
-    fs.unlinkSync(statePath);
-  } catch (e) {
-    if (e && e.code !== 'ENOENT') throw e;
-  }
-  fs.renameSync(tmpPath, statePath);
+  writeJsonAtomic(statePath, state, { mode: 0o666 });
 }
 
 function writeState(ticketId, state, opts) {

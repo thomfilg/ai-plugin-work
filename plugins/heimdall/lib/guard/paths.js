@@ -31,6 +31,17 @@ function isTempPath(filePath) {
   return false;
 }
 
+/**
+ * Free-text scanner over an arbitrary command string: globally replaces EVERY
+ * `~` / `$HOME` / `${HOME}` occurrence, anywhere in the text (even mid-word),
+ * so protected-entry matching sees home-relative references no matter where
+ * they appear in a command. Deliberately NOT converged on the vendored
+ * pathSafe.expandHome (GH-686/GH-582): that helper is anchored (start-of-string
+ * only), and anchoring here would weaken the guard — mid-string references
+ * like `cat $HOME/.claude/settings.json` would stop matching protected
+ * entries. Single-path callers should use pathSafe.expandHome; this stays
+ * intentionally lossy because it feeds substring matching, not path resolution.
+ */
 function expandHomePaths(text) {
   return text
     .replace(/~/g, os.homedir())

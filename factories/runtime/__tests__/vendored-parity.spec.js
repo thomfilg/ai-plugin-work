@@ -109,13 +109,19 @@ describe('VENDOR_SETS table shape', () => {
     'factories/storeDiscovery': [
       'plugins/synapsys/lib/storeDiscovery',
       'plugins/heimdall/lib/storeDiscovery',
+      'plugins/maestro/lib/storeDiscovery',
     ],
     'factories/safeIO': ['plugins/work/scripts/workflows/lib/safeIO'],
     'factories/hookEntrypoint': [
       'plugins/synapsys/lib/hookEntrypoint',
       'plugins/work/scripts/workflows/lib/hookEntrypoint',
+      'plugins/heimdall/lib/hookEntrypoint',
     ],
-    'factories/safeSubprocess': ['plugins/work/scripts/workflows/lib/safeSubprocess'],
+    'factories/safeSubprocess': [
+      'plugins/work/scripts/workflows/lib/safeSubprocess',
+      'plugins/synapsys/lib/safeSubprocess',
+      'plugins/heimdall/lib/safeSubprocess',
+    ],
     'factories/pathSafe': ['plugins/heimdall/lib/pathSafe'],
   };
 

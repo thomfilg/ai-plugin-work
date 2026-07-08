@@ -7,7 +7,6 @@
  * when /work is invoked, injecting the plan into the context.
  */
 
-const fs = require('fs');
 const path = require('path');
 // Resolve paths via the canonical scripts/workflows/... layout. The plugin root
 // historically also exposed `workflows -> scripts/workflows` as a committed
@@ -15,6 +14,9 @@ const path = require('path');
 // MODULE_NOT_FOUND (loader:1459) if the symlink is ever missing (clean clone
 // without symlinks, copy to a filesystem that strips them, refactor that
 // removes it). Use the real path so the hook never depends on the symlink.
+const { runHook } = require(
+  path.join(__dirname, '..', 'scripts', 'workflows', 'lib', 'hookEntrypoint')
+);
 const { appendAction } = require(
   path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'work-actions')
 );
@@ -53,17 +55,6 @@ const ORCHESTRATOR_PATH = path.join(
 // shell tokenization behavior.
 function tokenizeArgs(rawArgs) {
   return rawArgs.split(/\s+/).filter((token) => token.length > 0);
-}
-
-// Parse the UserPromptSubmit payload from stdin. Codex never sets
-// CLAUDE_USER_PROMPT, so payload.prompt is the only prompt source there;
-// on claude the env leg stays first (byte-identity).
-function readStdinPayload() {
-  try {
-    return JSON.parse(fs.readFileSync(0, 'utf8'));
-  } catch {
-    return {};
-  }
 }
 
 // Bridge runtime identity to the orchestrator child (and any libs reading
@@ -172,8 +163,10 @@ async function resolveBanner() {
   }
 }
 
-async function main() {
-  const payload = readStdinPayload();
+// The payload is read/parsed by runHook (hookEntrypoint). Codex never sets
+// CLAUDE_USER_PROMPT, so payload.prompt is the only prompt source there;
+// on claude the env leg stays first (byte-identity).
+async function main(payload) {
   const payloadPrompt = typeof payload.prompt === 'string' ? payload.prompt : '';
   const userPrompt = process.env.CLAUDE_USER_PROMPT || payloadPrompt;
 
@@ -289,8 +282,9 @@ function formatPlan(plan) {
   return lines.join('\n');
 }
 
-// Fail-open: a rejected main() must never crash the hook (exit non-zero).
-main().catch((err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+// Canonical entry protocol (stdin read, payload parse, fail-open error
+// handling: unexpected errors — including a rejected async main() — are
+// logged via logHookError and exit 0). The handler's own
+// console.log-then-exit(0) failure paths in fetchPlan are untouched —
+// runHook never intercepts stdout or an explicit process.exit.
+runHook(main, { file: __filename });

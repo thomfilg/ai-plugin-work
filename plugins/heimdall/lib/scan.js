@@ -6,22 +6,22 @@
  *
  * Walks the default catalog and keeps only targets that actually EXIST:
  *   - 'repo' targets are resolved against the repo root and must exist there.
- *   - 'home' targets are resolved against the home dir and are suggested only
- *     for a `global` install (a home path is not "in the repository").
+ *   - 'home' targets get anchored ~ / $HOME / ${HOME} expansion via the
+ *     vendored pathSafe ('~user' stays untouched → dropped by existsSync).
  * Targets already covered by an existing lock in the active store(s) are
  * dropped, so re-running install never re-suggests what's already protected.
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { CATALOG } = require('./catalog');
 const { getRepoRoot, discoverStores, readConfig } = require('./lock-store');
 const { buildEntries } = require('./guard');
+const { expandHome } = require('./pathSafe');
 
 function resolveTarget(target, repoRoot) {
   if (target.anchor === 'home') {
-    return path.join(os.homedir(), target.path.replace(/^~\/?/, ''));
+    return expandHome(target.path);
   }
   return path.resolve(repoRoot, target.path);
 }

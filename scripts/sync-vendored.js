@@ -47,7 +47,11 @@ const VENDOR_SETS = [
   },
   {
     master: 'factories/storeDiscovery',
-    vendorDirs: ['plugins/synapsys/lib/storeDiscovery', 'plugins/heimdall/lib/storeDiscovery'],
+    vendorDirs: [
+      'plugins/synapsys/lib/storeDiscovery',
+      'plugins/heimdall/lib/storeDiscovery',
+      'plugins/maestro/lib/storeDiscovery',
+    ],
   },
   {
     master: 'factories/safeIO',
@@ -58,11 +62,16 @@ const VENDOR_SETS = [
     vendorDirs: [
       'plugins/synapsys/lib/hookEntrypoint',
       'plugins/work/scripts/workflows/lib/hookEntrypoint',
+      'plugins/heimdall/lib/hookEntrypoint',
     ],
   },
   {
     master: 'factories/safeSubprocess',
-    vendorDirs: ['plugins/work/scripts/workflows/lib/safeSubprocess'],
+    vendorDirs: [
+      'plugins/work/scripts/workflows/lib/safeSubprocess',
+      'plugins/synapsys/lib/safeSubprocess',
+      'plugins/heimdall/lib/safeSubprocess',
+    ],
   },
   {
     master: 'factories/pathSafe',

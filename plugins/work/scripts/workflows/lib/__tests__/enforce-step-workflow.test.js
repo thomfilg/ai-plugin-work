@@ -1041,7 +1041,9 @@ describe('enforce-step-workflow', () => {
       assert.equal(evidence['check']?.tool, 'Skill');
 
       const files = fs.readdirSync(TASKS_DIR);
-      const tmpFiles = files.filter((f) => f.includes('.tmp.'));
+      // Covers both tmp namings: the legacy `<target>.tmp.<pid>` and the
+      // vendored safeIO `<target>.<pid>.tmp` the writer now uses.
+      const tmpFiles = files.filter((f) => f.endsWith('.tmp') || f.includes('.tmp.'));
       assert.equal(tmpFiles.length, 0, 'No temp files should remain');
     });
   });
