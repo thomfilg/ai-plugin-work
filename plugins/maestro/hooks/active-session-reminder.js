@@ -137,6 +137,17 @@ function saveShownMarker(markerPath, shown) {
   }
 }
 
+/**
+ * Render one pending-alert line: full instruction body on first surface this
+ * session, a compressed `[REPEAT n]` one-liner on every subsequent surface.
+ */
+function renderPendingLine(a, seen) {
+  const id = a.session || a.ticket;
+  const instr = String(a.instruction || '');
+  if (seen === 0) return `    ⚑ ${id} ${a.kind}: ${instr.slice(0, SHOWN_FULL)}`;
+  return `    ⚑ [REPEAT ${seen}] ${id} ${a.kind}: ${instr.slice(0, SHOWN_HEAD)}`;
+}
+
 function pendingDecisionLines() {
   const raw = readAlertTail();
   if (!raw) return [];
@@ -156,17 +167,9 @@ function pendingDecisionLines() {
 
   const out = ['  PENDING DECISIONS (recent actionable alerts — handle or they re-fire):'];
   for (const a of latest.values()) {
-    const id = a.session || a.ticket;
     const fp = alertFingerprint(a);
     const seen = Number(shown[fp]) || 0;
-    if (seen === 0) {
-      // First surface this session: full instruction body.
-      out.push(`    ⚑ ${id} ${a.kind}: ${String(a.instruction || '').slice(0, SHOWN_FULL)}`);
-    } else {
-      // Already surfaced: compress to a one-liner but keep re-firing.
-      const head = String(a.instruction || '').slice(0, SHOWN_HEAD);
-      out.push(`    ⚑ [REPEAT ${seen}] ${id} ${a.kind}: ${head}`);
-    }
+    out.push(renderPendingLine(a, seen));
     next[fp] = seen + 1;
   }
   saveShownMarker(markerPath, next);
