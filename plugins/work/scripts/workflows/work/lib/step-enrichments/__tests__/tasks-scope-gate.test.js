@@ -30,7 +30,7 @@ const validTaskBody = (num, includeInScope = true, includeOutScope = true) => {
     `## Task ${num} — Sample task`,
     '',
     '### Type',
-    'implementation',
+    'tdd-code',
     '',
     '### Description',
     'A task.',
@@ -54,6 +54,17 @@ const validTaskBody = (num, includeInScope = true, includeOutScope = true) => {
   return lines.join('\n');
 };
 
+// Parser-shaped trailing table required by the coverage-table deadlock guard
+// (ECHO-5139 family). Appended to fixtures that must PASS the gate.
+const coverageTail = [
+  '## Requirement Coverage',
+  '',
+  '| ID | Description | Status | Evidence |',
+  '|---|---|---|---|',
+  '| R1 | sample requirement | Covered | tasks.md:Task 1 |',
+  '',
+].join('\n');
+
 let tmp;
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tsg-'));
@@ -70,7 +81,7 @@ const ctx = () => ({ tasksDir: tmp, ticket: 'GH-1', workDir: tmp, path, fs });
 
 describe('tasks-scope-gate', () => {
   it('passes when every task has both scope sections', () => {
-    writeTasks([validTaskBody(1), validTaskBody(2)].join('\n'));
+    writeTasks([validTaskBody(1), validTaskBody(2), coverageTail].join('\n'));
     const reg = makeRegistry();
     registerEnrichment(reg.register);
     const entry = { step: 'tasks_gate' };
@@ -95,11 +106,15 @@ describe('tasks-scope-gate', () => {
     const body = [
       '## Task 1 — Sample',
       '',
+      '### Type',
+      'tdd-code',
+      '',
       '### Files in scope',
       '- a.ts',
       '',
       '### Files explicitly out of scope',
       '',
+      coverageTail,
     ].join('\n');
     writeTasks(body);
     const reg = makeRegistry();
@@ -136,5 +151,50 @@ describe('tasks-scope-gate', () => {
     assert.ok(entry._overrideInstruction);
     assert.match(entry._overrideInstruction.details, /Task 1/);
     assert.match(entry._overrideInstruction.details, /Task 2/);
+  });
+
+  // ── `## Requirement Coverage` deadlock guard (ECHO-5139 family) ──
+
+  it('blocks when tasks.md has no `## Requirement Coverage` table', () => {
+    writeTasks([validTaskBody(1), validTaskBody(2)].join('\n'));
+    const reg = makeRegistry();
+    registerEnrichment(reg.register);
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
+    assert.ok(entry._overrideInstruction, 'missing coverage table must block the gate');
+    assert.equal(entry._overrideInstruction.action, 'blocked');
+    assert.match(entry._overrideInstruction.reason, /Requirement Coverage/);
+    assert.match(entry._overrideInstruction.details, /ID \| Description \| Status \| Evidence/);
+  });
+
+  it('blocks when the coverage table has the wrong column shape (ECHO-5821)', () => {
+    writeTasks(
+      [
+        validTaskBody(1),
+        '## Requirement Coverage',
+        '',
+        '| Requirement | Source | Covered by Task(s) |',
+        '|---|---|---|',
+        '| R1 | brief | Task 1 |',
+        '',
+      ].join('\n')
+    );
+    const reg = makeRegistry();
+    registerEnrichment(reg.register);
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
+    assert.ok(entry._overrideInstruction, 'wrong table shape must block the gate');
+    assert.match(entry._overrideInstruction.details, /positionally/i);
+  });
+
+  it('scope-envelope blocker wins over the coverage-table blocker', () => {
+    // Task missing scope sections AND no coverage table → Gate C message first
+    writeTasks(validTaskBody(1, false, true));
+    const reg = makeRegistry();
+    registerEnrichment(reg.register);
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
+    assert.ok(entry._overrideInstruction);
+    assert.match(entry._overrideInstruction.reason, /scope envelope/);
   });
 });

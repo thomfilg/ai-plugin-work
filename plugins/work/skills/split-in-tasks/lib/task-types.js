@@ -273,6 +273,44 @@ function scopeEntryAdmitsOnlyTestFiles(entry) {
   return new RegExp(TEST_FILE_PATTERN).test(basename);
 }
 
+/**
+ * scopeEntryCanMatchTestFiles — true iff a `### Files in scope` entry COULD
+ * match (or allow creating) a test file. Broader than
+ * `scopeEntryAdmitsOnlyTestFiles`: a directory or wide glob admits test
+ * files alongside sources. Used by the gherkin_link tasks-phase to verify
+ * that a task carrying `@task:N` scenarios has a scope under which the RED
+ * gate's test-file discovery (`findTestFilesInScope`) can ever succeed.
+ *
+ * Rules:
+ *   - Test-only entry (literal or glob)                       → true.
+ *   - Glob entry: translate the basename glob to a regex and probe it with
+ *     test filenames (`x.test.js` etc.). `src/**` / `src/*` admit tests;
+ *     `docs/*.md` does not.
+ *   - Literal entry with no extension in its basename → treated as a
+ *     directory prefix → admits tests (fail-open: a false "true" cannot
+ *     wedge anything, it only skips a planner-time warning).
+ *   - Literal non-test file (`src/a.js`, `README.md`)         → false.
+ *
+ * @param {string} entry
+ * @returns {boolean}
+ */
+function scopeEntryCanMatchTestFiles(entry) {
+  if (typeof entry !== 'string' || !entry) return false;
+  if (scopeEntryAdmitsOnlyTestFiles(entry)) return true;
+  const lastSlash = entry.lastIndexOf('/');
+  const basename = lastSlash >= 0 ? entry.slice(lastSlash + 1) : entry;
+  if (!entry.includes('*')) {
+    return !basename.includes('.'); // extension-less literal → directory prefix
+  }
+  if (basename === '*' || basename === '**') return true;
+  const escaped = basename
+    .split('*')
+    .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  const re = new RegExp(`^${escaped}$`);
+  return ['x.test.js', 'x.spec.ts', 'x.test.tsx', 'x.spec.jsx'].some((p) => re.test(p));
+}
+
 module.exports = {
   TASK_TYPES,
   TDD_REQUIRED_TYPES,
@@ -288,4 +326,5 @@ module.exports = {
   matchesTypeScope,
   isTestFilePath,
   scopeEntryAdmitsOnlyTestFiles,
+  scopeEntryCanMatchTestFiles,
 };

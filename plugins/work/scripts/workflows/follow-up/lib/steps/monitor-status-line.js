@@ -9,31 +9,47 @@
 
 'use strict';
 
+const { formatDurationMs } = require('../../../lib/statusline/duration');
+
+// GH-670: one line for demoted body-only COMMENTED reviews from
+// non-allowlisted reviewers. Deliberately does NOT start with "Reviews:" so
+// triage's /Reviews:.*BLOCKING/ signal can never match it.
+function noticesLine(reviews) {
+  const n = reviews && reviews.notices ? reviews.notices.length : 0;
+  if (n === 0) return '';
+  return `Notices: ${n} notice(s) — comment-only review(s) from non-allowlisted reviewer(s); cannot block merge, no action required`;
+}
+
+// One-line reviews summary for the fallback report (formatReport threw).
+function reviewsSummaryLine(reviews) {
+  if (reviews.hasBlocking) return `Reviews: ${reviews.blocking.length} BLOCKING`;
+  if (reviews.pendingBots && reviews.pendingBots.length > 0) return 'Reviews: Awaiting bot reviews';
+  return 'Reviews: CLEAR';
+}
+
+// Minimal report used when formatReport throws.
+function fallbackReport(prInfo, ci, reviews, notices) {
+  const lines = [`PR: #${prInfo.number} — ${prInfo.title || ''}`, `CI: ${ci.status || 'unknown'}`];
+  lines.push(reviewsSummaryLine(reviews));
+  if (notices) lines.push(notices);
+  return lines.join('\n');
+}
+
 function buildOutput(state, prInfo, ci, reviews, formatReport) {
   const attempt = state.attempt || 1;
   const maxAttempts = state.maxAttempts || 40;
+  const notices = noticesLine(reviews);
   try {
-    return formatReport(prInfo, ci, reviews, attempt, maxAttempts, {});
+    const report = formatReport(prInfo, ci, reviews, attempt, maxAttempts, {});
+    return notices ? `${report}\n${notices}` : report;
   } catch {
-    const lines = [
-      `PR: #${prInfo.number} — ${prInfo.title || ''}`,
-      `CI: ${ci.status || 'unknown'}`,
-    ];
-    if (reviews.hasBlocking) lines.push(`Reviews: ${reviews.blocking.length} BLOCKING`);
-    else if (reviews.pendingBots && reviews.pendingBots.length > 0)
-      lines.push('Reviews: Awaiting bot reviews');
-    else lines.push('Reviews: CLEAR');
-    return lines.join('\n');
+    return fallbackReport(prInfo, ci, reviews, notices);
   }
 }
 
 function formatElapsed(monitorStartTime) {
   if (!monitorStartTime) return '';
-  const ms = Date.now() - new Date(monitorStartTime).getTime();
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  return formatDurationMs(Date.now() - new Date(monitorStartTime).getTime());
 }
 
 function pushCount(parts, emoji, list) {
@@ -48,6 +64,8 @@ function ciCountParts(ci, reviews) {
   pushCount(parts, '⊘', ci.cancelled);
   pushCount(parts, '🤖', reviews.pendingBots);
   if (reviews.hasBlocking) parts.push(`💬 ${reviews.blocking.length}`);
+  // GH-670: non-blocking notices (demoted COMMENTED reviews) — separate count.
+  pushCount(parts, '🔔', reviews.notices);
   return parts;
 }
 
@@ -66,17 +84,26 @@ function ciDetail(ci) {
   return '';
 }
 
+// Compose the one-line summary from structured parts + a (re)computed
+// elapsed string. Shared by the monitor step (persist time) and the status
+// bar renderer (refresh time) so the timer ticks live instead of freezing at
+// whatever the last monitor cycle stringified.
+function composeStatusLine(parts, elapsed) {
+  return [parts.statusLabel, parts.poll, elapsed, parts.counts].filter(Boolean).join(' · ');
+}
+
 function buildStatusLine(state, ci, reviews) {
   const attempt = state.attempt || 1;
   const maxAttempts = state.maxAttempts || 40;
-  const parts = ciCountParts(ci, reviews);
-  const statusLabel = ciStatusLabel(ci.status);
+  const countParts = ciCountParts(ci, reviews);
   const detail = ciDetail(ci);
-  const elapsed = formatElapsed(state._monitorStartTime);
-  const counts = parts.length > 0 ? parts.join(' ╎ ') : '';
-  const poll = `${attempt}/${maxAttempts}`;
-  const line1 = [statusLabel, poll, elapsed, counts].filter(Boolean).join(' · ');
-  return { line1, detail };
+  const parts = {
+    statusLabel: ciStatusLabel(ci.status),
+    poll: `${attempt}/${maxAttempts}`,
+    counts: countParts.length > 0 ? countParts.join(' ╎ ') : '',
+  };
+  const line1 = composeStatusLine(parts, formatElapsed(state._monitorStartTime));
+  return { line1, detail, parts };
 }
 
-module.exports = { buildOutput, buildStatusLine };
+module.exports = { buildOutput, buildStatusLine, composeStatusLine, formatElapsed };

@@ -36,7 +36,7 @@ test.describe('readReuseAudit(specDir)', () => {
           '## Other',
           'unrelated',
           '',
-        ].join('\n'),
+        ].join('\n')
       );
       assert.equal(typeof shared.readReuseAudit, 'function', 'readReuseAudit must be exported');
       const result = shared.readReuseAudit(dir);
@@ -62,6 +62,69 @@ test.describe('readReuseAudit(specDir)', () => {
     }
   });
 
+  test('parses the path-before-verb ordering: `Symbol` from `path` MUST be reused', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `readReuseAudit` from `lib/kind-checks/shared.js` MUST be reused — parser entry point',
+          '- `dispatcherShape` from `lib/dispatcher-helpers.js` may be reused — mirrored, not imported',
+          '',
+          '## Other',
+          'unrelated',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.ok(Array.isArray(result), 'expected an array');
+      assert.equal(result.length, 2);
+      assert.equal(result[0].symbol, 'readReuseAudit');
+      assert.equal(result[0].mustReuse, true);
+      assert.equal(result[1].symbol, 'dispatcherShape');
+      assert.equal(result[1].mustReuse, false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('canonical and path-before-verb orderings parse identically, MUST/may case-insensitive', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `AlphaHelper` must be reused from `src/alpha.js` — lowercase must, canonical order',
+          '- `BetaHelper` from `src/beta.js` must be reused — lowercase must, path first',
+          '- `GammaPattern` MAY be reused from `src/gamma.js` — uppercase may, canonical order',
+          '- `DeltaPattern` from `src/delta.js` MAY be reused — uppercase may, path first',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 4);
+      assert.deepEqual(
+        result.map((e) => [e.symbol, e.mustReuse]),
+        [
+          ['AlphaHelper', true],
+          ['BetaHelper', true],
+          ['GammaPattern', false],
+          ['DeltaPattern', false],
+        ]
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('throws when the Reuse Audit section exists but is empty/unparseable', () => {
     const dir = mkTmp();
     try {
@@ -75,7 +138,7 @@ test.describe('readReuseAudit(specDir)', () => {
 });
 
 test.describe('readSuggestedScopeFiles(tasksDir)', () => {
-  test('returns union of files listed under `### Suggested Scope` blocks', () => {
+  test('legacy `### Suggested Scope` blocks are ignored (heading removed)', () => {
     const dir = mkTmp();
     try {
       writeTasks(
@@ -94,16 +157,15 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
           '### Suggested Scope',
           '- `path/to/c.js`',
           '',
-        ].join('\n'),
+        ].join('\n')
       );
       assert.equal(
         typeof shared.readSuggestedScopeFiles,
         'function',
-        'readSuggestedScopeFiles must be exported',
+        'readSuggestedScopeFiles must be exported'
       );
       const result = shared.readSuggestedScopeFiles(dir);
-      assert.ok(Array.isArray(result));
-      assert.deepEqual(result.sort(), ['path/to/a.js', 'path/to/b.js', 'path/to/c.js'].sort());
+      assert.equal(result, null, 'legacy-only tasks.md declares no recognized scope');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -125,17 +187,20 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
           '### Files in scope',
           '- `new/path.js`',
           '',
-        ].join('\n'),
+        ].join('\n')
       );
       assert.equal(
         typeof shared.readSuggestedScopeFiles,
         'function',
-        'readSuggestedScopeFiles must be exported',
+        'readSuggestedScopeFiles must be exported'
       );
       const result = shared.readSuggestedScopeFiles(dir);
       assert.ok(Array.isArray(result));
       assert.ok(result.includes('new/path.js'), 'Files in scope should win');
-      assert.ok(!result.includes('legacy/old.js'), 'Suggested Scope should not appear when Files in scope is present');
+      assert.ok(
+        !result.includes('legacy/old.js'),
+        'Suggested Scope should not appear when Files in scope is present'
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -156,7 +221,7 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
           '### Suggested Scope',
           '- `path/to/fallback.js`',
           '',
-        ].join('\n'),
+        ].join('\n')
       );
       const result = shared.readSuggestedScopeFiles(dir);
       assert.ok(Array.isArray(result));
@@ -174,12 +239,12 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
     try {
       writeTasks(
         dir,
-        ['# Tasks', '', '## Task 1 — alpha', '', '### Requirements Covered', '- R1', ''].join('\n'),
+        ['# Tasks', '', '## Task 1 — alpha', '', '### Requirements Covered', '- R1', ''].join('\n')
       );
       assert.equal(
         typeof shared.readSuggestedScopeFiles,
         'function',
-        'readSuggestedScopeFiles must be exported',
+        'readSuggestedScopeFiles must be exported'
       );
       const result = shared.readSuggestedScopeFiles(dir);
       assert.equal(result, null);
@@ -213,5 +278,150 @@ test.describe('readTestReport(tasksDir)', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+test.describe('readBriefRequirements(tasksDir) — MoSCoW headings (ECHO-5530/ECHO-5145)', () => {
+  function writeBrief(dir, content) {
+    fs.writeFileSync(path.join(dir, 'brief.md'), content, 'utf8');
+  }
+
+  test('parses `### Must Have (P0)` numbered items from the brief-writer canonical format', () => {
+    const dir = mkTmp();
+    try {
+      writeBrief(
+        dir,
+        [
+          '# Brief',
+          '',
+          '## Requirements',
+          '',
+          '### Must Have (P0)',
+          '',
+          '1. First must-have thing',
+          '2. Second must-have thing',
+          '',
+          '### Should Have (P1)',
+          '',
+          '1. A should-have thing',
+          '',
+          '### Could Have (P2)',
+          '',
+          '- A could-have thing',
+          '',
+          '## Out of Scope',
+          '- other',
+          '',
+        ].join('\n')
+      );
+      const reqs = shared.readBriefRequirements(dir);
+      const p0 = reqs.filter((r) => r.priority === 'P0');
+      const p1 = reqs.filter((r) => r.priority === 'P1');
+      const p2 = reqs.filter((r) => r.priority === 'P2');
+      assert.equal(p0.length, 2, `expected 2 P0s, got ${JSON.stringify(reqs)}`);
+      assert.equal(p1.length, 1);
+      assert.equal(p2.length, 1);
+      assert.equal(p0[0].text, 'First must-have thing');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('MoSCoW headings without explicit (P0) tags map Must/Should/Could → P0/P1/P2', () => {
+    const dir = mkTmp();
+    try {
+      writeBrief(
+        dir,
+        [
+          '# Brief',
+          '',
+          '### Must-have',
+          '- do the thing',
+          '',
+          '### Should have',
+          '- maybe the thing',
+          '',
+        ].join('\n')
+      );
+      const reqs = shared.readBriefRequirements(dir);
+      assert.deepEqual(
+        reqs.map((r) => r.priority),
+        ['P0', 'P1']
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('legacy `- P0:` bullets still take precedence when present', () => {
+    const dir = mkTmp();
+    try {
+      writeBrief(
+        dir,
+        [
+          '# Brief',
+          '',
+          '## Requirements',
+          '- P0: legacy bullet requirement',
+          '',
+          '### Must Have (P0)',
+          '1. moscow item that must NOT double-count',
+          '',
+        ].join('\n')
+      );
+      const reqs = shared.readBriefRequirements(dir);
+      assert.equal(reqs.length, 1, 'legacy bullets win; MoSCoW is a fallback only');
+      assert.equal(reqs[0].text, 'legacy bullet requirement');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('returns [] when brief has neither bullets nor MoSCoW headings', () => {
+    const dir = mkTmp();
+    try {
+      writeBrief(dir, '# Brief\n\n## Context\n\nfree prose only\n');
+      assert.deepEqual(shared.readBriefRequirements(dir), []);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+test.describe('sliceSubsections(text, headingRe) — GH-408 h3 bounding', () => {
+  const doc = [
+    '## Task 1',
+    '### Files explicitly out of scope',
+    '- `components/**`',
+    '### Deliverables',
+    '- `z.union` in `lib/schema.ts`',
+    '',
+    '## Task 2',
+    '### Files explicitly out of scope',
+    '- `tests/e2e/**`',
+    '',
+  ].join('\n');
+
+  test('bounds each block at the next ### (h3), not only ## (h2)', () => {
+    const blocks = shared.sliceSubsections(doc, /^###\s+Files explicitly out of scope\b/im);
+    assert.equal(blocks.length, 2);
+    assert.ok(blocks[0].includes('components/**'));
+    assert.ok(!blocks[0].includes('z.union'), 'sibling ### Deliverables must not be swallowed');
+  });
+
+  test('returns every matching block, not just the first', () => {
+    const blocks = shared.sliceSubsections(doc, /^###\s+Files explicitly out of scope\b/im);
+    assert.ok(blocks[1].includes('tests/e2e/**'));
+  });
+
+  test('returns [] for empty text or no match', () => {
+    assert.deepEqual(shared.sliceSubsections('', /^###\s+Nope\b/im), []);
+    assert.deepEqual(shared.sliceSubsections(doc, /^###\s+Nope\b/im), []);
+  });
+
+  test('last block runs to end of document', () => {
+    const blocks = shared.sliceSubsections('## T\n### Head\n- `a/b.ts`', /^###\s+Head\b/im);
+    assert.equal(blocks.length, 1);
+    assert.ok(blocks[0].includes('a/b.ts'));
   });
 });

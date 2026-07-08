@@ -257,3 +257,158 @@ test('readMemoryFile top-level behaviorSignals is undefined when field absent', 
   const memories = listMemoriesFromStore(store);
   assert.equal(memories[0].behaviorSignals, undefined);
 });
+
+// --- Top-level comma splitting: regex constructs must not shatter list items ---
+
+test('toList keeps a trigger_pretool regex containing {1,3} as ONE spec', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'quant.md', {
+    name: 'quant',
+    description: 'd',
+    events: 'PreToolUse',
+    trigger_pretool: 'Bash:foo{1,3}bar',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.deepEqual(memories[0].triggerPretool, ['Bash:foo{1,3}bar']);
+});
+
+test('bracket-list trigger_pretool_content with nested {2,4} splits into exactly 2 patterns', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'bracket-quant.md', {
+    name: 'bracket-quant',
+    description: 'd',
+    events: 'PreToolUse',
+    trigger_pretool: 'Edit:',
+    trigger_pretool_content: '[colou?r{2,4}, \\bfoo\\b]',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.deepEqual(memories[0].triggerPretoolContent, ['colou?r{2,4}', '\\bfoo\\b']);
+});
+
+test('plain comma-separated trigger_pretool still splits into 2 specs', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'plain-csv.md', {
+    name: 'plain-csv',
+    description: 'd',
+    events: 'PreToolUse',
+    trigger_pretool: 'Bash:git, Edit:x',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.deepEqual(memories[0].triggerPretool, ['Bash:git', 'Edit:x']);
+});
+
+test('toList does not split on commas inside character classes or groups', () => {
+  const { toList } = require('../memory-store');
+  assert.deepEqual(toList('Bash:x[a,b]y'), ['Bash:x[a,b]y']);
+  assert.deepEqual(toList('Bash:(a,b)c'), ['Bash:(a,b)c']);
+  assert.deepEqual(toList('a\\,b'), ['a\\,b']);
+  // Plain csv identical to the naive split.
+  assert.deepEqual(toList('a, b, c'), ['a', 'b', 'c']);
+});
+
+// --- YAML block-list frontmatter (previously silently dropped) ---
+
+test('parseFrontmatter supports YAML block-list trigger_pretool', () => {
+  const { storeDir } = makeTempStore();
+  const raw = [
+    '---',
+    'name: block-list-mem',
+    'description: d',
+    'events: PreToolUse',
+    'trigger_pretool:',
+    '  - Bash:git\\s+push',
+    '  - Edit:foo',
+    'inject: full',
+    '---',
+    'body',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(storeDir, 'block-list-mem.md'), raw);
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.equal(memories.length, 1);
+  assert.deepEqual(memories[0].triggerPretool, ['Bash:git\\s+push', 'Edit:foo']);
+  assert.deepEqual(memories[0].events, ['PreToolUse']);
+});
+
+test('parseFrontmatter supports YAML block-list events', () => {
+  const { storeDir } = makeTempStore();
+  const raw = [
+    '---',
+    'name: block-events-mem',
+    'description: d',
+    'events:',
+    '',
+    '  - UserPromptSubmit',
+    '  - PreToolUse',
+    'trigger_prompt: \\bdeploy\\b',
+    'trigger_pretool: Bash:git',
+    '---',
+    'body',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(storeDir, 'block-events-mem.md'), raw);
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.equal(memories.length, 1);
+  assert.deepEqual(memories[0].events, ['UserPromptSubmit', 'PreToolUse']);
+  assert.deepEqual(memories[0].triggerPretool, ['Bash:git']);
+});
+
+test('parseFrontmatter block-list items are NOT comma-split (regex commas survive)', () => {
+  const { parseFrontmatter } = require('../memory-store');
+  const raw = [
+    '---',
+    'trigger_pretool_content:',
+    '  - colou?r{2,4}',
+    '  - "\\bfoo\\b"',
+    '---',
+    'body',
+  ].join('\n');
+  const { meta } = parseFrontmatter(raw);
+  assert.deepEqual(meta.trigger_pretool_content, ['colou?r{2,4}', '\\bfoo\\b']);
+});
+
+// --- getProjectName: linked git worktrees must resolve to the MAIN repo name ---
+
+test('getProjectName resolves the main repo name from inside a linked worktree', (t) => {
+  const { execSync } = require('node:child_process');
+  const { getProjectName } = require('../memory-store');
+
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-worktree-name-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+
+  const repo = path.join(base, 'main-repo-name');
+  const worktree = path.join(base, 'main-repo-name-GH-123');
+  const run = (cmd, cwd) =>
+    execSync(cmd, { cwd, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+
+  fs.mkdirSync(repo, { recursive: true });
+  fs.writeFileSync(path.join(repo, 'seed.txt'), 'seed\n');
+  run('git init -q -b main', repo);
+  run('git add seed.txt', repo);
+  run('git -c user.email=t@t -c user.name=t commit -q -m init', repo);
+  run(`git worktree add -q ${JSON.stringify(worktree)} -b gh-123`, repo);
+
+  // From the main checkout the name is unchanged…
+  assert.equal(getProjectName(repo), 'main-repo-name');
+  // …and from inside the linked worktree it must be the MAIN repo name, not
+  // the worktree directory basename (which would create a divergent global store).
+  assert.equal(getProjectName(worktree), 'main-repo-name');
+});
+
+test('getProjectName falls back to basename(cwd) outside any git repo', () => {
+  const { getProjectName } = require('../memory-store');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-no-git-'));
+  const sub = path.join(dir, 'plain-project');
+  fs.mkdirSync(sub, { recursive: true });
+  assert.equal(getProjectName(sub), 'plain-project');
+});

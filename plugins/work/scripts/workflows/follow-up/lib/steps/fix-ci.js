@@ -10,6 +10,7 @@
 const { execFileSync } = require('child_process');
 const { buildChildEnv } = require('../../../work/scripts/gh-exec');
 const { filterLogs } = require('../log-utils');
+const { T, getRuntime } = require('../../../lib/instruction-vocab');
 
 function shellSafe(s) {
   return String(s || '')
@@ -151,7 +152,7 @@ function buildConflictBlocked(state) {
   return {
     type: 'follow_up_instruction',
     action: 'blocked',
-    reason: `Merge conflicts found on PR #${prNum}${baseSuffix} — sync your branch with the target branch before proceeding.${fileSuffix} Then re-run /follow-up ${state.ticketId || ''}.`,
+    reason: `Merge conflicts found on PR #${prNum}${baseSuffix} — resolve them manually:${fileSuffix} (1) sync your branch with the target branch, which exposes the conflicts; (2) resolve the conflicts in the listed files; (3) push the resolution; (4) re-run /follow-up ${state.ticketId || ''}.`,
     state: { ticket: state.ticketId, currentStep: 'fix-ci', attempt: state.attempt || 0 },
   };
 }
@@ -209,7 +210,8 @@ function buildExecuteInstruction(state, prNum, isConflict, monitorOutput, ciLogs
       prompt: isConflict
         ? buildConflictPrompt(prNum, monitorOutput)
         : buildCiFailurePrompt(prNum, ciStatusLine, ciStatusDetail, ciLogs),
-      note: 'Pass the prompt directly to the agent.',
+      // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+      note: T('delegate.task.note.short', {}, getRuntime().name),
     },
   };
 }

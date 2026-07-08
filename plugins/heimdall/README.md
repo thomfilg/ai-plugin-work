@@ -119,6 +119,30 @@ Failure is **fail-open before any store exists** (installing the plugin without
 locks never bricks normal work) and **fail-closed once a store is configured and
 evaluation throws** (a configured guard errs on the side of blocking).
 
+### Runtime write-guard for scripts (Linux)
+
+A Bash command can run a script that builds a write target dynamically
+(`path.join`, a variable, string concat) or in a spawned subprocess — which no
+static text analysis can reliably attribute to a protected path. So when a
+command runs an external script and a protected **directory** is still locked,
+the hook rewrites the command to preload a small interposer
+(`scripts/heimdall-fsguard.c` → `scripts/bin/heimdall-fsguard.linux-<arch>.so`).
+The interposer hooks the libc write entry points and returns `EACCES` for any
+write that resolves under a locked dir — at runtime, regardless of how the path
+was constructed, and inherited into child processes via `LD_PRELOAD`. Writes
+elsewhere (e.g. `/tmp`) and reads pass, so this also clears the old
+false positives (a script that reads a protected path and writes elsewhere, or
+running a test file that merely names a protected path).
+
+The guard is scoped **per command** to the entries still locked this session, so
+speaking an unlock phrase lifts it for that agent only — a uid-level OS boundary
+could not do that. On hosts where the shim can't run (non-Linux, non-glibc,
+statically-linked binaries) the guard falls back to the broad static
+fail-closed check. Set `HEIMDALL_DISABLE_SHIM=1` to force that fallback. A
+prebuilt `linux-x86_64` `.so` is committed; other Linux arches build from source
+at `/heimdall:install` (rebuild manually with
+`bash plugins/heimdall/scripts/build-fsguard.sh`).
+
 ## Conceal & the secrets boundary
 
 Lock blocks stop **writes** and are liftable by an unlock phrase — a guardrail
@@ -164,6 +188,28 @@ drive `/heimdall:harden`.
 
 The OS boundary holds only if the agent uid has **no** sudo and **no**
 docker-socket access — both are root-equivalent and bypass file permissions.
+
+### Codex CLI lane (config.toml, not .mcp.json)
+
+The uid/file-ownership boundary itself is runtime-agnostic — it denies the
+agent uid no matter which CLI is running. What differs on Codex CLI is the MCP
+wiring: codex reads MCP servers from `[mcp_servers.<name>]` in
+`$CODEX_HOME/config.toml` (managed via the `codex mcp` CLI) or a plugin's
+`.mcp.json` — the **project-root `.mcp.json` that `setup-secrets-heimdall.sh`
+rewrites is not read by codex**. The script deliberately does not touch
+`config.toml` (it's user config, and heimdall's own catalog protects it), so
+after `/heimdall:harden` mirror the broker-wrapped launch manually:
+
+```bash
+# same broker command the harden run wrote into .mcp.json
+codex mcp add <server-name> -- /usr/local/lib/mcp-broker/<repo>/mcp-pg-broker <wrapper-args…>
+```
+
+Two codex-specific protection notes (both pre-seeded in the `/heimdall:protect`
+catalog): `~/.codex/config.toml` holds the **hook trust store** — an agent that
+can edit it can self-trust malicious hooks, so keep it phrase-locked; and
+`~/.codex/auth.json` is conceal-grade (hard read-deny via `/heimdall:conceal`,
+not a phrase lock).
 
 ### Recovering from a broken config
 

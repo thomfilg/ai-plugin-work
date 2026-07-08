@@ -91,6 +91,36 @@ test('devops BLOCKS on secret-shaped literal', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// ─── GH-652 regression: checks must FIRE for canonical closed-taxonomy tasks.md ───
+
+test('GH-652: devops check APPLIES via scope-derived kinds and FIRES on secret literal', () => {
+  const { root, tasksDir, worktreeRoot } = makeWorktree({
+    tasks: [
+      '# Tasks',
+      '',
+      '## Task 1',
+      '',
+      '### Type',
+      'ci',
+      '',
+      '### Files in scope',
+      '- `.github/workflows/ci.yml`',
+      '',
+    ].join('\n'),
+    files: { '.github/workflows/ci.yml': 'env:\n  API_KEY: "abcd1234abcd1234"\n' },
+    taskCtx: { ticket: 'ECHO-7777', files: ['.github/workflows/ci.yml'] },
+  });
+  assert.equal(
+    devops.appliesTo({ tasksDir }),
+    true,
+    'devops kind must be derived from scope paths / Type: ci (closed Type enum carries no legacy domain values)'
+  );
+  const r = devops.validate({ tasksDir, worktreeRoot });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /secret/i.test(e)));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('backend warns on `any` introduction', () => {
   const { root, tasksDir, worktreeRoot } = makeWorktree({
     tasks: '<!-- backend -->',

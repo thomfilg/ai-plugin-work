@@ -24,7 +24,6 @@ const fs = require('fs');
 const path = require('path');
 const { fileExists, readFile } = require('./work-helpers');
 const taskParserStrategy = require('./task-parser-strategy');
-const { extractTestCommand } = taskParserStrategy;
 
 function extractTestStrategy(taskBody) {
   return taskParserStrategy.extractTestStrategy(taskBody, extractSectionByHeading);
@@ -52,7 +51,7 @@ function _readClaimOwner(tasksDir, taskNum) {
 }
 
 /**
- * Normalise a single suggestedScope line by stripping leading list markers
+ * Normalise a single scope-section line by stripping leading list markers
  * (`- `, `* `, `+ `) so the reserved-files list is clean regardless of how
  * tasks.md was formatted.
  * @param {string} line
@@ -131,8 +130,8 @@ function extractSectionByHeading(body, heading) {
   // lookahead terminator (`$` matches every line-end under `m`), which
   // would prematurely truncate sections whose final line has no trailing
   // newline. Section body terminates at the next ### / ## heading or EOF.
-  // The `[^\\n]*` after the heading preserves the legacy tolerance for
-  // trailing heading text (e.g. `### Suggested Scope (legacy)`).
+  // The `[^\\n]*` after the heading tolerates trailing heading text
+  // (e.g. `### Files in scope (globs)`).
   const pattern = new RegExp(`(?:^|\\n)${heading}[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`);
   const m = body.match(pattern);
   if (!m) return null;
@@ -185,13 +184,11 @@ function _parseTaskBlock(num, rawBody) {
     dependencies: _extractDependencies(body),
     requirementsCovered: _sectionText(body, '### Requirements Covered'),
     acceptanceCriteria: _sectionText(body, '### Acceptance Criteria'),
-    suggestedScope: _sectionText(body, '### Suggested Scope'),
     filesInScope: _parseScopeList(extractSectionByHeading(body, '### Files in scope')),
     filesOutOfScope: _parseScopeList(
       extractSectionByHeading(body, '### Files explicitly out of scope')
     ),
     crossTaskDeps: _parseScopeList(extractSectionByHeading(body, '### Cross-Task Dependencies')),
-    testCommand: extractTestCommand(body),
     testStrategy: extractTestStrategy(body),
     rawContent: `## Task ${num} ${body}`,
   };
@@ -230,12 +227,8 @@ function _formatPendingLabel(tasksDir, t) {
     : 'pending — do NOT implement yet';
 }
 
-function _scopeReservedLine(suggestedScope) {
-  if (!suggestedScope) return null;
-  const scopeLines = suggestedScope
-    .split('\n')
-    .map((l) => _normalizeScope(l))
-    .filter(Boolean);
+function _scopeReservedLine(filesInScope) {
+  const scopeLines = Array.isArray(filesInScope) ? filesInScope.filter(Boolean) : [];
   return scopeLines.length > 0 ? `  Reserved files: ${scopeLines.join(', ')}` : null;
 }
 
@@ -251,7 +244,7 @@ function _renderPeerTaskLines(t, tasksDir, currentNum, persistedTasks) {
     return lines;
   }
   lines.push(`- Task ${t.num} — ${t.title} [${_formatPendingLabel(tasksDir, t)}]`);
-  const reserved = _scopeReservedLine(t.suggestedScope);
+  const reserved = _scopeReservedLine(t.filesInScope);
   if (reserved) lines.push(reserved);
   return lines;
 }

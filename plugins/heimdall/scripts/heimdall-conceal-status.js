@@ -7,8 +7,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { codexMcpWiring } = require('../lib/codex-mcp');
 
-const startDir = path.resolve(process.argv[2] || process.env.CLAUDE_PROJECT_DIR || process.cwd());
+// First non-flag arg is the repo dir; flags like --reminder are filtered out so
+// `node status.js --reminder` doesn't mistake the flag for a path.
+const posArgs = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const startDir = path.resolve(posArgs[0] || process.env.CLAUDE_PROJECT_DIR || process.cwd());
 
 // Resolve uid/gid → name from /etc/passwd /etc/group (plain file reads). We
 // deliberately avoid spawning `stat`/`id`: passing env/argv-derived paths to a
@@ -109,6 +113,11 @@ function pick(out, key, value) {
 // defined value.
 function mergeOne(out, dir, cfg) {
   for (const f of cfg.secretsFiles || []) out.secretsFiles.push(absUnder(dir, f));
+  // CLI consumers (injectCommands) lock their own secretsFile — count those too,
+  // else an inject-only repo audits as "conceal-only" and hides the real secret.
+  for (const c of cfg.injectCommands || []) {
+    if (c && c.secretsFile) out.secretsFiles.push(absUnder(dir, c.secretsFile));
+  }
   pick(out, 'wrapper', cfg.wrapper && absUnder(dir, cfg.wrapper));
   pick(out, 'mcpJson', cfg.mcpJson && absUnder(dir, cfg.mcpJson));
   pick(out, 'brokerPath', cfg.brokerPath);
@@ -123,7 +132,11 @@ function mergeForAudit(configs) {
   // nearest config. Use that dir so the audit reports the broker path harden
   // installed, even when run from a subdirectory under a guard-only config.
   const sb = configs.find(
-    (c) => (c.cfg.secretsFiles || []).length || c.cfg.wrapper || c.cfg.brokerPath
+    (c) =>
+      (c.cfg.secretsFiles || []).length ||
+      (c.cfg.injectCommands || []).length ||
+      c.cfg.wrapper ||
+      c.cfg.brokerPath
   );
   out.secretsBase = sb ? sb.dir : undefined;
   return out;
@@ -155,6 +168,61 @@ function reportSecretsFiles(secretsFiles) {
   return protectedCount;
 }
 
+// Escalation check (runs AS the agent uid): a file-ownership boundary is void if
+// the agent can become root. The dominant non-interactive path is a ROOTFUL
+// docker socket reachable via the 'docker' group. We detect it WITHOUT spawning
+// docker (CodeQL-safe): agent is in the docker group AND the system socket is
+// accessible. A rootless socket lives under /run/user/<uid>/ and is not flagged.
+// Passwordless sudo can't be probed from here without spawning sudo, so it's
+// left to the installer's gate; we note it.
+function dockerGid() {
+  try {
+    for (const line of fs.readFileSync('/etc/group', 'utf8').split('\n')) {
+      const f = line.split(':');
+      if (f[0] === 'docker' && f.length > 2) return Number(f[2]);
+    }
+  } catch {
+    /* no /etc/group → treat as no docker group */
+  }
+  return null;
+}
+
+function agentDockerBypass() {
+  const gid = dockerGid();
+  if (gid === null) return false;
+  let groups = [];
+  try {
+    groups = process.getgroups();
+  } catch {
+    return false;
+  }
+  if (!groups.includes(gid)) return false;
+  // In the docker group — is the ROOTFUL system socket actually reachable?
+  try {
+    fs.accessSync('/var/run/docker.sock', fs.constants.R_OK | fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function reportEscalation() {
+  const bypass = agentDockerBypass();
+  if (bypass) {
+    console.log(
+      "Escalation:  BYPASSABLE — agent is in the 'docker' group with a reachable rootful socket (root-equivalent)."
+    );
+    console.log(
+      '             Fix: sudo bash setup-rootless-docker.sh <you> + dockerd-rootless-setuptool.sh install + wsl --shutdown.'
+    );
+  } else {
+    console.log(
+      'Escalation:  no docker-group bypass (sudo password requirement checked by the installer).'
+    );
+  }
+  return bypass;
+}
+
 function reportMcpWiring(mcpJson, broker) {
   if (!mcpJson) {
     console.log('.mcp.json:   not configured');
@@ -171,8 +239,74 @@ function reportMcpWiring(mcpJson, broker) {
   }
 }
 
+// Codex wires MCP servers through config.toml [mcp_servers.*] tables (no
+// project .mcp.json lane on codex), so the audit covers that surface too.
+// Silent when no codex install exists, keeping claude-only output unchanged.
+function reportCodexMcpWiring(broker) {
+  const wiring = codexMcpWiring(broker);
+  if (!wiring) return;
+  console.log(
+    `codex mcp:   ${wiring.viaBroker}/${wiring.total} server(s) in ${wiring.cfgPath} route through the broker`
+  );
+}
+
+// Non-printing count of locked (present + agent-denied) secrets files — used by
+// the reminder path, which must compute the verdict without emitting the report.
+function countProtected(secretsFiles) {
+  let n = 0;
+  for (const p of secretsFiles) {
+    if (fs.existsSync(p) && !canAgentRead(p)) n++;
+  }
+  return n;
+}
+
+// Case-specific reminder text (SessionStart hook). null = nothing to nag about.
+// Critically, it names the ACTUAL remaining step: "install not run" vs "installed
+// but docker bypass still open" point at different fixes.
+function buildReminder(total, protectedCount, bypassable) {
+  if (total === 0) return null; // no secrets configured
+  if (protectedCount < total) {
+    return (
+      '⚠️  HEIMDALL: a secret here is NOT PROTECTED — the LLM/agent can read it. ' +
+      'The privileged OS install has not been run.\n' +
+      '   Fix: /heimdall:harden (one sudo). This repeats every session until done.'
+    );
+  }
+  if (bypassable) {
+    return (
+      '⚠️  HEIMDALL: the secret file IS locked, but the rootful-docker bypass is OPEN — ' +
+      'the LLM/agent can still read it via `docker run -v /:/host`.\n' +
+      '   Fix (NOT a re-install): sudo bash setup-rootless-docker.sh <you> + ' +
+      'dockerd-rootless-setuptool.sh install + wsl --shutdown.\n' +
+      '   This repeats every session until docker can no longer reach the secret.'
+    );
+  }
+  return null; // protected, no docker bypass
+}
+
+// SessionStart reminder path: silent unless a configured secret is reachable.
+function runReminder(found) {
+  if (found.state !== 'ok') {
+    process.exitCode = 0;
+    return;
+  }
+  const m = mergeForAudit(found.configs);
+  const total = m.secretsFiles.length;
+  const text = buildReminder(total, countProtected(m.secretsFiles), agentDockerBypass());
+  if (text) {
+    console.log(text);
+    process.exitCode = 2;
+  } else {
+    process.exitCode = 0;
+  }
+}
+
 function main() {
   const found = collectConfigs(startDir);
+  if (process.argv.includes('--reminder')) {
+    runReminder(found);
+    return;
+  }
   if (found.state === 'absent') {
     console.log(`heimdall: no config at or above ${startDir} → guard inactive for this project.`);
     process.exit(0);
@@ -207,19 +341,49 @@ function main() {
   console.log(`Broker conf: ${brokerConf}  [${stat(brokerConf)}]`);
 
   reportMcpWiring(m.mcpJson, broker);
+  reportCodexMcpWiring(broker);
+  const bypassable = reportEscalation();
 
   console.log('');
-  if (m.secretsFiles.length === 0) {
-    // Conceal-only project: hook-level deny patterns with no MCP secrets to lock.
-    // There is nothing for harden to do, so don't suggest it.
+  reportStatus(m.secretsFiles.length, protectedCount, bypassable);
+}
+
+// Final verdict + exit code. Exit codes let the install/harden flow GATE on real
+// protection rather than trusting the user ran the privileged step: 0 = protected
+// (or n/a), 2 = secrets are reachable by the agent/LLM (NOT protected).
+function reportStatus(total, protectedCount, bypassable) {
+  if (total === 0) {
+    // Conceal-only: hook-level deny patterns, no MCP secrets to lock.
     console.log(
       'STATUS: conceal-only — hook-level deny patterns active; no secretsFiles configured, so /heimdall:harden does not apply.'
     );
-  } else if (protectedCount === m.secretsFiles.length) {
-    console.log('STATUS: boundary ACTIVE — agent uid is denied on all (existing) secrets files.');
-  } else {
-    console.log('STATUS: boundary NOT fully active — run /heimdall:harden (sudo setup).');
+    process.exitCode = 0;
+    return;
   }
+  if (protectedCount === total && !bypassable) {
+    console.log(
+      'STATUS: PROTECTED — the agent/LLM is denied on all secrets files, with no rootful-docker escalation path.'
+    );
+    process.exitCode = 0;
+    return;
+  }
+  if (protectedCount === total && bypassable) {
+    console.log(
+      'STATUS: NOT PROTECTED (BYPASSABLE) — the OS install IS done (files locked, broker installed), but the agent/LLM can still become root via the rootful docker socket and read them.'
+    );
+    console.log(
+      '        Close the docker path: sudo bash setup-rootless-docker.sh <you> + dockerd-rootless-setuptool.sh install + wsl --shutdown. (No need to re-run the secrets install.)'
+    );
+    process.exitCode = 2;
+    return;
+  }
+  console.log(
+    'STATUS: NOT PROTECTED — the agent/LLM CAN READ these secrets right now. The privileged OS install has NOT been run,'
+  );
+  console.log(
+    '        so Heimdall is doing NOTHING to block reads. You MUST run /heimdall:harden and authenticate (sudo) for this to work.'
+  );
+  process.exitCode = 2;
 }
 
 main();

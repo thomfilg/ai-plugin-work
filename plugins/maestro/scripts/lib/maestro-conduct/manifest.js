@@ -43,17 +43,26 @@ function writeManifest(file, manifest) {
 }
 
 /**
- * Find the manifest file + task entry for a ticket id. First match across
- * all manifests wins. Returns { file, manifest, task } or null.
+ * Find the manifest file + task entry for a ticket id. When the same ticket
+ * appears in SEVERAL manifests (a re-orchestrated batch next to a stale
+ * 12-day-old one), the manifest with the NEWEST createdAt wins — readdir
+ * order used to pick whichever sorted first, which silently resolved a
+ * ticket to the stale manifest's null stopOracle and disabled the whole
+ * stop-condition pipeline for the live run.
+ * Returns { file, manifest, task } or null.
  */
 function findTask(taskId) {
+  let best = null;
   for (const file of listManifestFiles()) {
     const manifest = readManifest(file);
     if (!manifest || !Array.isArray(manifest.tasks)) continue;
     const task = manifest.tasks.find((t) => t.id === taskId);
-    if (task) return { file, manifest, task };
+    if (!task) continue;
+    const createdAt = Date.parse(manifest.createdAt || '') || 0;
+    if (!best || createdAt > best.createdAt) best = { file, manifest, task, createdAt };
   }
-  return null;
+  if (!best) return null;
+  return { file: best.file, manifest: best.manifest, task: best.task };
 }
 
 /**
@@ -66,6 +75,50 @@ function updateTaskStatus(taskId, status, note) {
   if (!hit) return false;
   hit.task.status = status;
   if (note !== undefined) hit.task.note = note;
+  hit.task.updatedAt = new Date().toISOString();
+  return writeManifest(hit.file, hit.manifest);
+}
+
+/**
+ * incrementTaskAttempts — bump `task.attempts` by 1 (creating the field if
+ * missing) and persist. Returns the new count, or 0 if the task isn't in
+ * any manifest. Used by dead-end rotation to give a ticket multiple tries
+ * before permanently marking it blocked. Attempts persist ACROSS
+ * re-bootstraps by design — only real progress (phase advance) resets them,
+ * so repeated dead-ends genuinely march toward `blocked`.
+ */
+function incrementTaskAttempts(taskId) {
+  const hit = findTask(taskId);
+  if (!hit) return 0;
+  const next = (hit.task.attempts || 0) + 1;
+  hit.task.attempts = next;
+  hit.task.updatedAt = new Date().toISOString();
+  writeManifest(hit.file, hit.manifest);
+  return next;
+}
+
+/**
+ * getTaskAttempts — read-only accessor for a task's cross-lifecycle strike
+ * count. Returns the number (default 0) when the task is found in some
+ * manifest, or null when the task is not registered anywhere. Lets dead-end
+ * rotation display the current strike on the probe path WITHOUT bumping it,
+ * and distinguish "tracked, 0 strikes" from "untracked" (the null bail).
+ */
+function getTaskAttempts(taskId) {
+  const hit = findTask(taskId);
+  if (!hit) return null;
+  return hit.task.attempts || 0;
+}
+
+/**
+ * resetTaskAttempts — zero out `task.attempts` and persist. Called when an
+ * agent makes real progress (phase advance) so a future dead-end is treated
+ * as a fresh first attempt rather than escalating straight to kill+rotate.
+ */
+function resetTaskAttempts(taskId) {
+  const hit = findTask(taskId);
+  if (!hit || !hit.task.attempts) return false;
+  hit.task.attempts = 0;
   hit.task.updatedAt = new Date().toISOString();
   return writeManifest(hit.file, hit.manifest);
 }
@@ -148,9 +201,25 @@ function poolFullForTask(taskId, activeWorkSessions) {
   if (!hit) return false;
   const { manifest: m } = hit;
   if (typeof m.slots !== 'number' || !Array.isArray(m.tasks)) return false;
-  const aliveTickets = aliveTicketSet(activeWorkSessions);
-  const liveInThisManifest = m.tasks.filter((t) => aliveTickets.has(t.id)).length;
-  return liveInThisManifest >= m.slots;
+  // GLOBAL cap: enforce this manifest's `slots` against ALL live `-work`
+  // sessions, not just the ones in the owning manifest. Per-manifest scoping
+  // let stale/sibling manifests bootstrap past the active pool (observed:
+  // 7 active on pool=5) — the machine's agent capacity is shared, so the cap
+  // must be shared too. Two carve-outs keep it fair:
+  //   - sessions of `done` tickets (post-oracle park, operator inspection)
+  //     don't hold a slot against fresh work;
+  //   - unknown tickets (no manifest anywhere) still count — they consume
+  //     real machine capacity.
+  const live = (Array.isArray(activeWorkSessions) ? activeWorkSessions : []).filter((s) =>
+    /-work$/.test(s)
+  );
+  const liveNotDone = live.filter((s) => {
+    const t = (s.match(/(?:^|\/)([A-Z][A-Z0-9]*-\d+)-work$/) || [])[1];
+    if (!t) return true;
+    const owner = findTask(t);
+    return !(owner && owner.task.status === 'done');
+  }).length;
+  return liveNotDone >= m.slots;
 }
 
 /**
@@ -178,14 +247,51 @@ function commandForTask(taskId) {
   return cmd ? String(cmd).replace(/^\//, '') : null;
 }
 
+/**
+ * runtimeForTask — the runtime ('claude' | 'codex') recorded for a ticket in
+ * its owning manifest: task-level `runtime` wins over the pool-level default.
+ * Null when the ticket is untracked or the value is malformed — callers fall
+ * through to the MAESTRO_RUNTIME env / 'claude' default (runtime-profile.js).
+ * Round-trips through syncFromTmux untouched (status/note-only rewrites), so
+ * a mixed claude/codex fleet keeps per-task runtimes across daemon restarts.
+ */
+function runtimeForTask(taskId) {
+  const hit = findTask(taskId);
+  if (!hit) return null;
+  const raw = (hit.task && hit.task.runtime) || (hit.manifest && hit.manifest.runtime) || null;
+  return raw === 'claude' || raw === 'codex' ? raw : null;
+}
+
+/**
+ * launchConfigForTask — one manifest lookup returning everything ctxFor needs
+ * about how the ticket was launched: the command and the operator-authored
+ * command brief (what the command does / what "done" means). The brief rides
+ * along in alert payloads so the operator LLM answers agent questions in the
+ * agent's OWN workflow vocabulary instead of guessing /work semantics.
+ */
+function launchConfigForTask(taskId) {
+  const hit = findTask(taskId);
+  if (!hit || !hit.manifest) return { command: null, commandBrief: null };
+  const m = hit.manifest;
+  return {
+    command: m.command ? String(m.command).replace(/^\//, '') : null,
+    commandBrief: m.commandBrief ? String(m.commandBrief) : null,
+  };
+}
+
 module.exports = {
   listManifestFiles,
   readManifest,
   writeManifest,
   findTask,
   updateTaskStatus,
+  incrementTaskAttempts,
+  getTaskAttempts,
+  resetTaskAttempts,
   syncFromTmux,
   poolFullForTask,
   stopOracleForTask,
   commandForTask,
+  runtimeForTask,
+  launchConfigForTask,
 };

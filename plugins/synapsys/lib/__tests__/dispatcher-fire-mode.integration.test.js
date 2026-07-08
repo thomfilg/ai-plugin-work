@@ -27,15 +27,21 @@ function writeMemory(dir, file, frontmatter, body) {
 }
 
 function runDispatcher({ event, payload, home, env = {} }) {
+  const spawnEnv = {
+    ...process.env,
+    HOME: home,
+    SYNAPSYS_NO_SETUP_HINT: '1',
+    ...env,
+  };
+  // The dispatcher's session-id resolver reads CLAUDE_CODE_SESSION_ID (GH-583)
+  // ahead of payload.session_id. These tests drive the session id via the
+  // payload, so an inherited env value would route telemetry/ledger writes to
+  // the wrong bucket. Scrub it for hermetic, payload-authoritative runs.
+  delete spawnEnv.CLAUDE_CODE_SESSION_ID;
   const res = spawnSync(process.execPath, [DISPATCHER, event], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      HOME: home,
-      SYNAPSYS_NO_SETUP_HINT: '1',
-      ...env,
-    },
+    env: spawnEnv,
   });
   return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
 }
@@ -334,5 +340,57 @@ describe('dispatcher fire_mode wiring (Task 3)', () => {
     ).length;
     assert.equal(fullCount, 1, 'full body must be injected exactly once per cascade session');
     assert.equal(reminderCount, 2, 'remaining matches must be reminders');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stop dispatch must NOT burn the fire_mode ledger: Stop stdout never reaches
+// the model, so a Stop-time render committing the ledger would consume e.g. a
+// `fire_mode: once` memory's single full-body injection for output the model
+// never sees. The Stop path renders with commitLedger=false; a subsequent
+// UserPromptSubmit fire must still receive the FULL body.
+
+describe('dispatcher Stop dispatch does not commit the fire_mode ledger', () => {
+  it('once — a Stop fire followed by a UserPromptSubmit fire still injects the full body', () => {
+    const fixture = setupFixture();
+    writeMemory(
+      fixture.storeDir,
+      'stop-then-prompt.md',
+      {
+        name: 'stop-then-prompt',
+        description: 'fires on Stop and on prompts',
+        events: 'UserPromptSubmit,Stop',
+        trigger_prompt: 'follow ?up',
+        trigger_stop_response: '\\bflaky\\b',
+        inject: 'full',
+        fire_mode: 'once',
+      },
+      'BODY-STOP-THEN-PROMPT-TEXT'
+    );
+
+    // 1) Stop fire (matching response) — rendered, but must not commit the ledger.
+    const stop = runDispatcher({
+      event: 'Stop',
+      payload: { cwd: fixture.cwd, session_id: SESSION_ID, response: 'that test is flaky' },
+      home: fixture.home,
+    });
+    assert.equal(stop.status, 0, `stop run failed: ${stop.stderr}`);
+    assert.match(stop.stdout, /BODY-STOP-THEN-PROMPT-TEXT/, 'stop fire renders the body');
+
+    // 2) UserPromptSubmit fire — despite the earlier Stop fire, this is the
+    // memory's FIRST model-visible injection and must be the full body, not
+    // the one-line reminder.
+    const prompt = runDispatcher({
+      event: 'UserPromptSubmit',
+      payload: promptPayload('please followup on the PR', fixture.cwd),
+      home: fixture.home,
+    });
+    assert.equal(prompt.status, 0, `prompt run failed: ${prompt.stderr}`);
+    assert.match(
+      prompt.stdout,
+      /BODY-STOP-THEN-PROMPT-TEXT/,
+      'prompt fire after a Stop fire must still inject the FULL body (Stop must not burn the once ledger)'
+    );
+    assert.doesNotMatch(prompt.stdout, /fired earlier; full body in this session/);
   });
 });

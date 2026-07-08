@@ -158,13 +158,24 @@ function summaryOf(reportResult) {
   return reportResult.summary || (reportResult.payload && reportResult.payload.summary) || null;
 }
 
+// GH-670: normalize legacy/monitor exit-reason spellings to the canonical
+// failureCategory before persisting. 'reviews' (the monitor/triage exit-reason
+// spelling) was stored verbatim, and report.js only recognised
+// 'review_failure' — so the workflow surfaced "Manual intervention required"
+// forever with no step ever clearing it.
+const FAILURE_CATEGORY_ALIASES = { reviews: 'review_failure' };
+
+function canonicalFailureCategory(reason) {
+  return FAILURE_CATEGORY_ALIASES[reason] || reason;
+}
+
 function applySurface(result, state, ctx) {
   state.currentStep = 'report';
   // Persist the surface reason as a failureCategory so the next /follow-up
   // cycle's report step recognises the workflow is still stuck and does NOT
   // mark status=complete.
   const reason = surfaceReasonOf(result);
-  if (reason) state.failureCategory = reason;
+  if (reason) state.failureCategory = canonicalFailureCategory(reason);
 
   // Bug 542-10: build the diagnostic summary BEFORE returning so the
   // auto-advance hook (which treats `surface` as terminal) shows the
@@ -262,6 +273,39 @@ function getNextInstruction(ticketId, prNumber) {
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
+// Terminal states used to leave only a JSON blob in the transcript — ping
+// the operator mailbox + terminal bell so a blocked/complete follow-up is
+// never silent ("agents get stuck with no notifications").
+function notifyTerminalInstruction(instruction, safeName) {
+  if (!instruction || !['blocked', 'surface', 'complete'].includes(instruction.action)) return;
+  try {
+    const { notifyOperator } = require('./lib/notify');
+    const detail =
+      instruction.summary ||
+      instruction.reason ||
+      (instruction.payload && instruction.payload.reason) ||
+      '';
+    notifyOperator(safeName, `${instruction.action}: ${String(detail).split('\n')[0]}`);
+  } catch {
+    /* fail-open — notification is best-effort */
+  }
+}
+
+// GH-214 (state-file-first): persist the instruction on EVERY run so callers
+// can invoke this script in the background and read the compact JSON from
+// `<TASKS_BASE>/<ticket>/.follow-up-next.json` instead of parsing stdout.
+// Then fire the terminal-state operator notification.
+function applyInstructionSideEffects(instruction, safeName) {
+  if (instruction) {
+    try {
+      require('./lib/instruction-file').persistInstruction(TASKS_BASE, safeName, instruction);
+    } catch {
+      /* fail-open */
+    }
+  }
+  notifyTerminalInstruction(instruction, safeName);
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
@@ -316,6 +360,8 @@ function main() {
 
   const instruction = getNextInstruction(safeName, prNumber);
 
+  applyInstructionSideEffects(instruction, safeName);
+
   // When the workflow completes, release the session guard ONLY if /follow-up
   // owns it (the `complete <id> <workflow>` filter is a no-op when a parent
   // workflow such as /work owns the session).
@@ -346,5 +392,6 @@ module.exports = {
     initState,
     detectDefaultBranch,
     loadPrDiffFiles,
+    canonicalFailureCategory,
   },
 };

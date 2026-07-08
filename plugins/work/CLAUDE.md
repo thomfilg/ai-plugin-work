@@ -6,6 +6,21 @@ This is a Claude Code plugin (Node.js, CommonJS only). It provides deterministic
 
 See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](./docs/README.md)** for full architecture documentation.
 
+### Codex ↔ Claude Code
+
+This plugin family runs on **both Claude Code and Codex CLI**. The full migration
+map — plugins, skills, subagents, hooks, MCP, permissions, slash commands,
+statusline, env vars, and marketplace — lives in
+**[docs/codex-support/05-codex-claude-plugin-map.md](../../docs/codex-support/05-codex-claude-plugin-map.md)**,
+alongside the machine-verified series in [`docs/codex-support/`](../../docs/codex-support/)
+(ground truth → touchpoint inventory → adapter design → work breakdown).
+
+Load-bearing facts when porting:
+- Manifest dir `.claude-plugin/` ↔ `.codex-plugin/`; `CLAUDE.md` ↔ `AGENTS.md`.
+- Env vars `CLAUDE_PLUGIN_ROOT`/`CLAUDE_PLUGIN_DATA` ↔ `PLUGIN_ROOT`/`PLUGIN_DATA` (Codex sets both — write `PLUGIN_ROOT:-CLAUDE_PLUGIN_ROOT` fallbacks).
+- Codex degradations announce a greppable `[<plugin>:codex-degraded]` prefix (see [`03-adapter-design.md`](../../docs/codex-support/03-adapter-design.md) §0/§M).
+- Codex `tui.status_line` is **built-in-fields-only** ([openai/codex#20140](https://github.com/openai/codex/issues/20140)), so command-backed status bars (the `/work` ⚙ bar, the 🔄 follow-up bar) can't render on codex — they degrade to a `/status` + `watch` fallback.
+
 ## Development Rules
 
 ### Language & Runtime
@@ -45,11 +60,51 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 ### TDD Enforcement
 - `implement` step is TDD-gated: must record RED → GREEN cycle before transitioning out.
 - `tdd-phase-state.js` is the ONLY way to record evidence — agents cannot self-report.
-- Phase gating hook (`work-implement-enforce.js`) blocks file edits by phase:
-  - RED: only `.test.*`/`.spec.*` files
+- `task-next.js` is the developer-agent entrypoint in multi-task mode
+  (`task-next.js <TICKET> task<N>`): it resolves the runnable command from the
+  task's `### Test Strategy` via the SHARED implement-gate resolver
+  (`resolveTaskTestExecution`), runs it, validates phase rules (including the
+  kind-aware contracts from `task-types.js`), and delegates recording to
+  `tdd-phase-state.js`. Machine-verified escape paths: `--resume-completed`
+  (GH-509, audited `tdd-resume-completed`) and planner-declared
+  `red-mode: ablation` (GH-570, audited `tdd-ablation-cycle`).
+- Phase gating hook (`work-implement-enforce.js`) is registered in `hooks/hooks.json`
+  (PreToolUse, matcher `Edit|Write|MultiEdit`, after the protect-* hooks) and blocks
+  file edits by phase:
+  - RED: only `.test.*`/`.spec.*` files — except tasks whose planner-declared
+    `### Test Strategy` carries `red-mode: ablation` (GH-570), which may edit
+    source files INSIDE the task's `### Files in scope` (the temporary
+    mutation); each such allow is audited (`ABLATION_RED_SOURCE_EDIT`)
   - GREEN: only source files + test helpers
   - REFACTOR: all files
-- `exception` mode for config-only changes — overwrites state directly, not via transition graph.
+  Fail-open when no workflow/implement step is active (exit 0).
+- Stop gating hook (`enforce-tdd-on-stop.js`) is registered in `hooks/hooks.json`
+  (SubagentStop, matcher `.*`) and self-filters (exit 0) unless the stopping
+  subagent is POSITIVELY identified as a developer-* agent — via the payload's
+  `agent_type` field (the documented SubagentStop identity field; legacy
+  agent_name/subagent_type read as fallbacks) or, when absent, the structural
+  developer dispatch-prompt marker in the subagent transcript's first user
+  message ('self-paced TDD agent' + task-next.js). Unidentifiable subagents,
+  undetectable tickets, non-implement steps, and checkpoint tasks are all
+  allowed to stop. When a developer
+  agent stops during `implement` without a valid TDD cycle, it blocks (exit 2) and
+  prints the ONE next command (`task-next.js`) — it never runs tests or records
+  evidence itself. Evidence is judged by the ONE shared contract-aware validator
+  (`tdd-enforcement.js validateTddEvidenceForType` — the SAME function the
+  implement gate and the check/complete validators use): TDD-exempt Types are
+  satisfied by red-only/green-only evidence (e.g. the gate's non-TDD stub), and
+  citation-kind GREEN evidence (`verified-by`/`wiring-citation` with `peerSha`)
+  satisfies the hook. A task with
+  no `### Test Strategy` resolution is allowed to stop, but the allow is audited to
+  `.work-actions.json` (enforcement row, action `tdd-stop-strategy-missing-allow`).
+- `exception` mode is OPERATOR-ONLY (requires `WORK_OPERATOR_TOKEN=1` — agent
+  environments never carry it). It overwrites state directly, not via the
+  transition graph. Categories are built from the shared TDD-exemption enum in
+  `skills/split-in-tasks/lib/task-types.js` (`tests-only`, `docs`, `config`,
+  `ci`, `mechanical-refactor`, `file-move`, `checkpoint`) plus the legacy
+  alias `config-only` (= `config`); every use is audited to
+  `.work-actions.json` (`tdd-exception`). Agents get TDD exemptions ONLY via
+  the planner's `### Type` line, never by invoking `exception`.
 
 ### Security
 - All ticket-ID-to-path conversions validated against directory traversal.
@@ -60,26 +115,23 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 
 ### Feature Flags
 
-- `WORK_TEST_STRATEGY_VALIDATOR` (default `1`) — gates the GH-590 tasks-draft
-  Test Strategy validator (enum-driven `### Test Strategy` blocks, command-
-  existence dispatcher, and TDD-ownership graph) plus the GH-610 implement-side
-  synthesis/citation consumer. Default `1` (on) now that both GH-590 and GH-610
-  have landed. Set to `0` to fall back to the legacy `### Test Command` path
-  (e.g. for in-flight `tasks.md` files authored before GH-590). Read via
-  `getConfig('WORK_TEST_STRATEGY_VALIDATOR')`.
+(None currently. The `WORK_TEST_STRATEGY_VALIDATOR` flag was removed — the
+GH-590 Test Strategy validators and the GH-610 implement-side synthesis
+consumer are permanently on. Legacy `### Test Command` blocks are rejected
+at the draft gate with a migration error pointing at
+`skills/split-in-tasks/docs/test-strategy.md`.)
 
-  **Implement-side synthesis flow.** When the flag is ON and a task carries a
-  `### Test Strategy` block but no legacy `### Test Command`, the implement side
-  synthesizes the runnable command instead of wedging. `readTaskTestCommand` /
-  `resolveTaskTestExecution` (`implement-gate.js`) call
-  `lib/test-strategy.js synthesizeCommand(strategy, findNearestEnvrc(worktreeDir))`
-  to produce the command for envelope kinds (`unit`/`integration`/`e2e`/`custom`),
-  threading the orchestrator's worktree-rooted `.envrc`. For citation kinds
-  (`verified-by`/`wiring-citation`) `synthesizeCommand` returns `null`; instead of
-  executing, `tdd-phase-state.js` records green evidence by peer citation
-  (`validatePeerCitation` + peer evidence sha + scope-overlap), and
-  `enforce-tdd-on-stop.js` accepts that citation evidence. With the flag OFF,
-  behavior is byte-for-byte unchanged — only `### Test Command` is read.
+**Implement-side synthesis flow.** The implement side synthesizes the
+runnable command from the task's `### Test Strategy` (the legacy
+`### Test Command` readers were fully removed in GH-653). `readTaskTestCommand` /
+`resolveTaskTestExecution` (`implement-gate.js`) call
+`lib/test-strategy.js synthesizeCommand(strategy, findNearestEnvrc(worktreeDir))`
+to produce the command for envelope kinds (`unit`/`integration`/`e2e`/`custom`),
+threading the orchestrator's worktree-rooted `.envrc`. For citation kinds
+(`verified-by`/`wiring-citation`) `synthesizeCommand` returns `null`; instead of
+executing, `tdd-phase-state.js` records green evidence by peer citation
+(`validatePeerCitation` + peer evidence sha + scope-overlap), and
+`enforce-tdd-on-stop.js` accepts that citation evidence.
 
 ### Ticket Providers
 - Configured via `TICKET_PROVIDER` env var: `jira`, `linear`, `github`, `none`.

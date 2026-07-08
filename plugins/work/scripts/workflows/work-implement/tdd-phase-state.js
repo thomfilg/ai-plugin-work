@@ -23,6 +23,7 @@
  *   node tdd-phase-state.js record-red <TICKET_ID> --cmd "<test command>"
  *   node tdd-phase-state.js record-green <TICKET_ID> --cmd "<test command>"
  *   node tdd-phase-state.js record-refactor <TICKET_ID> --cmd "<test command>"
+ *   node tdd-phase-state.js record-resume-completed <TICKET_ID> --task <N> --cmd "<test command>"
  *   node tdd-phase-state.js transition <TICKET_ID> <target_phase>
  *   node tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"
  *
@@ -44,6 +45,7 @@ const {
   cmdTransition,
 } = require('./tdd-phase-state/record-cycle');
 const { cmdRecordRed, cmdRecordSkipRed } = require('./tdd-phase-state/record-red');
+const { cmdRecordResumeCompleted } = require('./tdd-phase-state/resume-completed');
 const { cmdException } = require('./tdd-phase-state/exception');
 
 // Subcommands that require token verification
@@ -52,6 +54,7 @@ const GATED_SUBCOMMANDS = [
   'record-skip-red',
   'record-green',
   'record-refactor',
+  'record-resume-completed',
   'transition',
   'exception',
 ];
@@ -74,7 +77,7 @@ if (process.argv.length < 3) {
   if (require.main === module) {
     errorExit(
       'Missing subcommand. Usage: tdd-phase-state.js <subcommand> <TICKET_ID> [...]. ' +
-        'Valid subcommands: init, current, record-red, record-skip-red, record-green, record-refactor, transition, exception.'
+        'Valid subcommands: init, current, record-red, record-skip-red, record-green, record-refactor, record-resume-completed, transition, exception.'
     );
   }
   process.exit(0);
@@ -110,6 +113,9 @@ switch (subcommand) {
   case 'record-refactor':
     cmdRecordRefactor(ticketId, args.slice(2));
     break;
+  case 'record-resume-completed':
+    cmdRecordResumeCompleted(ticketId, args.slice(2));
+    break;
   case 'transition':
     cmdTransition(ticketId, args[2], args.slice(2));
     break;
@@ -119,6 +125,6 @@ switch (subcommand) {
   default:
     errorExit(
       `Unknown subcommand: ${subcommand}. ` +
-        'Valid: init, current, record-red, record-skip-red, record-green, record-refactor, transition, exception'
+        'Valid: init, current, record-red, record-skip-red, record-green, record-refactor, record-resume-completed, transition, exception'
     );
 }

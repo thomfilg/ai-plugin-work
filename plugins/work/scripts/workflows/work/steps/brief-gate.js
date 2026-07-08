@@ -26,6 +26,7 @@
 
 const fs = require('fs');
 const openQuestions = require('../lib/open-questions');
+const { T, renderQuestionText, getRuntime } = require('../../lib/instruction-vocab');
 
 /**
  * Build the `AskUserQuestion` payload for the RUN action. Kept local so the
@@ -91,19 +92,43 @@ function briefGateStep(add, s, ctx) {
     return;
   }
 
+  // The question renderer keeps claude byte-identical and swaps the codex
+  // vocabulary (request_user_input prose / parked-gate notice per mode, C3).
+  const rt = getRuntime();
   add(
     STEPS.brief_gate,
     'RUN',
-    'AskUserQuestion',
+    T('tool.question', {}, rt.name),
     `Resolve ${blocking.length} unresolved cross-ticket/architectural question(s)`,
     {
       agentType: 'general-purpose',
-      agentPrompt: `Use AskUserQuestion to resolve ${blocking.length} unresolved open question(s) in brief.md, then call applyBriefResolutions() to persist the answers.`,
+      agentPrompt: renderQuestionText(
+        `Use AskUserQuestion to resolve ${blocking.length} unresolved open question(s) in brief.md, then call applyBriefResolutions() to persist the answers.`,
+        rt
+      ),
       askUserQuestionPayload: buildAskUserQuestionPayload(blocking),
       onResolve: 'rewrite brief.md',
       postResolveCommand: `node -e "var r=process.argv[3];if(!r)process.exit(0);require(process.argv[1]).applyBriefResolutions(process.argv[2],JSON.parse(r))" "${path.join(__dirname, 'brief-gate.js')}" "${briefPath}" "$RESOLUTIONS_JSON"`,
     }
   );
+}
+
+/**
+ * Defensive type guard for the resolutions payload: reject `undefined`/`null`,
+ * stray primitives (number, string, boolean, symbol, bigint), and empty
+ * containers before doing any I/O. Only a non-empty Map or plain-object
+ * payload can carry resolution data; anything else is a caller bug (or a
+ * cancellation) and must be a silent no-op — the next planner pass will
+ * re-prompt.
+ *
+ * @param {Map<string,string>|Record<string,string>|null|undefined} resolutions
+ * @returns {boolean} true if the payload carries at least one resolution.
+ */
+function hasResolutionData(resolutions) {
+  if (resolutions === undefined || resolutions === null) return false;
+  if (typeof resolutions !== 'object') return false;
+  const size = resolutions instanceof Map ? resolutions.size : Object.keys(resolutions).length;
+  return size > 0;
 }
 
 /**
@@ -121,20 +146,7 @@ function briefGateStep(add, s, ctx) {
  * @returns {boolean} true if brief.md was rewritten, false if skipped.
  */
 function applyBriefResolutions(briefPath, resolutions) {
-  if (resolutions === undefined || resolutions === null) return false;
-  // Defensive type guard: reject stray primitives (number, string, boolean,
-  // symbol, bigint) before doing any I/O. Only Map or plain-object payloads
-  // can carry resolution data; anything else is a caller bug and must be a
-  // silent no-op — the next planner pass will re-prompt.
-  if (typeof resolutions !== 'object') return false;
-  if (resolutions instanceof Map && resolutions.size === 0) return false;
-  if (
-    !(resolutions instanceof Map) &&
-    typeof resolutions === 'object' &&
-    Object.keys(resolutions).length === 0
-  ) {
-    return false;
-  }
+  if (!hasResolutionData(resolutions)) return false;
 
   let markdown;
   try {

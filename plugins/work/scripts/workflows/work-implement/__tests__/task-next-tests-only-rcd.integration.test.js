@@ -49,9 +49,10 @@ function makeWorkspace({ scope, testCmd }) {
     '### Files in scope',
     ...scope.map((s) => `- ${s}`),
     '',
-    '### Test Command',
-    '```bash',
-    testCmd,
+    '### Test Strategy',
+    '```',
+    'kind: custom',
+    `command: ${testCmd}`,
     '```',
     '',
   ].join('\n');

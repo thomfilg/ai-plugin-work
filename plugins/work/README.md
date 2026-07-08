@@ -27,6 +27,22 @@ For local development, point to a local directory instead:
 /plugin marketplace add ./path/to/claude-plugin-work
 ```
 
+### Codex CLI
+
+The same plugin installs natively on Codex CLI (0.142.5+):
+
+```
+codex plugin marketplace add thomfilg/claude-plugin-work
+codex plugin add work-workflow@work-workflow
+```
+
+Then run the one-time TUI `/hooks` trust review — codex **silently skips
+untrusted hooks**, so until then every workflow gate is off. `/work` is invoked
+as a skill mention (`$work GH-N`) rather than a slash command; subagents run
+inline (serialized) and interactive gates degrade per the
+`[work:codex-degraded]` notices. Details: the repo-root `README.md` install
+matrix and `docs/hooks.md` → "Dual runtime".
+
 ## Available Skills (Slash Commands)
 
 ### Core Workflow
@@ -42,7 +58,7 @@ For local development, point to a local directory instead:
 
 | Command | Description |
 |---------|-------------|
-| `/check2 <TICKET_ID>` | Run full quality check: lint, typecheck, tests, code review, QA, and requirements verification in parallel |
+| `/check <TICKET_ID>` | Run full quality check: lint, typecheck, tests, code review, QA, and requirements verification in parallel |
 | `/check-qa <app>` | Run QA testing for a specific app using Playwright |
 | `/check-browser` | Verify browser/UI state using API-first approach with browser fallback |
 
@@ -59,7 +75,8 @@ For local development, point to a local directory instead:
 | Command | Description |
 |---------|-------------|
 | `/bootstrap <TICKET_IDs...>` | Setup multiple Jira tasks: creates worktrees, symlinks configs, opens draft PRs |
-| `/orchestrate <TICKET_IDs...>` | Runs `/work` for multiple Jira tasks sequentially in isolated worktrees |
+
+> **Running `/work` for multiple tickets?** Use the maestro plugin's `/orchestrate` skill — it owns multi-agent orchestration (parallel tmux sessions per ticket, auto-restart, operator hand-off). The work plugin no longer ships a duplicate `/orchestrate`.
 
 ### CI/CD
 
@@ -74,6 +91,35 @@ The plugin registers hooks that enforce workflow discipline:
 - **`enforce-step-workflow`** - Validates that steps execute in the correct order during `/work` sessions
 - **`enforce-screenshot-requirement`** - Ensures QA screenshots are captured before completing checks
 - **`work-orchestrator-hook`** - Pre-processes `/work` commands to initialize the workflow engine
+
+## Commits
+
+The `commit-writer` subagent was **removed** (GH-539). Instead:
+
+- The **session agent authors the commit message** inline (it has the context), then commits
+  through the sanctioned script **`commit-and-push.js`**, which stages (`git add -A`),
+  validates, commits, and pushes. No subagent dispatch.
+- The **always-on `enforce-agent-usage` PreToolUse hook FORCES it**: a raw `git commit` is
+  **always blocked** (exit 2) and the agent is told to run `commit-and-push.js`. There is no
+  install step and no bypass — the script is the only path, so a commit can never skip
+  validation. (`--amend` / `--allow-empty` / `fixup!` / `squash!` are exempt.)
+- The script enforces the rules from a single source of truth
+  (`scripts/workflows/work/hooks/commit-msg-rules.js`) and **rejects** a bad commit:
+  - **semantic format** (`type(scope): description`, allowed types, ≤72-char title, no trailing
+    period, no emoji, imperative mood, ≤100-char body lines);
+  - **no AI/tool attribution** (`Co-Authored-By: Claude`, `Generated with Codex`, etc.);
+  - **a human git identity** — the committing `user.name`/`user.email` must not be an AI tool
+    (`claude`, `codex`, `gemini`, …). The identity is the worktree's effective git user (its
+    local config when a worktree `.envrc` set it up, else the global user).
+
+### Commit-message rule decisions
+
+- **Title ≤ 72 chars, body lines ≤ 100 chars.** The ticket's "≤72" refers to the commit
+  **title**; body lines use the ≤100 limit. Both live in `commit-msg-rules.js`
+  (`titleLengthRule`, `bodyLineLengthRule`).
+- **Deferred:** a `no empty body when type is feat/breaking` rule is **not** enforced yet. It
+  is deferred pending team confirmation on whether to **block** or merely **warn**, and is
+  intentionally omitted from `commit-msg-rules.js` until that decision lands.
 
 ## Architecture
 
@@ -90,7 +136,7 @@ claude-plugin-work/
 │   │   ├── hook-error-log.js     # Hook error file logger (see Debugging Hooks)
 │   │   └── hooks/                # Shared hooks (enforce-step-workflow, etc.)
 │   ├── work/                     # /work orchestrator workflow
-│   ├── check/                    # /check2 workflow
+│   ├── check/                    # /check workflow
 │   └── work-pr/                  # /work-pr workflow
 ├── agents/                       # Agent definitions (18 specialized agents)
 │   ├── brief-writer.md           # Product brief generation
@@ -139,8 +185,8 @@ export ENFORCE_HOOK_DEBUG=1
 **Race conditions:** Each log line includes PID. Writes use `O_APPEND` with short lines (~3.8KB max). On Linux ext4/xfs, these are effectively atomic across concurrent instances.
 
 **Source files:**
-- `scripts/workflows/lib/hook-error-log.js` (plugin hooks)
-- `~/.claude/hooks/lib/hook-error-log.js` (personal hooks — identical copy)
+- `scripts/workflows/lib/hook-error-log.js` (plugin hooks — a delegate re-exporting the vendored `scripts/workflows/lib/hookEntrypoint/logHookError.js` port; the implementation master is `factories/hookEntrypoint/logHookError.js`, kept in sync by `scripts/sync-vendored.js`)
+- `~/.claude/hooks/lib/hook-error-log.js` (personal hooks — standalone copy of the same logger)
 
 ## Prerequisites
 

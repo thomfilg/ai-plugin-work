@@ -38,6 +38,31 @@ const SKIP_DIRS_ROOT_ONLY = new Set(['tasks', 'external_scripts', 'references', 
 
 const TEST_FILE_RE = /(?:^|[\\/])__tests__[\\/]|\.test\.js$|\.spec\.js$/;
 
+// Vendored lib copies — machine-verified byte-identical duplicates of their
+// factories/<lib> masters, kept in parity by `node scripts/sync-vendored.js
+// --check` in CI. Intentional duplication (codex cache-isolates each plugin,
+// so each lib is checked in per plugin): excluded from the gate here — both
+// the static rules and jscpd — while the masters under factories/ stay
+// covered. Mirror any change in scripts/sync-vendored.js VENDOR_SETS.
+const VENDORED_DIRS = [
+  'plugins/heimdall/lib/pathSafe',
+  'plugins/heimdall/lib/runtime',
+  'plugins/heimdall/lib/storeDiscovery',
+  'plugins/maestro/scripts/lib/runtime',
+  'plugins/synapsys/lib/hookEntrypoint',
+  'plugins/synapsys/lib/runtime',
+  'plugins/synapsys/lib/storeDiscovery',
+  'plugins/work/scripts/workflows/lib/hookEntrypoint',
+  'plugins/work/scripts/workflows/lib/runtime',
+  'plugins/work/scripts/workflows/lib/safeIO',
+  'plugins/work/scripts/workflows/lib/safeSubprocess',
+];
+
+function isVendoredFile(absFile, repoRoot) {
+  const rel = path.relative(repoRoot, absFile).split(path.sep).join('/');
+  return VENDORED_DIRS.some((dir) => rel.startsWith(`${dir}/`));
+}
+
 function parseArgs(argv) {
   const opts = { changed: false, json: false, paths: [] };
   for (const a of argv) {
@@ -137,9 +162,11 @@ function changedFiles(repoRoot) {
 }
 
 function discoverFiles(opts, repoRoot) {
-  if (opts.paths.length > 0) return expandPaths(opts.paths, repoRoot);
-  if (opts.changed) return changedFiles(repoRoot);
-  return walkJsFiles(repoRoot);
+  let files;
+  if (opts.paths.length > 0) files = expandPaths(opts.paths, repoRoot);
+  else if (opts.changed) files = changedFiles(repoRoot);
+  else files = walkJsFiles(repoRoot);
+  return files.filter((f) => !isVendoredFile(f, repoRoot));
 }
 
 function nonTestFiles(absFiles) {
@@ -285,4 +312,6 @@ if (require.main === module) {
   process.exit(main(process.argv.slice(2)));
 }
 
-module.exports = { main, parseArgs, walkJsFiles };
+// VENDORED_DIRS is exported so the vendored-parity spec can assert it stays
+// the exact union of scripts/sync-vendored.js VENDOR_SETS vendor dirs.
+module.exports = { main, parseArgs, walkJsFiles, VENDORED_DIRS };

@@ -2,7 +2,7 @@
 
 Context-triggered memory injection plugin.
 
-Memories are markdown files with frontmatter that declares **which events** they listen to (`SessionStart`, `UserPromptSubmit`, `PreToolUse`) and **which trigger patterns** activate them. When an event fires and a memory's trigger matches the payload, the memory is injected into Claude's context.
+Memories are markdown files with frontmatter that declares **which events** they listen to (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) and **which trigger patterns** activate them. When an event fires and a memory's trigger matches the payload, the memory is injected into Claude's context. For `UserPromptSubmit` / `SessionStart` the injected text is written to raw stdout; for `PreToolUse` / `PostToolUse` it is delivered via the `hookSpecificOutput.additionalContext` JSON envelope, which Claude Code adds to the model context for tool-use events.
 
 ## Frontmatter schema
 
@@ -10,7 +10,7 @@ Memories are markdown files with frontmatter that declares **which events** they
 |---|---|---|
 | `name` | string | Unique memory id |
 | `description` | string | Human-readable summary |
-| `events` | csv | Subset of `SessionStart,UserPromptSubmit,PreToolUse,Stop` |
+| `events` | csv | Subset of `SessionStart,UserPromptSubmit,PreToolUse,PostToolUse,Stop` |
 | `trigger_prompt` | regex | Matched against the user prompt on `UserPromptSubmit` |
 | `trigger_pretool` | csv of `<Tool>:<arg-regex>` | Matched against the tool name + serialized tool input on `PreToolUse` |
 | `trigger_pretool_content` | csv of regex | *(optional)* Matched against the **content** the tool is writing. Combined with `trigger_pretool` via AND. Per-tool content: `Edit`→`new_string`, `Write`→`content`, `MultiEdit`→`edits[].new_string` joined, `NotebookEdit`→`new_source`; other tools → no content (fail-closed). Flags: `i,m`. Invalid regex → stderr warning + skip; all-invalid or missing content → memory does not fire. |
@@ -20,6 +20,10 @@ Memories are markdown files with frontmatter that declares **which events** they
 | `exclude_preset` | string or csv of strings | *(optional)* Named exclude patterns sourced from `lib/synapsys-presets.json`. Resolved at load time and concatenated with `exclude_prompt` into one OR-joined exclude list (`memory.excludeResolved`). Built-in presets: `git-ops`, `ci-monitor`, `review-comment-handling` — see [Adopting `exclude_preset`](#adopting-exclude_preset) below. Unknown preset name → stderr warning + skip. |
 | `exclude_pretool` | csv of `<Tool>:<arg-regex>` | *(optional)* Negative pretool gate. Same shape as `trigger_pretool`. If the tool name + serialized tool input matches any spec here, the memory does NOT fire even if `trigger_pretool` matches. Invalid spec → stderr warning + skip. |
 | `inject` | `full` \| `summary` | How much of the body to inject |
+| `enforce` | `advise` \| `suggest` \| `block` | *(optional, default `advise`)* Per-memory enforcement level on `PreToolUse` — see [Enforce mode](#enforce-mode). Unknown values normalize to `advise` with a stderr warning. |
+| `enforce_classifier` | string | *(optional)* Named built-in classifier gating an `enforce: block` memory: `symbol-shape` or `first-edit-of-session`. Unknown name → the memory degrades to `advise` with a stderr warning. Without a classifier, the `trigger_pretool` match itself is the block condition. |
+| `enforce_satisfied_by` | regex | *(optional)* Tool-name regex used by `first-edit-of-session`: if a tool call matching it (e.g. `cortex_recall`) was observed earlier this session, the first edit is allowed. |
+| `cortex_query` | string | *(optional)* When the memory fires, also run a Phase 2 cortex auto-recall with this query and inline the results beneath the memory body. See [Cortex auto-recall](#cortex-auto-recall). |
 
 ## Four storage tiers
 
@@ -87,6 +91,88 @@ inject: full
 **Docs:** `packages/ui/src/components/form/Button/Button.md`
 ```
 
+## Enforce mode
+
+By default a matched memory only *advises* — its body is injected as context and the tool call proceeds. The `enforce` frontmatter key (GH-520) escalates what happens when a memory's `trigger_pretool` ladder matches on `PreToolUse`:
+
+| `enforce` | On PreToolUse match |
+|---|---|
+| `advise` *(default)* | Exactly the pre-enforce behavior: inject via `additionalContext`. No behavior change for existing memories. |
+| `suggest` | Inject as usual PLUS append a one-line nudge: `[synapsys:suggest] <name> — consider the recommended alternative before proceeding (see memory above)`. Never blocks. |
+| `block` | If the memory's classifier (when declared) also says "block", emit `permissionDecision: 'deny'` with a structured message and stop the tool call. The deny response carries ONLY the deny JSON — no `additionalContext` mixing. First blocking memory wins (memory list order). |
+
+A memory with `enforce: block` and no `enforce_classifier` blocks purely on its `trigger_pretool` match — the trigger IS the classifier. Fail-open ethos is preserved: any throw anywhere in enforcement falls back to plain advise injection, never a spurious deny.
+
+### Built-in classifiers
+
+Pure regex + tiny session state — no model calls. Conservative: any ambiguity → allow.
+
+- **`symbol-shape`** — for grep-style symbol lookups. Extracts the search pattern (`Grep` → `tool_input.pattern`; `Bash` → the first quoted/bare arg after a `grep`/`rg` invocation; anything else → allow) and blocks only when it is identifier-shaped (`/^[A-Za-z_$][A-Za-z0-9_$]*$/`, 3–50 chars, no spaces/quotes/slashes/regex metachars, not `TODO`/`FIXME`/`README`/`NOTE`/`XXX`). Greps targeting `.md`, `.claude/`, or `node_modules` paths are always allowed.
+- **`first-edit-of-session`** — blocks the first `Edit`/`Write`/`MultiEdit`/`NotebookEdit` of the session UNLESS a tool call matching the memory's `enforce_satisfied_by` regex was observed earlier this session. After the first edit is allowed or blocked once, subsequent edits pass — it's a first-edit gate, not a permanent one.
+
+### Override marker
+
+Blocks are per-call escapable. Re-issue the SAME tool call including the marker anywhere in the tool input (the Bash command or the tool's description field):
+
+```
+# synapsys:override=<memory-name> reason="<10+ char reason>"
+```
+
+A valid override (reason ≥ 10 chars) allows the call and logs an `override` telemetry event `{event:'override', memory, reason}`. A reason under 10 chars keeps the block and appends a too-short notice. Every block logs `{event:'block', memory, tool}` via the same per-session JSONL writer as `fired`/`cited` (per-memory `telemetry: false` and `SYNAPSYS_TELEMETRY=0` both respected). Overrides are per-call — no session state.
+
+The deny message the agent sees:
+
+```
+[synapsys:block] <memory-name>
+<memory body (trimmed)>
+
+To override, re-issue the SAME tool call including the marker:
+  # synapsys:override=<memory-name> reason="<10+ char reason>"
+(in the Bash command or the tool's description field). Overrides are per-call and logged.
+```
+
+`/synapsys:status` shows the memories with `enforce ≠ advise` plus the current session's block/override counts.
+
+### Worked example — codegraph over identifier greps (`symbol-shape`)
+
+Authorable template (docs, not a shipped memory):
+
+```markdown
+---
+name: codegraph-over-grep
+description: Use codegraph_explore for symbol lookups instead of raw identifier greps.
+events: PreToolUse
+trigger_pretool: Grep:,Bash:\b(grep|rg)\b
+inject: full
+enforce: block
+enforce_classifier: symbol-shape
+---
+
+This project has a codegraph index. For symbol lookups (a bare identifier like
+`getUserData`), call `codegraph_explore` — one call returns the verbatim source
+plus callers and blast radius. Raw greps stay fine for regexes, phrases, docs
+(`.md`), `.claude/`, and `node_modules`.
+```
+
+### Worked example — cortex recall before the first edit (`first-edit-of-session`)
+
+```markdown
+---
+name: cortex-recall-before-first-edit
+description: Recall prior-session context before the first edit of a session.
+events: PreToolUse
+trigger_pretool: Edit:,Write:,MultiEdit:,NotebookEdit:
+inject: full
+enforce: block
+enforce_classifier: first-edit-of-session
+enforce_satisfied_by: cortex_recall
+---
+
+Before the first edit of a session, run `cortex_recall` for this project so
+prior decisions and gotchas inform the change. Once any tool matching
+`cortex_recall` has run this session, edits proceed normally.
+```
+
 ## Adopting `exclude_preset`
 
 Use `exclude_preset` to silence a memory during routine workflows where its content doesn't apply. The presets in `lib/synapsys-presets.json` cover the most common collision categories — adopt them on existing memories rather than hand-rolling `exclude_prompt` regexes.
@@ -151,9 +237,21 @@ node plugins/synapsys/scripts/synapsys-explain.js \
 
 A working exclude shows `excluded_pattern` in the explainer output. If the memory still fires, double-check the preset name spelling and the regex flavor (presets are case-sensitive on their literal patterns).
 
+## Codex CLI
+
+Synapsys runs on Codex CLI from the same install (`codex plugin add
+synapsys@work-workflow` + one-time TUI `/hooks` trust review — codex silently
+skips untrusted hooks). Memories keep firing with zero data migration:
+`Edit`/`Write` tool triggers alias-match codex `apply_patch` events (parsed
+write targets), UserPromptSubmit/Stop matchers are re-applied in-script, and
+the replay walker reads codex rollout transcripts. Accepted losses (design §M):
+`/clear`-rotation semantics and crystallize-from-codex-history; replay's judge
+leg auto-downgrades to `--no-judge`. See the repo-root `README.md` for the
+install matrix and degradation table.
+
 ## Files
 
-- `hooks/synapsys.js` — single dispatcher; routes SessionStart / UserPromptSubmit / PreToolUse
+- `hooks/synapsys.js` — single dispatcher; routes SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop (PreToolUse and PostToolUse output is wrapped in the `hookSpecificOutput.additionalContext` JSON envelope)
 - `hooks/hooks.json` — Claude Code hook registrations
 - `lib/memory-store.js` — store discovery + frontmatter parser
 - `lib/matcher.js` — event/payload matchers
@@ -183,22 +281,24 @@ node plugins/synapsys/scripts/synapsys-explain.js --event=... --verbose
 
 ## Measuring false positives with `synapsys replay`
 
-Once a store has more than a handful of memories, gut-feel trigger tuning stops scaling. `synapsys-replay.js` walks recent transcripts under `~/.claude/projects/<hash>/*.jsonl`, replays every `UserPromptSubmit` and `PreToolUse` event against the current store, optionally asks a lightweight LLM judge whether each fired match was actually relevant, and emits a per-memory report ranked by false-positive rate.
+Once a store has more than a handful of memories, gut-feel trigger tuning stops scaling. `synapsys-replay.js` walks recent transcripts under `~/.claude/projects/<hash>/*.jsonl`, replays every `UserPromptSubmit` and `PreToolUse` event against the current store, optionally dispatches a `Task(synapsys-replay-judge)` subagent to judge whether each fired match was actually relevant, and emits a per-memory report ranked by false-positive rate.
 
 ```bash
 # Zero-cost path: no LLM calls, ranks memories by raw fire counts.
 node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge
 
-# Full pipeline with judge (requires ANTHROPIC_API_KEY).
+# Full pipeline with the judge subagent (no API key required).
 node plugins/synapsys/scripts/synapsys-replay.js --since=14d
 
 # Machine-readable output.
 node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge --json
 ```
 
-Defaults: `--since=7d`, `--max-judges=200` (hard cap with even sampling + extrapolation note), `claude-haiku-4-5` as the judge model. Scope is the **current project only** — the cwd path with `/` replaced by `-` (matching Claude Code's `~/.claude/projects/<hash>` layout). Use `--project=<hash>` to target a different project, `--all-projects` to scan every project under `~/.claude/projects/`, `--only=<csv>` to restrict to specific memories, `--store=<name|path>` to override store auto-detection.
+Defaults: `--since=7d`, `--max-judges=200` (hard cap with even sampling + extrapolation note). The judge runs as a `Task(synapsys-replay-judge)` subagent driven by a file-mailbox phase-next loop — the runner writes a numbered/clipped batch to `batch-N.in.json`, dispatches the subagent, and reads its verdicts back from `batch-N.out.json`. Scope is the **current project only** — the cwd path with `/` replaced by `-` (matching Claude Code's `~/.claude/projects/<hash>` layout). Use `--project=<hash>` to target a different project, `--all-projects` to scan every project under `~/.claude/projects/`, `--only=<csv>` to restrict to specific memories, `--store=<name|path>` to override store auto-detection.
 
-`--no-judge` makes zero outbound HTTP calls and requires no `ANTHROPIC_API_KEY` — `relevant` and `fp_rate` are `null`, but `fires` and `sample_matches` are still populated. With the judge enabled, expected cost is well under **$0.05** per default run (~500 input + ~5 output tokens × ≤200 calls). See `skills/replay/SKILL.md` for the full cost model, security note, and the PTU-not-judged decision.
+No API key is required in any mode: the judge subagent runs against the already-authenticated in-session model, so data leaves the local box only via that session (never a separate API console). `--no-judge` skips the subagent dispatch entirely — `relevant` and `fp_rate` are `null`, but `fires` and `sample_matches` are still populated — and is the documented non-interactive / CI path (judged runs auto-downgrade to this when no dispatcher is available). See `skills/replay/SKILL.md` for the full cost framing, security note, and the PTU-not-judged decision.
+
+> **Migration note:** older installs that exported the Anthropic API key env var for replay can drop it from their shell config — the judge no longer reads any API credential.
 
 ## Staleness check
 
@@ -395,12 +495,83 @@ The output has three sections:
 
 The `--last <Nd>` flag filters telemetry `.jsonl` files by `mtime`; default is `7d`. `--cwd` overrides discovery. Exit code is always `0` — read errors emit a stderr note but never fail the command.
 
+## Cortex auto-recall
+
+Synapsys surfaces prior-session insights from cortex without any agent action. There are two phases, both deterministic (no LLM call) and both fail-open — if no recall provider resolves (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)), nothing is injected and the session proceeds normally.
+
+### Phase 1 — SessionStart recall
+
+Phase 1 runs **only when a recall provider is resolvable** (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)): an explicit `SYNAPSYS_CORTEX_RECALL_MODULE`, or the zero-config default bridge when a cortex sqlite store is detectable (GH-662). With no resolvable provider, SessionStart schedules nothing, writes no cache, and injects nothing; the session is entirely unaffected and no marker is emitted.
+
+When a provider *is* configured: on `SessionStart`, synapsys schedules a fire-and-forget background recall that issues **two bounded provider `recall` calls** (the provider's bridge to `cortex_recall`): one keyed on the ticket id, and one on derived keywords from the session context. Results are persisted to a per-session cache file. At the **next `UserPromptSubmit` boundary**, synapsys reads the cache and injects a `[cortex:auto-recall]` block into its existing stdout channel — the same channel that already carries matched-memory bodies. When a configured provider's query returns nothing, an empty marker line is emitted (the recall genuinely ran and found nothing):
+
+```
+[cortex:auto-recall] query="<q>" projectId="<p>" → no matches
+```
+
+The SessionStart recall does **not** block the prompt; the cache is consumed on the following prompt, not the one that triggered the session.
+
+### Phase 2 — per-memory `cortex_query`
+
+Add an optional `cortex_query:` field to any memory's frontmatter. When that memory fires through the normal `matcher.js` gates, synapsys also runs `cortex_recall({ query: <cortex_query>, projectId })` and inlines the results directly beneath the memory body in the same injection chunk. Phase 2 inherits all existing gating — the memory must already have passed `selectForEvent` — and the inlined recall output is governed by the same injection budget as memory text.
+
+### Recall provider — `SYNAPSYS_CORTEX_RECALL_MODULE`
+
+Both phases reach cortex through an **injected provider**, not by calling the MCP tool directly. The Phase 1 background worker is a detached Node process and the Phase 2 inline path runs inside the hook — neither can invoke an MCP tool, which is only reachable by the live agent. Both paths resolve their recall function through the single shared resolver in `lib/cortex-provider.js`, in this order:
+
+1. **Explicit module** — `SYNAPSYS_CORTEX_RECALL_MODULE` set: a path to a Node module exporting `recall(query, projectId) → Array | Promise<Array>`. A valid module always wins. A set-but-broken (unloadable/malformed) module disables recall entirely — the default bridge is **never** used as a fallback for an explicitly configured module.
+2. **Default bridge (zero-config, GH-662)** — env var unset: synapsys probes for a cortex sqlite store at `~/.cortex/memory.db` (override the path with `SYNAPSYS_CORTEX_DB`). When the db exists, opens read-only, and has a `memories` table, `lib/cortex-bridge.js` serves recalls directly from it — no configuration needed.
+3. **Disabled** — neither resolves: both phases inject nothing and the session proceeds normally.
+
+Notes on the default bridge:
+
+- **Node >= 22.5 required** — the bridge uses the built-in `node:sqlite` module (experimental). On older Nodes it reports "unavailable" and recall stays disabled; nothing crashes.
+- **Keyword + recency, not semantic** — the hook path has no embedder, so the bridge ranks rows by how many query keywords their content matches (then by recency), capped at 5 per query. Rows older than `max_age_days` are excluded inside the query itself (so stale rows can never crowd fresher eligible ones out of the cap), and results — shaped `{ id, savedAt, title, body, ageDays }` — still pass the downstream `max_age_days` / `max_results_per_query` budgets.
+- **Read-only** — the bridge opens the db with `readOnly: true` and never writes memories (R17).
+- The kill switch `SYNAPSYS_CORTEX_AUTO_RECALL=off` still disables **everything**, bridge included (see [Kill-switch](#kill-switch)).
+
+Resolution is fail-open throughout (R14) — a misconfigured provider or an undetectable bridge never breaks a session. Run `/synapsys recall` to see which provider is in effect.
+
+### Config knobs
+
+Behavior is governed by `~/.claude/synapsys/config.yaml` under a `cortex_auto_recall:` block. Defaults (shipped values):
+
+```yaml
+cortex_auto_recall:
+  enabled: true              # master switch for all auto-recall
+  on_session_start: true     # Phase 1 SessionStart recall
+  on_memory_fire: true       # Phase 2 per-memory cortex_query recall
+  on_user_prompt: false      # reserved (Phase 3, not yet wired)
+  max_age_days: 180          # drop cortex results older than this
+  max_results_per_query: 5   # cap results per cortex_recall call
+  max_chars_per_memory: 500  # truncate per-memory inlined recall output
+  max_keywords: 6            # cap derived keywords for the SessionStart keyword query
+```
+
+Any key omitted from the file falls back to the default above.
+
+### Kill-switch
+
+Set the env var `SYNAPSYS_CORTEX_AUTO_RECALL=off` (case-insensitive) to disable **all** auto-recall paths regardless of `config.yaml`. Any other value, or unset, leaves auto-recall governed by the config.
+
+### Inspecting activity — `synapsys recall`
+
+Run `/synapsys recall` (or `node plugins/synapsys/scripts/synapsys-recall.js`) to see the current session's auto-recall activity. It first prints the resolved recall provider — `provider: module <path>`, `provider: default bridge (cortex sqlite, read-only): <db path>`, or `provider: none (<reason>)` — then one line per query that ran this session with its result count:
+
+```
+provider: default bridge (cortex sqlite, read-only): /home/me/.cortex/memory.db
+- <query string> → 3 results
+- <other query> → 1 result
+```
+
+When nothing has run yet, it prints `no auto-recall this session`. (This is distinct from `/synapsys status`, which reports the live active-domain set.)
+
 ## Design choices
 
 - **Fail-open** — any error in the dispatcher exits 0 with no output. Memory injection must never block a user prompt or tool call.
 - **Flat frontmatter** — single-line values only, no nested YAML, zero deps.
 - **Marker files** — synapsys only reads from dirs with `.synapsys.json`. Prevents stray `synapsys` directories from being picked up.
-- **Output cap** — injected text is truncated at 8000 characters to protect the context window.
+- **Output budget** — injected text is governed by a 16000-character demote-not-truncate budget: memories that would overflow it are demoted to one-line summaries (never silently truncated) and re-inject in full on their next match. Override with `SYNAPSYS_INJECT_BUDGET`.
 
 ## fire_mode — injection deduplication
 
@@ -435,7 +606,7 @@ The session id used to key the per-session injection ledger is resolved through 
 1. **`process.env.CLAUDE_CODE_SESSION_ID`** — the authoritative signal. Claude Code rotates this environment variable on `/clear` and at the start of every new conversation, so the dispatcher automatically reads/writes a fresh ledger file (`~/.claude/synapsys/.session/<CLAUDE_CODE_SESSION_ID>.json`) per session with no explicit clear hook. Values are validated against `SAFE_ID_RE` (`/^[A-Za-z0-9_-]{1,128}$/`); unsafe values are sha256-hashed before touching the filesystem, and empty strings are treated as absent.
 2. **`payload.session_id`** — passed by the hook payload when available.
 3. **`<sessionDir>/.current`** — advisory persistent fallback also published for out-of-process readers (`synapsys-list`, `synapsys-stats`).
-4. **`sha1(cwd + processStartTime)`** — last-resort deterministic fallback.
+4. **`sha256(cwd + processStartTime)`** — last-resort deterministic fallback.
 
 Graceful degradation: if `CLAUDE_CODE_SESSION_ID` ever disappears in a future Claude Code release, legs 2–4 still produce a usable session id, but `/clear` correctness (a fresh ledger after the user clears the conversation) specifically depends on the env var rotating. Stale `.current` files do not override a present env var, and a new Claude Code session in the same `cwd` always starts with a fresh ledger because the env var changes per conversation.
 

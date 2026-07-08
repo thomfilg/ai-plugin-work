@@ -232,6 +232,25 @@ describe('createPhaseStateCli factory', () => {
     assert.match(err.message, /expired/i);
   });
 
+  it('record tolerates small cross-process clock skew but rejects far-future tokens', () => {
+    mintToken(ticket);
+    run(binPath, ['init', ticket], { TASKS_BASE: tasksBase });
+
+    // Within TOKEN_CLOCK_SKEW_MS (2s): minter's clock slightly ahead of the
+    // consumer's — must be accepted (this exact skew flaked full-suite runs).
+    mintToken(ticket, { timestamp: Date.now() + 1_000 });
+    const ok = run(binPath, ['record', ticket, 'a'], { TASKS_BASE: tasksBase });
+    assert.equal(ok.status, 0, `skewed token rejected: ${ok.stderr}`);
+
+    // Beyond the tolerance: still rejected as future-dated.
+    mintToken(ticket, { timestamp: Date.now() + 60_000 });
+    const res = run(binPath, ['record', ticket, 'b'], { TASKS_BASE: tasksBase });
+    assert.notEqual(res.status, 0);
+    const err = JSON.parse(res.stderr.trim().split('\n').pop());
+    assert.equal(err.error, true);
+    assert.match(err.message, /in the future/i);
+  });
+
   it('record rejects an unauthorized agent', () => {
     mintToken(ticket);
     run(binPath, ['init', ticket], { TASKS_BASE: tasksBase });

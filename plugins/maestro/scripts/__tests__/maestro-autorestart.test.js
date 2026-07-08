@@ -39,7 +39,18 @@ function loadFreshActions(fakeDir, env = {}) {
   for (const k of Object.keys(require.cache)) {
     if (k.includes('/maestro-conduct/')) delete require.cache[k];
   }
-  Object.assign(process.env, env);
+  // Default sink isolation: tests that omit LOG_FILE/ALERT_FILE used to write
+  // straight into the PRODUCTION /tmp/maestro-conduct.log — fake ECHO-5/ECHO-9
+  // restart lines from this suite were found interleaved with a live fleet's
+  // events. Never let a test touch the operator's real sinks.
+  const isolationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-test-sinks-'));
+  const defaults = {
+    LOG_FILE: path.join(isolationDir, 'conduct.log'),
+    ALERT_FILE: path.join(isolationDir, 'alerts.jsonl'),
+    MAESTRO_GROOM_DELAY_SEC: '0',
+    MAESTRO_SEND_VERIFY_DELAY_SEC: '0',
+  };
+  Object.assign(process.env, defaults, env);
   process.env.PATH = `${fakeDir}:${process.env.PATH}`;
   return require(ACTIONS_LIB);
 }

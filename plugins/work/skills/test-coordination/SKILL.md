@@ -1,6 +1,6 @@
 ---
 name: test-coordination
-argument-hint: [ticket-id]
+argument-hint: '[ticket-id]'
 description: Coordinate test coverage improvement - runs /tests-review and /tests-create in parallel until coverage is adequate
 user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, Skill
@@ -83,7 +83,7 @@ Read final results from tests-feedback.jsonl.
 ## Step 7: Report Results and Commit
 
 Report final rating, iterations, and stop reason.
-If tests were modified, prompt to commit using commit-writer agent.
+If tests were modified, prompt to commit the changes through `commit-and-push.js` (a raw `git commit` is blocked; the script enforces conventions).
 
 ---
 

@@ -4,6 +4,10 @@
  * inject-ledger — per-session injection ledger for synapsys fire_mode.
  *
  * Session-id resolution chain (spec §3.2, GH-583):
+ *   0. Codex-shaped payloads only (turn_id / rollout transcript_path, WP-12):
+ *      `payload.session_id` wins — the env leg is the OUTER Claude session's
+ *      id when codex runs nested under a Claude terminal and would
+ *      cross-contaminate that session's ledger.
  *   1. `process.env.CLAUDE_CODE_SESSION_ID` — authoritative. Validated by
  *      /^[A-Za-z0-9_-]{1,128}$/; unsafe values are sha256-hashed (path-traversal
  *      guard, spec §4.1). Empty/unset falls through to leg 2. Claude Code rotates
@@ -39,6 +43,7 @@ const path = require('node:path');
 const os = require('node:os');
 const sharedSessionId = require('./session-id');
 const sessionIdRotation = require('./session-id-rotation');
+const { sniffPayload } = require('./runtime/index');
 
 const MAX_FILE_BYTES = 64 * 1024;
 const SAFE_ID_RE = sharedSessionId.SAFE_ID_RE;
@@ -124,6 +129,17 @@ function computeFallbackId() {
 
 function resolveChain(payload) {
   try {
+    // Codex-shaped payloads (turn_id / rollout transcript_path) carry the
+    // CODEX session id; the CLAUDE_CODE_SESSION_ID env leg belongs to the
+    // OUTER Claude session when codex is nested under a Claude terminal (the
+    // exact /work orchestration topology — a codex hook child inherits the
+    // launcher's full Claude env). Env-first there keys the codex run's
+    // ledger to the launching Claude session (WP-12 live smoke proved the
+    // cross-contamination), so the payload leg wins for codex payloads.
+    if (sniffPayload(payload) === 'codex') {
+      const fromCodexPayload = resolveFromPayload(payload);
+      if (fromCodexPayload) return { sessionId: fromCodexPayload, source: 'payload' };
+    }
     const fromEnv = resolveFromEnv();
     if (fromEnv) {
       // Instrumentation pin (GH-583 follow-up): record env-var rotations to a

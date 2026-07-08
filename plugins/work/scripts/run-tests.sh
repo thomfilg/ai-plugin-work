@@ -44,6 +44,7 @@ mapfile -t FILES < <(
   {
     find plugins -type d \( -name node_modules -o -path 'plugins/work/hooks' \) -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print
     [ -d factories ] && find factories -type d -name node_modules -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print
+    [ -d scripts ] && find scripts -type d -name node_modules -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print
   } | sort
 )
 

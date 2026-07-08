@@ -25,13 +25,6 @@ const {
   TEST_FILE_EXT_RE,
   isIntegrationTestPath,
   isE2eTestPath,
-  usesIntegrationRunner,
-  usesUnitRunner,
-  usesE2eRunner,
-  usesRecognisedRunner,
-  detectNonTestCommand,
-  extractChangedFilesFromTestCommand,
-  extractEvalScopePairs,
 } = require('./task-scope-globs');
 
 const {
@@ -41,8 +34,6 @@ const {
   validateUniqueOwnership,
   validateTddCycle,
 } = require('./task-scope-validators');
-
-const { validateTaskTestScope } = require('./task-scope-test-validator');
 
 /**
  * Validate every task and return a flat error list.
@@ -57,7 +48,6 @@ function validateAll(tasks) {
   const errors = [];
   for (const t of tasks) {
     errors.push(...validateTask(t));
-    errors.push(...validateTaskTestScope(t));
   }
   errors.push(...validateTddCycle(tasks));
   errors.push(...validateCrossTaskDepsOwnership(tasks));
@@ -97,9 +87,30 @@ function findTask(tasks, taskNum) {
   return tasks.find((t) => t && t.num === taskNum) || null;
 }
 
+/**
+ * Scope-match for arbitrary (not just test) files: exact match, legacy
+ * bare-dir prefix, then the shared glob-aware matcher. ONE shared
+ * implementation (validator-unification rule) consumed by the
+ * resume-completed recorder (GH-509 condition d), the ablation recorder
+ * (GH-570 in-scope mutation requirement), and the work-implement-enforce
+ * hook's ablation-RED allowance.
+ *
+ * @param {string} rel - worktree-relative candidate path
+ * @param {Array<string>} scopeList - the task's `### Files in scope` entries
+ * @returns {boolean}
+ */
+function fileInTaskScope(rel, scopeList) {
+  if (typeof rel !== 'string' || !rel) return false;
+  const list = Array.isArray(scopeList) ? scopeList.filter((s) => typeof s === 'string' && s) : [];
+  return list.some((s) => {
+    if (rel === s) return true;
+    if (rel.startsWith(s.replace(/\/+$/, '') + '/')) return true;
+    return fileMatchesScope(rel, [s]);
+  });
+}
+
 module.exports = {
   validateTask,
-  validateTaskTestScope,
   validateTddCycle,
   validateCrossTaskDepsOwnership,
   validateIntraTicketScope,
@@ -107,15 +118,9 @@ module.exports = {
   validateAll,
   unionFilesInScope,
   findTask,
-  extractChangedFilesFromTestCommand,
-  extractEvalScopePairs,
   fileMatchesScope,
+  fileInTaskScope,
   isIntegrationTestPath,
   isE2eTestPath,
-  usesIntegrationRunner,
-  usesUnitRunner,
-  usesE2eRunner,
-  usesRecognisedRunner,
-  detectNonTestCommand,
   TEST_FILE_EXT_RE,
 };

@@ -8,7 +8,12 @@
  * mirroring the original protect-package-json hook).
  */
 
-const { expandHomePaths, allRefsUnderAllowedPaths } = require('./paths');
+const { expandHomePaths, allRefsUnderAllowedPaths, markerOnlyInTempPaths } = require('./paths');
+const {
+  normalizedVariants,
+  commandGlobReferencesMarker,
+  commandGlobReferencesPath,
+} = require('./shell-normalize');
 
 // Generic write-op templates; `MARKER` is replaced per protected marker.
 const BASH_WRITE_TEMPLATES = [
@@ -42,20 +47,14 @@ const BASH_WRITE_TEMPLATES = [
   /tar\s+.*-C\s*["']?[^|&;]*MARKER/i,
   /tar\s+.*--directory\s*["']?[^|&;]*MARKER/i,
   /unzip\s+.*-d\s*["']?[^|&;]*MARKER/i,
-  /python[23]?\s+-c\s+.*MARKER/i,
-  /MARKER.*python[23]?\s+-c/i,
-  /node\s+-e\s+.*MARKER/i,
-  /MARKER.*node\s+-e/i,
-  /perl\s+-e\s+.*MARKER/i,
-  /MARKER.*perl\s+-e/i,
-  /ruby\s+-e\s+.*MARKER/i,
-  /MARKER.*ruby\s+-e/i,
+  // Interpreter invocations (node -e, python -c, perl/ruby -e, sh/bash -c, eval)
+  // that merely NAME the marker are NOT writes — `node -e "require('X/.claude/c')"`
+  // and `python -c "print(open('X/.claude/c').read())"` are pure reads. Their
+  // actual writes carry a redirect (`>`, caught by the generic template above) or
+  // a write API (caught by BASH_WRITE_GLOBAL below), so no bare-interpreter marker
+  // template is needed here. Dropping them removes the highest-volume false
+  // positive (read-only introspection). See GH-656.
   /cd\s+.*MARKER.*(?:&&|;|\|\||&)/i,
-  /sh\s+-c\s+.*MARKER/i,
-  /MARKER.*sh\s+-c/i,
-  /bash\s+-c\s+.*MARKER/i,
-  /MARKER.*bash\s+-c/i,
-  /eval\s+.*MARKER/i,
   /git\s+clone\s+.*MARKER/i,
   /git\s+checkout\s+.*MARKER/i,
   /git\s+pull\s+.*MARKER/i,
@@ -68,13 +67,22 @@ const BASH_WRITE_TEMPLATES = [
   /<<.*>\s*["']?[^|&;]*MARKER/i,
 ];
 
+// Interpreter WRITE detection: a `node -e`/`python -c` invocation is a write
+// only when its inline code calls a write API (not merely `open(`/`require`,
+// which are reads). `open(` is required to carry a write mode ('w'/'a'/'x') so a
+// read-open is not flagged. See GH-656.
 const BASH_WRITE_GLOBAL = [
-  /node\s+-e\s+.*(?:writeFileSync|appendFileSync|writeFile|createWriteStream)/i,
-  /python[23]?\s+-c\s+.*(?:open\(|write\(|\.write|write_text|write_bytes|\.unlink|\.rename|\.replace\(|\.mkdir|shutil\.\w*copy|shutil\.move|shutil\.rmtree)/i,
+  /node\s+-e\s+.*(?:writeFileSync|appendFileSync|writeFile\b|createWriteStream|\brmSync|\bunlinkSync|\brenameSync)/i,
+  /python[23]?\s+-c\s+.*(?:open\([^)]*,\s*['"][^'"]*(?:[wax]|r[^'"]*\+)|write_text|write_bytes|\.write\(|\.unlink|\.rename|\.replace\(|\.mkdir|shutil\.\w*copy|shutil\.move|shutil\.rmtree)/i,
 ];
 
+// Bare interpreter tokens (node -e, python -c, sh -c, eval, …) are deliberately
+// NOT generic write signals: naming a protected path inside an interpreter read
+// (`node -e "require('X/.claude/c')"`) must not count as an absolute-path write.
+// Real interpreter writes carry a redirect (`>`) or a write API (BASH_WRITE_GLOBAL)
+// and are still detected. See GH-656.
 const GENERIC_WRITE_RE =
-  /(?:>{1,2}|>\||\btee\b|\bcp\b|\bmv\b|\brm\b|\brmdir\b|\btouch\b|\bmkdir\b|\bchmod\b|\bchown\b|\bln\b|\binstall\b|\brsync\b|\bdd\b|\btruncate\b|\bsed\s+-i|\bpatch\b|\bsponge\b|\bunlink\b|\bcurl\s+-o|\bcurl\s+--output|\bwget\s+-O|\bwget\s+--output|\btar\s+-C|\btar\s+--directory|\bunzip\s+-d|\bfind\s+.*-exec|\bxargs\b|\bnode\s+-e\b|\bpython[23]?\s+-c\b|\bperl\s+-e\b|\bruby\s+-e\b|\bsh\s+-c\b|\bbash\s+-c\b|\beval\b)/i;
+  /(?:>{1,2}|>\||\btee\b|\bcp\b|\bmv\b|\brm\b|\brmdir\b|\btouch\b|\bmkdir\b|\bchmod\b|\bchown\b|\bln\b|\binstall\b|\brsync\b|\bdd\b|\btruncate\b|\bsed\s+-i|\bpatch\b|\bsponge\b|\bunlink\b|\bcurl\s+-o|\bcurl\s+--output|\bwget\s+-O|\bwget\s+--output|\btar\s+-C|\btar\s+--directory|\bunzip\s+-d|\bfind\s+.*-exec|\bxargs\b)/i;
 
 const _patternCache = new Map();
 function getPatternsForMarker(marker) {
@@ -148,26 +156,28 @@ function isReadOnlyBashCommand(command) {
   return true;
 }
 
-/** All command variants (raw / expanded / collapsed) for matching. */
+/**
+ * All command variants for matching. `command`/`collapsed`/`expanded`/
+ * `expandedCollapsed` are the named forms other heuristics key off; `all` is the
+ * de-duplicated set of those PLUS shell-deobfuscated forms (dequoted,
+ * single-char-class reduced, brace-expanded) so quote/backslash/brace/`[x]`
+ * evasions collapse back to the literal path before matching. See GH-655.
+ */
 function commandVariants(command) {
   const collapsed = command.replace(/\s*\n+\s*/g, ' ');
-  return {
-    command,
-    collapsed,
-    expanded: expandHomePaths(command),
-    expandedCollapsed: expandHomePaths(collapsed),
-  };
+  const expanded = expandHomePaths(command);
+  const expandedCollapsed = expandHomePaths(collapsed);
+  const all = new Set();
+  for (const base of [command, collapsed, expanded, expandedCollapsed]) {
+    for (const variant of normalizedVariants(base)) all.add(variant);
+  }
+  return { command, collapsed, expanded, expandedCollapsed, all: [...all] };
 }
 
 function anyMatches(patterns, v) {
   for (const p of patterns) {
-    if (
-      p.test(v.command) ||
-      p.test(v.expanded) ||
-      p.test(v.collapsed) ||
-      p.test(v.expandedCollapsed)
-    ) {
-      return true;
+    for (const s of v.all) {
+      if (p.test(s)) return true;
     }
   }
   return false;
@@ -183,13 +193,58 @@ function markerWriteMatch(marker, v) {
   return false;
 }
 
+/**
+ * Does `marker` appear in `text` sitting on a path-like boundary? The marker is
+ * regex-escaped (same escape as the cp/rsync read check above) and must be
+ * preceded by start-of-string, `/`, whitespace, a quote, or `>`, and followed
+ * by end-of-string, `/`, whitespace, a quote, or `.`.
+ *
+ * The `>` leading boundary covers no-space redirect-writes (`>ui/x`). A second
+ * alternative (`=marker/`) covers `flag=path` writes such as dd's
+ * `of=src/output.dat`, where the marker is preceded by `=`.
+ */
+const _boundaryCache = new Map();
+function getBoundaryPattern(marker) {
+  if (_boundaryCache.has(marker)) return _boundaryCache.get(marker);
+  const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Leading boundary also accepts `>` so a no-space redirect into the protected
+  // dir (`>ui/x`) stays blocked — a genuine path-token write, fail-closed like
+  // its spaced form `> ui/x`. See GH-642.
+  //
+  // The `=${esc}/` alternative restores blocking of `flag=path` writes (dd's
+  // `of=src/output.dat`) that String.includes caught before the boundary anchor.
+  // It requires a trailing `/` so it only fires on a path INTO the protected dir
+  // — a bare assignment like `x=ui` (marker at end, no `/`) is not a path token
+  // and must stay allowed. See GH-642.
+  const pattern = new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])|=${esc}/`);
+  _boundaryCache.set(marker, pattern);
+  return pattern;
+}
+
+function markerOnPathBoundary(marker, text) {
+  return getBoundaryPattern(marker).test(text);
+}
+
 function markerPresent(marker, v) {
-  return (
-    v.command.includes(marker) ||
-    v.expanded.includes(marker) ||
-    v.collapsed.includes(marker) ||
-    v.expandedCollapsed.includes(marker)
-  );
+  // Markers containing `/` are already path-qualified — a raw substring match is
+  // safe and intentional (relative-path writes like `sed -i .claude/x`). Tested
+  // over `v.all` so a dequoted/brace-expanded form is also caught, plus a
+  // wildcard token that could expand onto the path (GH-655).
+  if (marker.includes('/')) {
+    for (const s of v.all) {
+      if (s.includes(marker) || commandGlobReferencesPath(s, marker)) return true;
+    }
+    return false;
+  }
+  // Bare basenames anchor to a path boundary so short names (ui, db, api, lib,
+  // src) no longer match a mid-word substring (build → "ui", require → "ui",
+  // glibc → "lib") and wrongly flag unrelated commands (GH-642). Wildcard tokens
+  // are matched only when anchored by a substantial literal prefix/suffix, so
+  // `ls src/*` still does not flag `ui` (GH-655).
+  for (const s of v.all) {
+    if (markerOnPathBoundary(marker, s) || commandGlobReferencesMarker(s, marker)) return true;
+  }
+  return false;
 }
 
 /**
@@ -204,6 +259,11 @@ function markerPresent(marker, v) {
  */
 function markerEligible(entry, marker, v) {
   if (!markerPresent(marker, v)) return false;
+  // Temp-path parity with the file-tool guard (findProtectedTarget exempts temp
+  // paths): a write whose only marker hit sits inside a scratch temp path — e.g.
+  // scaffolding `/tmp/x/.claude/fixture` — is not a write to the protected path.
+  // See GH-658.
+  if (markerOnlyInTempPaths(v.expandedCollapsed, marker)) return false;
   if (!entry.isFile && allRefsUnderAllowedPaths(v.expandedCollapsed, entry)) return false;
   return true;
 }
@@ -213,12 +273,15 @@ function absolutePathWrite(entry, v, dirPresent) {
     dirPresent &&
     hasGenericWriteIntent(v.collapsed) &&
     !isDirectionSensitiveRead(v.command, v.expanded, entry.dir) &&
+    !markerOnlyInTempPaths(v.expandedCollapsed, entry.dir) && // GH-658 temp parity
     !allRefsUnderAllowedPaths(v.expandedCollapsed, entry)
   );
 }
 
 function entryWriteMatch(entry, v) {
-  const dirPresent = v.expanded.includes(entry.dir) || v.expandedCollapsed.includes(entry.dir);
+  const dirPresent =
+    v.all.some((s) => s.includes(entry.dir)) ||
+    v.all.some((s) => commandGlobReferencesPath(s, entry.dir));
   if (absolutePathWrite(entry, v, dirPresent)) return 'absolute-path';
   for (const marker of entry.markers) {
     if (!markerEligible(entry, marker, v)) continue;

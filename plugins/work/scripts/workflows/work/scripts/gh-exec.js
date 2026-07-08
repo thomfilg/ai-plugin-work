@@ -4,23 +4,42 @@
  * Executes `gh` commands via execFileSync with JSON parsing,
  * error handling, and optional non-zero exit tolerance.
  *
+ * Token precedence (buildChildEnv): an explicit non-empty GH_TOKEN wins, else
+ * an explicit non-empty GITHUB_TOKEN is honored, else both are dropped so gh
+ * falls back to the keyring active account (GH_TOKEN > GITHUB_TOKEN > keyring,
+ * matching gh's own resolution). Empty-string tokens are treated as absent.
+ *
  * Auth diagnostic: when `gh` exits non-zero with an auth-shaped stderr
- * (matched by AUTH_ERROR_REGEX), `ghExec` spawns `gh auth status` with a
- * scrubbed env (no GH_TOKEN/GITHUB_TOKEN) and appends a diagnostic block to
- * the thrown Error.message listing the active gh account, other configured
- * accounts, the `gh auth switch --user <other>` hint, and a reminder to
- * unset GH_TOKEN/GITHUB_TOKEN. Set `GH_EXEC_NO_DIAG=1` (strict string match)
- * to opt out and restore today's raw-error behavior.
+ * (matched by AUTH_ERROR_REGEX), `ghExec` spawns `gh auth status` and appends a
+ * diagnostic block to the thrown Error.message listing the active gh account,
+ * other configured accounts, the `gh auth switch --user <other>` hint, and
+ * guidance to set GH_TOKEN (now honored) for the owning account. Set
+ * `GH_EXEC_NO_DIAG=1` (strict string match) to opt out and restore today's
+ * raw-error behavior.
  */
 const { execFileSync } = require('child_process');
 
 const AUTH_ERROR_REGEX =
   /Could not resolve to a Repository|Resource not accessible|HTTP 40[134]|requires authentication/i;
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
 function buildChildEnv() {
   const env = { ...process.env };
-  delete env.GH_TOKEN;
-  delete env.GITHUB_TOKEN;
+  // Token precedence mirrors gh: explicit GH_TOKEN > explicit GITHUB_TOKEN >
+  // keyring active account. Honor whichever explicit token is set (empty
+  // strings count as absent); when neither is set, drop both so gh falls back
+  // to the keyring. GH_CONFIG_DIR and all other vars pass through untouched.
+  if (isNonEmptyString(process.env.GH_TOKEN)) {
+    delete env.GITHUB_TOKEN;
+  } else if (isNonEmptyString(process.env.GITHUB_TOKEN)) {
+    delete env.GH_TOKEN;
+  } else {
+    delete env.GH_TOKEN;
+    delete env.GITHUB_TOKEN;
+  }
   return env;
 }
 
@@ -97,7 +116,7 @@ function buildAuthDiagnostic(parsed) {
     }
   }
   lines.push(
-    '   If GH_TOKEN or GITHUB_TOKEN is set in your env, unset them so gh uses the keyring.'
+    '   Set GH_TOKEN to the account that owns this repo (it is now honored); otherwise run `gh auth switch --user <other>` to change the keyring active account.'
   );
   return lines.join('\n');
 }

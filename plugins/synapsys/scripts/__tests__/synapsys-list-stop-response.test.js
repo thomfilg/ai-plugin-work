@@ -34,9 +34,14 @@ function writeMemory(storeDir, name, frontmatter) {
 }
 
 function runList(cwd) {
+  // Isolated HOME: without it the CLI also lists the machine's real
+  // global/shared stores, and any live memory carrying trigger_stop_response
+  // breaks the "omits stop-response" assertion (machine-dependent failure).
+  const fakeHome = path.join(cwd, 'fake-home');
+  fs.mkdirSync(fakeHome, { recursive: true });
   const res = spawnSync(process.execPath, [SCRIPT, '--verbose', '--no-color', `--cwd=${cwd}`], {
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: { ...process.env, NO_COLOR: '1', HOME: fakeHome },
   });
   return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
 }

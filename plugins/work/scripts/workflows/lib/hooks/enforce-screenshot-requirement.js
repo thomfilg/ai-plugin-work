@@ -167,18 +167,21 @@ function hasScreenshots(ticketId) {
 function blockIfNoScreenshots(hookData) {
   const ticketId = getTicketId();
   if (!ticketId) return;
-  // Skip screenshot enforcement when no web apps are configured (GH-181)
-  // Use process.env.WEB_APPS directly to avoid circular dependencies in the hook
-  let webApps = [];
+  // Skip screenshot enforcement when no web apps are configured (GH-181).
+  // Resolve WEB_APPS through lib/config (dotenv-aware): a raw process.env
+  // read misses values that live only in the repo/cwd .env file (PR #628
+  // finding — same fix as check validate-summary/verify-playwright). The
+  // old "circular dependency" concern was stale: this hook already requires
+  // ../config in getScreenshotDir. Fail-open on config load errors so a
+  // misconfigured environment never bricks the hook.
+  let hasConfiguredWebApps = false;
   try {
-    webApps = JSON.parse(process.env.WEB_APPS || '[]');
+    hasConfiguredWebApps = require('../config').webAppNames().length > 0;
   } catch {
     process.stderr.write(
-      'warn: screenshot-requirement: malformed WEB_APPS env var, treating as empty\n'
+      'warn: screenshot-requirement: could not resolve WEB_APPS config, treating as empty\n'
     );
   }
-  // Align with config.webAppNames() — require at least one entry with a name
-  const hasConfiguredWebApps = Array.isArray(webApps) && webApps.some((app) => app && app.name);
   if (!hasConfiguredWebApps) return;
   if (fs.existsSync(skipMarkerPath(ticketId))) return;
   if (!hasTsxChanges()) return;
@@ -237,13 +240,17 @@ function unblockAfterChoice(hookData) {
   }
 }
 
-async function main() {
-  let input = '';
+/** Read and parse the hook payload from stdin. */
+async function readHookPayload() {
+  const chunks = [];
   for await (const chunk of process.stdin) {
-    input += chunk;
+    chunks.push(chunk);
   }
+  return JSON.parse(chunks.join(''));
+}
 
-  const hookData = JSON.parse(input);
+async function main() {
+  const hookData = await readHookPayload();
   const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
   const toolName = hookData.tool_name || '';
 

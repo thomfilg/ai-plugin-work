@@ -19,6 +19,8 @@
 
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { hasUnpushedCommitsStrict } = require('../git-unpushed');
+const { T, getRuntime } = require('../../../lib/instruction-vocab');
 
 function blocked(reason) {
   return { type: 'follow_up_instruction', action: 'blocked', reason };
@@ -86,11 +88,19 @@ function fetchNextComment(state, commentsScript, ctx, scriptEnv) {
   }
 }
 
-// No more actionable comments. When all remaining comments are terminal (solved
-// or skipped), advance directly to `report` and let the workflow finish — the
-// rationale for each skip is preserved in follow-up-comments.json for later
-// review. Previously this returned `action: 'blocked'` which forced a manual
-// "I have reviewed, re-run" ack-loop even after the user had approved the skips.
+// No more actionable comments. When all remaining comments are terminal
+// (solved or skipped), record the counts and finish — the rationale for each
+// disposition is preserved in follow-up-comments.json and itemized by the
+// report step. Previously this returned `action: 'blocked'` which forced a
+// manual "I have reviewed, re-run" ack-loop even after the user had approved
+// the skips.
+//
+// Routing: when review-fix commits are still unpushed, go through push-retry
+// first (the old skipped>0 path jumped straight to report and completed the
+// workflow with the fixes never pushed). Otherwise go to report. Counts are
+// recorded on EVERY done-path — including all-solved — so the completion
+// summary can itemize what was addressed (previously the skipped===0 path
+// fell through with no counts and the summary never mentioned reviews).
 //
 // Loop-break invariant: routing to `report` marks the workflow `status:
 // complete`, so re-running /follow-up without --init returns "Already complete"
@@ -98,18 +108,29 @@ function fetchNextComment(state, commentsScript, ctx, scriptEnv) {
 function handleNoMoreComments(state, commentsScript, ctx, scriptEnv) {
   delete state._reviewSnapshotDone;
   const statusResult = readCommentsStatus(commentsScript, ctx, scriptEnv);
-  if (statusResult && statusResult.skipped > 0) {
-    state._skippedReviewsCount = statusResult.skipped;
+  if (statusResult) {
+    state._skippedReviewsCount = statusResult.skipped || 0;
     state._solvedReviewsCount = statusResult.solved || 0;
-    state.currentStep = 'report';
   }
+  // GH-670: the review work that set failureCategory ('review_failure', or
+  // legacy 'reviews') is now terminal — every tracked comment is solved or
+  // skipped locally. Null it out (mirrors push-retry's loopBackToMonitor) so
+  // the report step routes to completion instead of surfacing forever.
+  state.failureCategory = null;
+  // STRICT commits-only probe: the dirty-tree fallback would misroute a
+  // no-upstream worktree with stray untracked files into an endless
+  // done→push-retry cycle (review finding on PR #666).
+  state.currentStep = hasUnpushedCommitsStrict(ctx.worktreeDir) ? 'push-retry' : 'report';
   return null;
 }
 
+// The denominator must be the STABLE total: `remaining` shrinks while
+// currentIndex grows, so preferring it produced counters that ran backwards
+// ("Comment 3 of 1" on the last of three) — review finding on PR #666.
 function computeCounts(st) {
   if (!st) return { totalComments: '?', currentIndex: '?' };
   return {
-    totalComments: st.remaining || st.total || '?',
+    totalComments: st.total || st.remaining || '?',
     currentIndex: (st.solved || 0) + (st.skipped || 0) + 1,
   };
 }
@@ -153,6 +174,32 @@ function cleanCommentBody(rawBody) {
     .trim();
 }
 
+// Mandatory judgment/triage step (GH-352). Lifted to module scope so
+// buildReviewPrompt stays under the 80-line/function cap. The agent must
+// read the referenced code and verify the bot's claim BEFORE choosing Option
+// A / Option B, classify into one of six categories, and record the chosen
+// category inside the solve/skip reason so it persists in comment.resolution.
+function reviewJudgmentBlock(fileRef) {
+  return [
+    '## Before you act — judge the comment:',
+    `1. **Read the referenced code** at \`${fileRef}\` (the file/line above).`,
+    "2. **Verify the bot's claim** is accurate against the current code — do not trust it blindly.",
+    '3. **Classify** the comment into exactly one category and take the prescribed action:',
+    '   - **real bug** → fix (Option A)',
+    '   - **real improvement** (perf/maintainability, related to this PR) → fix (Option A)',
+    '   - **style/naming preference** → skip with reason (Option B)',
+    '   - **false positive** (bot misread the code) → skip with evidence (Option B)',
+    '   - **conflicts with user intent / ticket requirements** → skip with reason (Option B)',
+    '   - **ambiguous** (unsure whether it applies) → ask the user',
+    '4. **Record the classification**: put a leading `[<category>]` token at the start of the',
+    '   `<reason>` you pass to `--mark-locally-skipped` and the `<description>` you pass to',
+    '   `--mark-locally-solved`, so the category persists in the comment resolution.',
+    '',
+    '---',
+    '',
+  ];
+}
+
 function buildReviewPrompt(comment, fileRef, counts, commands) {
   const author = comment.author || 'unknown';
   const priority = comment.priority || 'unknown';
@@ -168,6 +215,7 @@ function buildReviewPrompt(comment, fileRef, counts, commands) {
     codeContext ? `### Current code:\n\`\`\`\n${codeContext}\n\`\`\`\n` : '',
     '---',
     '',
+    ...reviewJudgmentBlock(fileRef),
     '## You MUST do exactly ONE of these:',
     '',
     '### Option A — Fix the code:',
@@ -219,7 +267,8 @@ function buildReviewExecute(state, comment, commentsScript, counts) {
       agentType: 'work-workflow:developer-nodejs-tdd',
       description: `Review comment ${counts.currentIndex} of ${counts.totalComments}: ${fileRef}`,
       prompt: buildReviewPrompt(comment, fileRef, counts, commands),
-      note: 'Pass the prompt directly to the agent.',
+      // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+      note: T('delegate.task.note.short', {}, getRuntime().name),
     },
   };
 }
@@ -263,3 +312,10 @@ module.exports = function registerFixReviews(register) {
     return buildReviewExecute(state, comment, commentsScript, counts);
   });
 };
+
+// Exposed for tests so ordering/content assertions run against the ACTUAL
+// assembled prompt string rather than the raw source-file layout. The judgment
+// block's content is covered transitively via buildReviewPrompt, so it is not
+// exported separately.
+module.exports.buildReviewPrompt = buildReviewPrompt;
+module.exports.computeCounts = computeCounts;

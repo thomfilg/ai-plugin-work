@@ -29,34 +29,30 @@
  */
 
 const path = require('path');
+// Shared resolver for codex apply_patch write targets (design C6).
+const { resolveApplyPatchTargets } = require('./apply-patch-targets');
+// Check 3 (per-task .check.md routing) lives in its own module.
+const { checkPerTaskPath } = require('./artifact-per-task-path');
 
 /** Shell write operators — redirects, tee, cp, mv, dd */
 const BASH_WRITE_OPS = /(?:>{1,2}|\btee\b|\bcp\b|\bmv\b|\bdd\b.*\bof=)/;
 
-/**
- * Extract the actual target file path from a Bash command string.
- * Looks for tokens containing both the given basename and a path separator.
- * Returns null if no reliable path can be determined (caller should fail-open).
- *
- * @param {string} cmd — the raw Bash command string
- * @param {string} basename — the artifact basename to search for
- * @returns {string|null}
- */
-function extractBashTargetPath(cmd, basename) {
-  const tokens = cmd.split(/\s+/);
-  let lastMatch = null;
-  for (const token of tokens) {
-    // Strip shell redirects and quotes
-    const cleaned = token.replace(/^[>]+/, '').replace(/['"]/g, '');
-    if (cleaned.includes(basename) && cleaned.includes('/')) {
-      lastMatch = cleaned;
-    }
-  }
-  return lastMatch;
-}
-
 /** Node.js fs write calls executed via Bash */
 const NODE_FS_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream)\b/;
+
+/**
+ * Whole-basename reference test for Bash command strings.
+ * A raw `cmd.includes(basename)` also fires on unrelated files that merely
+ * CONTAIN the artifact basename as a substring — e.g. `subtasks.md`,
+ * `tasks.md.bak`, `tasks.mdx` for artifact `tasks.md` (ECHO-5538 secondary
+ * bug). Require the basename to be delimited: preceded by start-of-string,
+ * a path separator, or a shell delimiter, and not followed by a word
+ * character, dot, or dash.
+ */
+function bashReferencesBasename(cmd, basename) {
+  const esc = basename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[/\\s'"\`=(<>|;&])${esc}(?![\\w.-])`).test(cmd);
+}
 
 /**
  * @typedef {object} ArtifactRule
@@ -88,6 +84,140 @@ function matchesRule(basename, rule) {
 }
 
 /**
+ * Vector 2: Bash shell writes — find the first artifact rule referenced by
+ * the command (whole-basename match — substring hits like `subtasks.md`
+ * must not trigger the rule).
+ */
+function matchBashArtifact(artifacts, cmd) {
+  for (const a of artifacts) {
+    if (a.basename && bashReferencesBasename(cmd, a.basename)) {
+      return { bn: a.basename, rule: a };
+    }
+    if (a.pattern) {
+      // Extract potential filenames from command tokens
+      const tokens = cmd.match(/[\w.-]+\.(?:md|json|txt)/g) || [];
+      const match = tokens.find((t) => a.pattern.test(t));
+      if (match) return { bn: match, rule: a };
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the write target (basename + path context + matching rule) for the
+ * tool call, or null when the call does not touch a protected artifact.
+ */
+function matchDirectWriteTarget(artifacts, toolInput) {
+  // Vector 1: Direct file writes
+  const filePath = toolInput?.file_path || '';
+  if (!filePath) return null;
+  const bn = path.basename(filePath);
+  const rule = artifacts.find((a) => matchesRule(bn, a));
+  return rule ? { bn, filePath, rule } : null;
+}
+
+/** Bash shell writes: >, >>, tee, cp, mv, sed -i, cat >, node -e writeFileSync */
+function hasBashWriteVector(cmd) {
+  return BASH_WRITE_OPS.test(cmd) || NODE_FS_WRITES.test(cmd) || /\bsed\s+-i\b/.test(cmd);
+}
+
+/**
+ * Codex apply_patch vector: the Edit/Write matcher lanes alias-fire for
+ * apply_patch but the payload is a raw patch (no file_path). Resolve every
+ * parsed target against the payload cwd and match the FIRST artifact rule
+ * hit. Unparseable targets (ok:false) fail open — advisory protector (C6).
+ */
+function matchApplyPatchTarget(artifacts, toolInput, hookData) {
+  for (const resolved of resolveApplyPatchTargets(toolInput?.command, hookData)) {
+    const bn = path.basename(resolved);
+    const rule = artifacts.find((a) => matchesRule(bn, a));
+    if (rule) return { bn, filePath: resolved, rule };
+  }
+  return null;
+}
+
+function matchWriteTarget(artifacts, toolName, toolInput, hookData) {
+  if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
+    return matchDirectWriteTarget(artifacts, toolInput);
+  }
+  if (toolName === 'apply_patch') {
+    return matchApplyPatchTarget(artifacts, toolInput, hookData);
+  }
+  if (toolName !== 'Bash') return null;
+  const cmd = String(toolInput?.command || '');
+  if (!hasBashWriteVector(cmd)) return null;
+  const matched = matchBashArtifact(artifacts, cmd);
+  // Use cmd as context for ticket ID check
+  return matched ? { bn: matched.bn, filePath: cmd, rule: matched.rule } : null;
+}
+
+/** Check 1: Step must be in_progress (primary step or any allowedSteps). */
+function checkStepGate(rule, currentStep, bn) {
+  const stepAllowed =
+    currentStep === rule.step ||
+    (Array.isArray(rule.allowedSteps) && rule.allowedSteps.includes(currentStep));
+  if (stepAllowed) return null;
+  const stepsLabel = rule.allowedSteps ? [rule.step, ...rule.allowedSteps].join(', ') : rule.step;
+  return {
+    blocked: true,
+    file: bn,
+    rule: 'step',
+    message:
+      `BLOCKED: Cannot write ${bn} — none of the allowed step(s) '${stepsLabel}' are in_progress.\n` +
+      `Current step: ${currentStep || '(none)'}\n` +
+      `Only the ${stepsLabel} step(s) may create/modify this file.\n`,
+  };
+}
+
+/** Check 2: Agent must be authorized (if agents specified). */
+function checkAgentGate(rule, hookData, isRunningInAgent, bn) {
+  if (!rule.agents || rule.agents.length === 0) return null;
+  const transcriptPath = hookData?.transcript_path;
+  if (isRunningInAgent(transcriptPath, rule.agents, hookData)) return null;
+  return {
+    blocked: true,
+    file: bn,
+    rule: 'agent',
+    message:
+      `BLOCKED: Cannot write ${bn} — not running in an authorized agent.\n` +
+      `Allowed agents: ${rule.agents.join(', ')}\n` +
+      `This file can only be created/modified by the designated agent during the ${rule.step} step.\n`,
+  };
+}
+
+/**
+ * For Edit/MultiEdit, read the existing file and apply the edit in memory to
+ * get the resulting content the guard should evaluate.
+ */
+function simulateEditContent(toolInput) {
+  const fs = require('fs');
+  const existing = fs.readFileSync(toolInput?.file_path, 'utf-8');
+  const oldStr = toolInput?.old_string || '';
+  const newStr = toolInput?.new_string || '';
+  if (oldStr && newStr) return existing.replace(oldStr, newStr);
+  return existing; // Can't simulate edit, check existing
+}
+
+function resolveGuardContent(toolName, toolInput) {
+  if (toolName === 'Write') return toolInput?.content || '';
+  try {
+    return simulateEditContent(toolInput);
+  } catch {
+    return toolInput?.new_string || ''; // File doesn't exist yet, fall back
+  }
+}
+
+/** Check 4: Content guard (if specified on the rule). */
+function checkContentGuard(rule, toolName, toolInput, currentStep, bn) {
+  if (!rule.contentGuard || !['Write', 'Edit', 'MultiEdit'].includes(toolName)) return null;
+  const guardContent = resolveGuardContent(toolName, toolInput);
+  if (!guardContent) return null;
+  const guardResult = rule.contentGuard(guardContent, currentStep);
+  if (!guardResult.blocked) return null;
+  return { blocked: true, file: bn, rule: 'content', message: guardResult.message };
+}
+
+/**
  * Create an artifact protector instance.
  *
  * @param {object} opts
@@ -107,239 +237,29 @@ function createArtifactProtector(opts) {
   const { artifacts, getStepInProgress, isRunningInAgent = () => true, getTicketId } = opts;
 
   function check(toolName, toolInput, hookData) {
-    let bn, filePath, rule;
-
-    if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
-      // Vector 1: Direct file writes
-      filePath = toolInput?.file_path || '';
-      if (!filePath) return { blocked: false };
-      bn = path.basename(filePath);
-      rule = artifacts.find((a) => matchesRule(bn, a));
-      if (!rule) return { blocked: false };
-    } else if (toolName === 'Bash') {
-      // Vector 2: Bash shell writes (>, >>, tee, cp, mv, sed -i, cat >, node -e writeFileSync)
-      const cmd = String(toolInput?.command || '');
-      const hasWrite =
-        BASH_WRITE_OPS.test(cmd) || NODE_FS_WRITES.test(cmd) || /\bsed\s+-i\b/.test(cmd);
-      if (!hasWrite) return { blocked: false };
-
-      // Check if any artifact basename appears in the command
-      for (const a of artifacts) {
-        if (a.basename && cmd.includes(a.basename)) {
-          bn = a.basename;
-          filePath = cmd; // Use cmd as context for ticket ID check
-          rule = a;
-          break;
-        }
-        if (a.pattern) {
-          // Extract potential filenames from command tokens
-          const tokens = cmd.match(/[\w.-]+\.(?:md|json|txt)/g) || [];
-          const match = tokens.find((t) => a.pattern.test(t));
-          if (match) {
-            bn = match;
-            filePath = cmd;
-            rule = a;
-            break;
-          }
-        }
-      }
-      if (!rule) return { blocked: false };
-    } else {
-      return { blocked: false };
-    }
+    const target = matchWriteTarget(artifacts, toolName, toolInput, hookData);
+    if (!target) return { blocked: false };
+    const { bn, filePath, rule } = target;
 
     // Get ticket context
     const ticketId = getTicketId ? getTicketId(hookData) : null;
     if (!ticketId) return { blocked: false }; // No ticket context → allow (fail-open)
 
     // Only protect files within the ticket's folder (use path separator to avoid partial matches)
-    if (!filePath.includes(`/${ticketId}/`) && !filePath.endsWith(`/${ticketId}`))
+    if (!filePath.includes(`/${ticketId}/`) && !filePath.endsWith(`/${ticketId}`)) {
       return { blocked: false };
+    }
 
-    // Check 1: Step must be in_progress (primary step or any allowedSteps)
     const currentStep = getStepInProgress(ticketId);
-    const stepAllowed =
-      currentStep === rule.step ||
-      (Array.isArray(rule.allowedSteps) && rule.allowedSteps.includes(currentStep));
-    if (!stepAllowed) {
-      const stepsLabel = rule.allowedSteps
-        ? [rule.step, ...rule.allowedSteps].join(', ')
-        : rule.step;
-      return {
-        blocked: true,
-        file: bn,
-        rule: 'step',
-        message:
-          `BLOCKED: Cannot write ${bn} — none of the allowed step(s) '${stepsLabel}' are in_progress.\n` +
-          `Current step: ${currentStep || '(none)'}\n` +
-          `Only the ${stepsLabel} step(s) may create/modify this file.\n`,
-      };
-    }
-
-    // Check 2: Agent must be authorized (if agents specified)
-    if (rule.agents && rule.agents.length > 0) {
-      const transcriptPath = hookData?.transcript_path;
-      if (!isRunningInAgent(transcriptPath, rule.agents, hookData)) {
-        return {
-          blocked: true,
-          file: bn,
-          rule: 'agent',
-          message:
-            `BLOCKED: Cannot write ${bn} — not running in an authorized agent.\n` +
-            `Allowed agents: ${rule.agents.join(', ')}\n` +
-            `This file can only be created/modified by the designated agent during the ${rule.step} step.\n`,
-        };
-      }
-    }
-
-    // Check 3: Per-task path enforcement — when tasks.md exists, .check.md reports
-    // must go to tasks/ticketId/task${N}/ not tasks/ticketId/ root.
-    // Exception: during the final /check step, per-task routing is skipped
-    // (reports belong at ticket root), but the path-escape guard still applies.
-    if (bn.endsWith('.check.md')) {
-      try {
-        const fs = require('fs');
-        const getConfigMod = require(path.join(__dirname, 'get-config'));
-        const tasksBase = getConfigMod.require('TASKS_BASE');
-        // Sanitize ticketId for filesystem path (e.g. GitHub #123 → GH-123)
-        const configMod = require(path.join(__dirname, 'config'));
-        const safeId =
-          typeof configMod.safeTicketId === 'function'
-            ? configMod.safeTicketId(ticketId)
-            : ticketId;
-        const statePath = path.join(tasksBase, safeId, '.work-state.json');
-        if (fs.existsSync(statePath)) {
-          const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-          if (state.tasksMeta && state.tasksMeta.totalTasks > 0) {
-            // Determine the actual file path — for Bash, extract from command string
-            let actualFilePath;
-            if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
-              actualFilePath = filePath;
-            } else if (toolName === 'Bash') {
-              actualFilePath = extractBashTargetPath(filePath, bn);
-              // If we can't extract a reliable path, fail-open (skip per-task check)
-            }
-
-            if (!actualFilePath) {
-              // Can't determine path — skip per-task enforcement (fall through)
-            } else {
-              // Per-task mode active — check file path is under task${N}/
-              // Use path.resolve to prevent bypass via relative path components
-              // (e.g., ../../ticketId/file.check.md). path.relative then gives a
-              // canonical relative path; we verify it doesn't escape with '..'
-              // and doesn't contain path.sep (i.e., it's a direct child, not nested).
-              const resolvedTicketDir = path.resolve(path.join(tasksBase, safeId));
-              const resolvedFilePath = path.resolve(actualFilePath);
-              const relPath = path.relative(resolvedTicketDir, resolvedFilePath);
-              const isEscapingTicketDir = relPath === '..' || relPath.startsWith('..' + path.sep);
-              const isWithinTicketDir =
-                relPath !== '' && !isEscapingTicketDir && !path.isAbsolute(relPath);
-
-              // Compute task number before branching — needed by both branches
-              const totalTasks = state.tasksMeta.totalTasks;
-              const rawCurrentIdx = state.tasksMeta.currentTaskIndex;
-              const currentIdx = Number.isInteger(rawCurrentIdx) ? rawCurrentIdx : 0;
-              const normalizedIdx = Math.min(Math.max(currentIdx, 0), totalTasks - 1);
-              const taskNum = normalizedIdx + 1;
-
-              // Block writes that escape the ticket directory via path traversal.
-              // This guard runs unconditionally — including during the 'check' step —
-              // so that writes like "/<ticket>/../outside/file.check.md" are always blocked.
-              if (isEscapingTicketDir) {
-                const suggestedPath =
-                  currentStep === 'check'
-                    ? path.join(resolvedTicketDir, bn)
-                    : path.join(resolvedTicketDir, 'task' + taskNum, bn);
-                return {
-                  blocked: true,
-                  file: bn,
-                  rule: 'per-task-path',
-                  message:
-                    `BLOCKED: Cannot write ${bn} outside ticket directory.\n` +
-                    `The resolved path escapes the ticket folder. Write your report to:\n` +
-                    `  ${suggestedPath}\n`,
-                };
-              }
-
-              // Per-task routing enforcement — skip during 'check' step
-              // (final /check step writes reports at ticket root, not per-task)
-              if (currentStep !== 'check') {
-                // Two-branch enforcement:
-                // 1. Block writes at ticket root (no path separator in relPath)
-                // 2. Block writes to wrong task folder (relPath doesn't start with taskN/)
-                if (isWithinTicketDir && !relPath.includes(path.sep)) {
-                  // File is at ticket root (no path separator) — block and suggest correct task folder
-                  return {
-                    blocked: true,
-                    file: bn,
-                    rule: 'per-task-path',
-                    message:
-                      `BLOCKED: Cannot write ${bn} at ticket root.\n` +
-                      `Per-task mode is active for this ticket. Write your report to the task folder instead:\n` +
-                      `  ${path.join(resolvedTicketDir, 'task' + taskNum, bn)}\n`,
-                  };
-                } else if (isWithinTicketDir) {
-                  // File is in a subdirectory — validate it's the correct task folder
-                  const expectedPath = 'task' + taskNum + path.sep + bn;
-                  if (relPath !== expectedPath) {
-                    return {
-                      blocked: true,
-                      file: bn,
-                      rule: 'per-task-path',
-                      message:
-                        `BLOCKED: Cannot write ${bn} to wrong task folder.\n` +
-                        `You are working on task ${taskNum}. Write your report to:\n` +
-                        `  ${path.join(resolvedTicketDir, 'task' + taskNum, bn)}\n`,
-                    };
-                  }
-                }
-              }
-            } // end actualFilePath else
-          }
-        }
-      } catch {
-        // fail-open
-      }
-    }
-
-    // Check 4: Content guard (if specified on the rule)
-    if (rule.contentGuard && ['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
-      let guardContent = '';
-      if (toolName === 'Write') {
-        guardContent = toolInput?.content || '';
-      } else if (toolName === 'Edit' || toolName === 'MultiEdit') {
-        // Read existing file and apply edit in memory to get resulting content
-        try {
-          const fs = require('fs');
-          const existing = fs.readFileSync(toolInput?.file_path, 'utf-8');
-          const oldStr = toolInput?.old_string || '';
-          const newStr = toolInput?.new_string || '';
-          if (oldStr && newStr) {
-            guardContent = existing.replace(oldStr, newStr);
-          } else {
-            guardContent = existing; // Can't simulate edit, check existing
-          }
-        } catch {
-          guardContent = toolInput?.new_string || ''; // File doesn't exist yet, fall back
-        }
-      }
-      if (guardContent) {
-        const guardResult = rule.contentGuard(guardContent, currentStep);
-        if (guardResult.blocked) {
-          return {
-            blocked: true,
-            file: bn,
-            rule: 'content',
-            message: guardResult.message,
-          };
-        }
-      }
-    }
-
-    return { blocked: false };
+    return (
+      checkStepGate(rule, currentStep, bn) ||
+      checkAgentGate(rule, hookData, isRunningInAgent, bn) ||
+      checkPerTaskPath({ bn, filePath, toolName, ticketId, currentStep }) ||
+      checkContentGuard(rule, toolName, toolInput, currentStep, bn) || { blocked: false }
+    );
   }
 
   return { check, matchesRule };
 }
 
-module.exports = { createArtifactProtector, matchesRule };
+module.exports = { createArtifactProtector, matchesRule, bashReferencesBasename };

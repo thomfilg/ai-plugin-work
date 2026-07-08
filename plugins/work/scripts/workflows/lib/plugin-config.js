@@ -1,11 +1,11 @@
 /**
  * plugin-config.js — shared resolver for the /work plugin's dirs + config.
  *
- * The /follow-up and /check2 orchestrators (and their auto-advance hooks) all
+ * The /follow-up and /check orchestrators (and their auto-advance hooks) all
  * need the same boilerplate: resolve the plugin root from the /work directory,
  * load `get-config`, and derive WORKTREES_BASE / TASKS_BASE. Centralising it
  * here keeps the call sites in sync and removes the duplicate-block the quality
- * gate flagged across follow-up + check2.
+ * gate flagged across follow-up + check.
  */
 
 'use strict';

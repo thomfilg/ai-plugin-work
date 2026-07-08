@@ -227,3 +227,56 @@ test('backward compatibility - top-level table preserved', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Case F (#498) — comma-separated multi-ID bullets synthesize one row per ID
+test('comma-separated Requirements Covered bullets synthesize one row per ID (#498)', () => {
+  const tasks = [
+    '# Tasks',
+    '',
+    '## Task 1 — Foo',
+    '',
+    '### Requirements Covered',
+    '- R1, R6, R7, AC1',
+    '',
+    '## Task 2 — Bar',
+    '',
+    '### Requirements Covered',
+    '- R2',
+    '',
+  ].join('\n');
+  const { root, tasksDir } = makeTasksDir({ tasks });
+  try {
+    const rows = readRequirementCoverage(tasksDir);
+    const task1Ids = rows
+      .filter((r) => /Task 1/.test(r.evidence))
+      .map((r) => r.id)
+      .sort();
+    assert.deepEqual(task1Ids, ['AC1', 'R1', 'R6', 'R7']);
+    const task2Ids = rows.filter((r) => /Task 2/.test(r.evidence)).map((r) => r.id);
+    assert.deepEqual(task2Ids, ['R2']);
+    for (const row of rows) assert.equal(row.source, 'subsection');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Case G — non-canonical bare-token bullets are NOT recognized (canonical
+// grammar only; the generation side enforces canonical IDs via traceability)
+test('non-canonical bare-token bullet synthesizes no coverage row', () => {
+  const tasks = [
+    '# Tasks',
+    '',
+    '## Task 1 — Foo',
+    '',
+    '### Requirements Covered',
+    '- REQ_CUSTOM_1',
+    '',
+  ].join('\n');
+  const { root, tasksDir } = makeTasksDir({ tasks });
+  try {
+    const rows = readRequirementCoverage(tasksDir);
+    assert.deepEqual(rows, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

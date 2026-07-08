@@ -38,7 +38,6 @@ The plugin uses 19 specialized agents, each defined as a markdown file in `agent
 |---|---|---|
 | **pr-generator** | `agents/pr-generator.md` | Generate PR titles and descriptions from diffs |
 | **pr-post-generator** | `agents/pr-post-generator.md` | Add visual documentation to PRs |
-| **commit-writer** | `agents/commit-writer.md` | Generate semantic commit messages |
 
 ### Coordination Agents
 
@@ -59,7 +58,7 @@ The `/work` orchestrator selects agents based on the current step:
 | spec | spec-writer |
 | tasks | (skill: split-in-tasks) |
 | implement | developer-* (auto-selected) |
-| commit | commit-writer |
+| commit | _(session agent authors; forced through commit-and-push.js by enforce-agent-usage)_ |
 | check | code-checker, quality-checker, qa-*, completion-checker (parallel) |
 | pr | pr-generator |
 

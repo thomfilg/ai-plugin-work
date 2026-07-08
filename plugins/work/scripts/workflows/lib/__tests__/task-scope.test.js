@@ -15,6 +15,7 @@ describe('validateTask', () => {
   it('passes when both sections are populated', () => {
     const errors = ts.validateTask({
       num: 1,
+      type: 'tdd-code',
       filesInScope: ['lib/x.ts'],
       filesOutOfScope: ['lib/y.ts'],
     });
@@ -24,6 +25,7 @@ describe('validateTask', () => {
   it('passes with empty filesOutOfScope (no siblings)', () => {
     const errors = ts.validateTask({
       num: 1,
+      type: 'tdd-code',
       filesInScope: ['lib/x.ts'],
       filesOutOfScope: [],
     });
@@ -31,7 +33,7 @@ describe('validateTask', () => {
   });
 
   it('fails when both filesInScope and suggestedScope are missing', () => {
-    const errors = ts.validateTask({ num: 2, filesOutOfScope: [] });
+    const errors = ts.validateTask({ num: 2, type: 'tdd-code', filesOutOfScope: [] });
     assert.equal(errors.length, 1);
     assert.match(errors[0], /Task 2/);
     assert.match(errors[0], /Files in scope/);
@@ -40,6 +42,7 @@ describe('validateTask', () => {
   it('fails when both filesInScope and suggestedScope are empty', () => {
     const errors = ts.validateTask({
       num: 3,
+      type: 'tdd-code',
       filesInScope: [],
       suggestedScope: '',
       filesOutOfScope: [],
@@ -47,14 +50,16 @@ describe('validateTask', () => {
     assert.equal(errors.length, 1);
   });
 
-  it('accepts legacy suggestedScope as fallback when filesInScope is missing', () => {
+  it('rejects legacy suggestedScope-only tasks (canonical Files in scope required)', () => {
     const errors = ts.validateTask({
       num: 5,
+      type: 'tdd-code',
       filesInScope: [],
       suggestedScope: '- lib/x.ts',
       filesOutOfScope: [],
     });
-    assert.deepEqual(errors, []);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /missing `### Files in scope`/);
   });
 
   it('fails when filesOutOfScope is non-array (malformed)', () => {
@@ -63,7 +68,7 @@ describe('validateTask', () => {
   });
 
   it('tolerates missing filesOutOfScope (legacy task)', () => {
-    const errors = ts.validateTask({ num: 6, filesInScope: ['x.ts'] });
+    const errors = ts.validateTask({ num: 6, type: 'tdd-code', filesInScope: ['x.ts'] });
     assert.deepEqual(errors, []);
   });
 
@@ -75,7 +80,7 @@ describe('validateTask', () => {
   it('exempts checkpoint tasks from the Files-in-scope requirement', () => {
     // Checkpoint tasks don't ship code, so they don't need a scope envelope.
     assert.deepEqual(ts.validateTask({ num: 9, type: 'checkpoint' }), []);
-    assert.deepEqual(ts.validateTask({ num: 10, isCheckpoint: true }), []);
+    assert.deepEqual(ts.validateTask({ num: 10, type: 'checkpoint', isCheckpoint: true }), []);
   });
 
   // GH-392 follow-up: cross-task deps must be repo-relative.
@@ -101,10 +106,51 @@ describe('validateTask', () => {
   it('accepts repo-relative crossTaskDeps', () => {
     const errors = ts.validateTask({
       num: 13,
+      type: 'tdd-code',
       filesInScope: ['src/a.ts'],
       crossTaskDeps: ['src/shared/schema.ts', 'lib/**/*.ts'],
     });
     assert.deepEqual(errors, []);
+  });
+
+  // GH-498-shape defense: unknown/missing `### Type` falls back to the
+  // strictest tdd-code contract at implement and wedges non-code tasks at
+  // RED. Catch it at tasks_gate where tasks.md is still editable.
+  it('rejects a task with a missing Type', () => {
+    const errors = ts.validateTask({ num: 20, filesInScope: ['src/a.ts'] });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Task 20 is missing `### Type`/);
+    assert.match(errors[0], /tdd-code/);
+  });
+
+  it('rejects a task with a legacy domain-kind Type (devops)', () => {
+    const errors = ts.validateTask({
+      num: 21,
+      type: 'devops',
+      filesInScope: ['scripts/deploy.yml'],
+    });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /"devops" is not in the closed enum/);
+    assert.match(errors[0], /strictest tdd-code gate contract/);
+  });
+
+  it('accepts every member of the closed Type enum', () => {
+    for (const type of [
+      'tdd-code',
+      'tests-only',
+      'docs',
+      'config',
+      'ci',
+      'mechanical-refactor',
+      'file-move',
+      'checkpoint',
+    ]) {
+      const errors = ts.validateTask({ num: 22, type, filesInScope: ['src/a.ts'] });
+      assert.ok(
+        !errors.some((e) => /### Type/.test(e)),
+        `Type "${type}" should be accepted; got: ${errors.join(' | ')}`
+      );
+    }
   });
 
   it('rejects absolute path in filesInScope and filesOutOfScope', () => {
@@ -131,7 +177,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.match(errors[0], /no other task lists it in/);
   });
 
-  it('accepts a crossTaskDep that literally appears in another task\'s scope', () => {
+  it("accepts a crossTaskDep that literally appears in another task's scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/schema.ts', 'src/b.ts'] },
@@ -139,7 +185,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
   });
 
-  it('accepts a crossTaskDep covered by another task\'s glob scope', () => {
+  it("accepts a crossTaskDep covered by another task's glob scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/**'] },
@@ -186,8 +232,8 @@ describe('validateCrossTaskDepsOwnership', () => {
 describe('validateAll', () => {
   it('returns valid:true when all tasks pass', () => {
     const result = ts.validateAll([
-      { num: 1, filesInScope: ['a.ts'], filesOutOfScope: [] },
-      { num: 2, filesInScope: ['b.ts'], filesOutOfScope: ['c.ts'] },
+      { num: 1, type: 'tdd-code', filesInScope: ['a.ts'], filesOutOfScope: [] },
+      { num: 2, type: 'tdd-code', filesInScope: ['b.ts'], filesOutOfScope: ['c.ts'] },
     ]);
     assert.equal(result.valid, true);
     assert.deepEqual(result.errors, []);
@@ -230,175 +276,6 @@ describe('unionFilesInScope', () => {
   });
 });
 
-describe('validateTaskTestScope (regression: ECHO-4637-class deadlock)', () => {
-  it('passes when CHANGED_FILES is a strict subset of Files in scope', () => {
-    const task = {
-      num: 2,
-      filesInScope: [
-        'lib/external-assets/update-tags.ts',
-        'lib/external-assets/__tests__/update-tags.test.ts',
-      ],
-      testCommand:
-        'CHANGED_FILES="lib/external-assets/__tests__/update-tags.test.ts" eval "$TEST_UNIT_COMMAND"',
-    };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('blocks when CHANGED_FILES references a sibling-owned integration test', () => {
-    // The exact ECHO-4637 shape: Task 2 ships only the helper but its test
-    // command runs through tRPC integration tests, traversing code owned by
-    // Task 4 (schema narrowing).
-    const task = {
-      num: 2,
-      filesInScope: ['lib/external-assets/update-tags.ts'],
-      testCommand:
-        'CHANGED_FILES="lib/external-assets/update-tags.ts ' +
-        'app/api/trpc/routers/__tests__/external-assets-tags.integration.test.ts ' +
-        'lib/validation/__tests__/external-asset-update-tags.test.ts" ' +
-        'eval "$TEST_INTEGRATION_COMMAND"',
-    };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(errors.length >= 1, `expected at least one error, got ${errors.length}`);
-    const deadlock = errors.find((e) => /deadlock/i.test(e));
-    assert.ok(deadlock, 'expected a deadlock error');
-    assert.match(deadlock, /Task 2/);
-    assert.match(deadlock, /external-assets-tags\.integration\.test\.ts/);
-    assert.match(deadlock, /lib\/validation\/__tests__\/external-asset-update-tags\.test\.ts/);
-  });
-
-  it('honours glob patterns in Files in scope', () => {
-    const task = {
-      num: 1,
-      filesInScope: ['lib/foo/**', 'tests/foo/**'],
-      testCommand: 'CHANGED_FILES="lib/foo/bar.ts tests/foo/bar.test.ts" eval "$TEST_UNIT_COMMAND"',
-    };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('skips check when testCommand is absent (legacy tasks)', () => {
-    const task = { num: 3, filesInScope: ['lib/foo.ts'], testCommand: null };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('skips check when Test Command does not use the canonical CHANGED_FILES envelope', () => {
-    const task = {
-      num: 4,
-      filesInScope: ['lib/foo.ts'],
-      testCommand: 'pnpm test lib/other/something.test.ts',
-    };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('validateAll surfaces test-scope errors alongside scope-envelope errors', () => {
-    const tasks = [
-      {
-        num: 1,
-        filesInScope: ['lib/foo/**'],
-        testCommand: 'CHANGED_FILES="lib/bar/bar.test.ts" eval "$TEST_UNIT_COMMAND"',
-      },
-    ];
-    const r = ts.validateAll(tasks);
-    assert.equal(r.valid, false);
-    assert.ok(r.errors.some((e) => /references files not in its/.test(e)));
-  });
-});
-
-describe('extractChangedFilesFromTestCommand', () => {
-  const cases = [
-    ['CHANGED_FILES="a.ts b.ts" eval "$X"', ['a.ts', 'b.ts']],
-    [`CHANGED_FILES='a.ts b.ts' eval "$X"`, ['a.ts', 'b.ts']],
-    ['CHANGED_FILES="a.ts" eval "$X" && CHANGED_FILES="b.ts" eval "$Y"', ['a.ts']],
-    ['pnpm test foo.ts', []],
-    [null, []],
-    ['', []],
-  ];
-  for (const [input, expected] of cases) {
-    it(`parses: ${JSON.stringify(input)}`, () => {
-      assert.deepEqual(ts.extractChangedFilesFromTestCommand(input), expected);
-    });
-  }
-});
-
-describe('Rule 4b: testable surface enforcement', () => {
-  it('blocks Test Command that is `pnpm typecheck`', () => {
-    const task = {
-      num: 6,
-      filesInScope: ['lib/foo.ts'],
-      testCommand: 'pnpm typecheck',
-    };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(errors.length >= 1);
-    assert.match(errors[0], /typecheck-only/);
-    assert.match(errors[0], /Rule 4b/);
-  });
-
-  it('blocks Test Command that is `pnpm lint`', () => {
-    const task = { num: 7, filesInScope: ['lib/foo.ts'], testCommand: 'pnpm lint --fix' };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(errors.length >= 1);
-    assert.match(errors[0], /lint-only/);
-  });
-
-  it('blocks Test Command that is `pnpm build`', () => {
-    const task = { num: 8, filesInScope: ['lib/foo.ts'], testCommand: 'pnpm build' };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(errors.length >= 1);
-    assert.match(errors[0], /build-only/);
-  });
-
-  it('blocks Test Command that is `true` (noop)', () => {
-    const task = { num: 9, filesInScope: ['lib/foo.ts'], testCommand: 'true' };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(errors.length >= 1);
-    assert.match(errors[0], /noop/);
-  });
-
-  it('blocks helper-only task: CHANGED_FILES has zero test files', () => {
-    // ECHO-4637 Task 6 shape: ships a helper, no test file, integration runner.
-    const task = {
-      num: 6,
-      filesInScope: ['tests/e2e/helpers/external-assets-filter-seed.ts'],
-      testCommand:
-        'CHANGED_FILES="tests/e2e/helpers/external-assets-filter-seed.ts" eval "$TEST_INTEGRATION_COMMAND"',
-    };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(errors.length >= 1);
-    assert.match(errors[0], /no test files/i);
-    assert.match(errors[0], /Rule 4b/);
-  });
-
-  it('exempts checkpoint tasks (type=checkpoint)', () => {
-    const task = {
-      num: 9,
-      type: 'checkpoint',
-      filesInScope: ['*.md'],
-      testCommand: 'pnpm typecheck',
-    };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('exempts checkpoint tasks (isCheckpoint=true)', () => {
-    const task = {
-      num: 9,
-      isCheckpoint: true,
-      filesInScope: ['*.md'],
-      testCommand: 'true',
-    };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('does NOT block hardcoded runner invocations (pnpm test foo.test.ts)', () => {
-    const task = {
-      num: 1,
-      filesInScope: ['lib/foo/**'],
-      testCommand: 'pnpm test lib/foo/bar.test.ts',
-    };
-    // No CHANGED_FILES envelope to parse, so other checks short-circuit. The
-    // detectNonTestCommand check must NOT flag `pnpm test` as a non-test cmd.
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-});
-
 describe('test-file naming convention (integration / e2e)', () => {
   describe('isIntegrationTestPath', () => {
     const cases = [
@@ -433,162 +310,6 @@ describe('test-file naming convention (integration / e2e)', () => {
         assert.equal(ts.isE2eTestPath(p), expected);
       });
     }
-  });
-
-  describe('validateTaskTestScope: runner-vs-naming consistency', () => {
-    it('blocks $TEST_INTEGRATION_COMMAND with a non-integration test file', () => {
-      const task = {
-        num: 1,
-        filesInScope: ['lib/foo/**', 'tests/**'],
-        testCommand:
-          'CHANGED_FILES="lib/foo/bar.ts tests/foo/bar.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
-      };
-      const errors = ts.validateTaskTestScope(task);
-      assert.equal(errors.length, 1);
-      assert.match(errors[0], /no declared runner will pick up/i);
-      assert.match(errors[0], /bar\.test\.ts/);
-    });
-
-    it('blocks $TEST_E2E_COMMAND with a non-e2e test file', () => {
-      const task = {
-        num: 2,
-        filesInScope: ['tests/**'],
-        testCommand: 'CHANGED_FILES="tests/foo.test.ts" eval "$TEST_E2E_COMMAND"',
-      };
-      const errors = ts.validateTaskTestScope(task);
-      assert.equal(errors.length, 1);
-      assert.match(errors[0], /no declared runner will pick up/i);
-    });
-
-    it('blocks $TEST_UNIT_COMMAND when test file IS an integration test', () => {
-      const task = {
-        num: 3,
-        filesInScope: ['lib/foo/**'],
-        testCommand:
-          'CHANGED_FILES="lib/foo/__tests__/bar.integration.test.ts" eval "$TEST_UNIT_COMMAND"',
-      };
-      const errors = ts.validateTaskTestScope(task);
-      assert.equal(errors.length, 1);
-      assert.match(errors[0], /no declared runner will pick up/i);
-    });
-
-    it('blocks $TEST_UNIT_COMMAND when test file IS an e2e test', () => {
-      const task = {
-        num: 4,
-        filesInScope: ['tests/**'],
-        testCommand: 'CHANGED_FILES="tests/e2e/foo.spec.ts" eval "$TEST_UNIT_COMMAND"',
-      };
-      const errors = ts.validateTaskTestScope(task);
-      assert.equal(errors.length, 1);
-      assert.match(errors[0], /no declared runner will pick up/i);
-    });
-
-    it('passes correctly named integration test with the integration runner', () => {
-      const task = {
-        num: 5,
-        filesInScope: ['lib/foo/**'],
-        testCommand:
-          'CHANGED_FILES="lib/foo/bar.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
-      };
-      assert.deepEqual(ts.validateTaskTestScope(task), []);
-    });
-
-    it('passes correctly named e2e test with the e2e runner', () => {
-      const task = {
-        num: 6,
-        filesInScope: ['tests/**'],
-        testCommand: 'CHANGED_FILES="tests/e2e/foo.spec.ts" eval "$TEST_E2E_COMMAND"',
-      };
-      assert.deepEqual(ts.validateTaskTestScope(task), []);
-    });
-
-    it('passes multi-suite chained command when each eval has its own CHANGED_FILES (post-bug-#3 fix)', () => {
-      // After GH-397 bug #3 fix, each eval MUST be preceded by its own
-      // CHANGED_FILES assignment in the same segment — otherwise the second
-      // runner executes against the whole repo and the per-task gate is defeated.
-      const task = {
-        num: 7,
-        filesInScope: ['lib/foo/**', 'app/api/**'],
-        testCommand:
-          'CHANGED_FILES="lib/foo/foo.test.ts" eval "$TEST_UNIT_COMMAND" && CHANGED_FILES="app/api/bar.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
-      };
-      assert.deepEqual(ts.validateTaskTestScope(task), []);
-    });
-
-    it('still blocks when a file matches NO declared runner', () => {
-      // Only `$TEST_UNIT_COMMAND` declared, but an integration file is in
-      // CHANGED_FILES — unit runner's include pattern won't match it.
-      const task = {
-        num: 8,
-        filesInScope: ['lib/foo/**', 'app/api/**'],
-        testCommand:
-          'CHANGED_FILES="app/api/bar.integration.test.ts lib/foo/foo.test.ts" eval "$TEST_UNIT_COMMAND"',
-      };
-      const errors = ts.validateTaskTestScope(task);
-      assert.ok(errors.length >= 1);
-      assert.match(errors[0], /bar\.integration\.test\.ts/);
-    });
-  });
-});
-
-describe('per-eval CHANGED_FILES validation (Task 3 — bug #3)', () => {
-  it('Scenario 6: Test Command with two evals and only one CHANGED_FILES prefix fails validation', () => {
-    // Two evals chained with `&&`, only the FIRST has a CHANGED_FILES prefix.
-    // The second eval ($TEST_INTEGRATION_COMMAND) is unscoped — it would run
-    // the integration runner against ALL files, defeating the per-task gate.
-    const task = {
-      num: 3,
-      filesInScope: ['a.test.ts', 'b.integration.test.ts'],
-      testCommand:
-        'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND" && eval "$TEST_INTEGRATION_COMMAND"',
-    };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(errors.length >= 1, `expected at least one error, got ${errors.length}`);
-    const unscoped = errors.find((e) => /\$TEST_INTEGRATION_COMMAND/.test(e));
-    assert.ok(unscoped, 'expected error naming the unscoped $TEST_INTEGRATION_COMMAND eval');
-  });
-
-  it('Scenario 7: Test Command with one CHANGED_FILES per eval passes validation', () => {
-    // Each eval has its own CHANGED_FILES prefix in the same segment — both
-    // runners are scoped. Both test files live in `### Files in scope`.
-    const task = {
-      num: 4,
-      filesInScope: ['a.test.ts', 'b.integration.test.ts'],
-      testCommand:
-        'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND" && CHANGED_FILES="b.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
-    };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('Scenario 8: Single-eval Test Command (backward compatible) still passes', () => {
-    const task = {
-      num: 5,
-      filesInScope: ['a.test.ts'],
-      testCommand: 'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND"',
-    };
-    assert.deepEqual(ts.validateTaskTestScope(task), []);
-  });
-
-  it('Scenario 9: Two-eval form — second eval CHANGED_FILES references an unscoped file', () => {
-    // Both evals have their own CHANGED_FILES prefix (so the per-eval check
-    // passes), but the SECOND eval references `app/api/bar.integration.test.ts`
-    // which is NOT listed in `### Files in scope`. Downstream scope-membership
-    // validation must union both evals' files and flag the offender —
-    // otherwise the second runner executes against code owned by a sibling
-    // task and the gate deadlocks (ECHO-4637-class).
-    const task = {
-      num: 6,
-      filesInScope: ['a.test.ts'],
-      testCommand:
-        'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND" && CHANGED_FILES="app/api/bar.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
-    };
-    const errors = ts.validateTaskTestScope(task);
-    assert.ok(
-      errors.some(
-        (e) => /Files in scope/.test(e) && /app\/api\/bar\.integration\.test\.ts/.test(e)
-      ),
-      `expected scope-membership error naming the offending file from the second eval; got: ${JSON.stringify(errors)}`
-    );
   });
 });
 

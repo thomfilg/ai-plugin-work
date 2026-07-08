@@ -199,11 +199,11 @@ describe('integration — mixed serial/parallel dependency graph (R19)', () => {
     };
 
     // Both task 2 and task 3 should be startable (parallel)
-    const check2 = createClaimCheck({ taskNum: 2, ownerId: 'PR1' });
-    const check3 = createClaimCheck({ taskNum: 3, ownerId: 'PR2' });
+    const claimCheck2 = createClaimCheck({ taskNum: 2, ownerId: 'PR1' });
+    const claimCheck3 = createClaimCheck({ taskNum: 3, ownerId: 'PR2' });
 
-    const result2 = runPreflight(ctx, { checks: [createGraphCheck(), check2] });
-    const result3 = runPreflight(ctx, { checks: [createGraphCheck(), check3] });
+    const result2 = runPreflight(ctx, { checks: [createGraphCheck(), claimCheck2] });
+    const result3 = runPreflight(ctx, { checks: [createGraphCheck(), claimCheck3] });
 
     assert.equal(result2.allow, true, 'task 2 with dep 1 complete is startable');
     assert.equal(result3.allow, true, 'task 3 with dep 1 complete is startable in parallel');

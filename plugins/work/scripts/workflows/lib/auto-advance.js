@@ -1,6 +1,6 @@
 /**
  * Shared runner for the PostToolUse auto-advance hooks
- * (follow-up/hooks/follow-up-auto-advance.js, check2/hooks/check-auto-advance.js).
+ * (follow-up/hooks/follow-up-auto-advance.js, check/hooks/check-auto-advance.js).
  *
  * Both hooks do the same thing — install fail-open guards, read the hook
  * payload from stdin, find this terminal's orchestrator pid marker, run the
@@ -17,6 +17,7 @@ const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 const { resolvePluginConfig } = require('./plugin-config');
+const { getRuntime } = require('./runtime');
 
 // Parse the PostToolUse hook payload from stdin. Returns null on any error.
 function readHookData() {
@@ -39,9 +40,12 @@ function findMarker(TASKS_BASE, markerFile, workLibDir) {
   return marker;
 }
 
-// Run an orchestrator script for `ticket` and return its parsed instruction, or
-// null on any spawn/parse error (fail-open).
-function runOrchestrator(scriptPath, ticket, timeout) {
+// Run an orchestrator script for `ticket` and return its parsed instruction.
+// On spawn/parse error, returns null AND prints a one-line warning — the
+// previous fully-silent failure meant a timed-out orchestrator (monitor
+// cycles legitimately sleep past the spawn timeout) simply never advanced
+// the workflow and nobody was told.
+function runOrchestrator(scriptPath, ticket, timeout, rt = getRuntime()) {
   try {
     const result = execFileSync(process.execPath, [scriptPath, ticket], {
       encoding: 'utf8',
@@ -49,7 +53,16 @@ function runOrchestrator(scriptPath, ticket, timeout) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return JSON.parse(result);
-  } catch {
+  } catch (err) {
+    const why =
+      err && (err.code === 'ETIMEDOUT' || err.signal === 'SIGTERM')
+        ? `timed out after ${Math.round(timeout / 1000)}s (long CI wait)`
+        : `failed: ${String((err && err.message) || err).slice(0, 120)}`;
+    rt.emit.context(
+      'PostToolUse',
+      `\n⚠ [auto-advance] orchestrator ${why} — workflow did NOT advance. ` +
+        `Re-run \`node ${scriptPath} ${ticket}\` to continue.\n`
+    );
     return null;
   }
 }
@@ -57,17 +70,18 @@ function runOrchestrator(scriptPath, ticket, timeout) {
 // Print an instruction wrapped in its action's banner. `banners` maps an action
 // to a [top, bottom] pair; unknown actions print nothing. `extra`, when given,
 // returns an optional line inserted after the opening banner (e.g. a surface
-// reason).
-function printInstruction(instruction, banners, extra) {
+// reason). On claude the emitted bytes match the previous console.log sequence
+// exactly; on codex the same text rides the additionalContext envelope.
+function printInstruction(instruction, banners, extra, rt = getRuntime()) {
   const banner = banners[instruction.action];
   if (!banner) return;
-  console.log('\n' + banner[0]);
+  const lines = ['', banner[0]];
   if (extra) {
     const line = extra(instruction);
-    if (line) console.log(line);
+    if (line) lines.push(line);
   }
-  console.log(JSON.stringify(instruction, null, 2));
-  console.log(banner[1] + '\n');
+  lines.push(JSON.stringify(instruction, null, 2), banner[1], '');
+  rt.emit.context('PostToolUse', lines.join('\n'));
 }
 
 /**
@@ -89,9 +103,19 @@ function runAutoAdvance(opts) {
   const hookData = readHookData();
   if (!hookData) process.exit(0);
 
+  const rt = getRuntime(hookData);
+  const evt = rt.normalizeHookPayload(hookData, { event: 'PostToolUse' });
+
   // Guard: do NOT fire inside sub-agents
-  const transcriptPath = hookData?.transcript_path || '';
-  if (transcriptPath.includes('/subagents/')) process.exit(0);
+  if (rt.isSubagentContext(evt)) process.exit(0);
+
+  // Bridge runtime identity to the orchestrator child (and any libs reading
+  // env): codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a
+  // runtime pin, so children would misclassify without this.
+  if (!process.env.AGENT_RUNTIME) process.env.AGENT_RUNTIME = rt.name;
+  if (!process.env.AGENT_SESSION_ID && evt.sessionId) {
+    process.env.AGENT_SESSION_ID = evt.sessionId;
+  }
 
   const { TASKS_BASE } = resolvePluginConfig(opts.workDir);
   if (!TASKS_BASE) process.exit(0);
@@ -99,11 +123,11 @@ function runAutoAdvance(opts) {
   const marker = findMarker(TASKS_BASE, opts.markerFile, path.join(opts.workDir, 'lib'));
   if (!marker) process.exit(0);
 
-  const instruction = runOrchestrator(opts.scriptPath, marker.ticket, opts.timeout);
+  const instruction = runOrchestrator(opts.scriptPath, marker.ticket, opts.timeout, rt);
   if (!instruction) process.exit(0);
 
   if (opts.afterInstruction) opts.afterInstruction(TASKS_BASE, marker.ticket, instruction);
-  printInstruction(instruction, opts.banners, opts.surfaceExtra);
+  printInstruction(instruction, opts.banners, opts.surfaceExtra, rt);
   process.exit(0);
 }
 

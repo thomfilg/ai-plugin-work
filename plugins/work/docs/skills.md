@@ -11,7 +11,7 @@ Skills are user-invocable slash commands defined in `skills/*/SKILL.md`. Each sk
 | `/work <TICKET>` | `skills/work/` | Full orchestrated ticket-to-PR workflow |
 | `/work-implement <TICKET>` | `skills/work-implement/` | Quick TDD-gated implementation |
 | `/work-pr <TICKET>` | `skills/work-pr/` | Update PR description and visual docs |
-| `/check2 <TICKET>` | `skills/check2/` | Full quality verification (parallel agents) |
+| `/check <TICKET>` | `skills/check/` | Full quality verification (parallel agents) |
 | `/check-qa <app>` | `skills/check-qa/` | Test specific app via Playwright |
 | `/check-browser` | `skills/check-browser/` | Verify browser/UI state |
 
@@ -38,8 +38,9 @@ Skills are user-invocable slash commands defined in `skills/*/SKILL.md`. Each sk
 |---|---|---|
 | `/follow-up` | `skills/follow-up/` | Monitor CI, address review comments |
 | `/bootstrap <TICKET...>` | `skills/bootstrap/` | Setup worktrees for multiple tickets |
-| `/orchestrate <TICKET...>` | `skills/orchestrate/` | Run /work sequentially for multiple tickets |
 | `/cleanup-worktrees` | `skills/cleanup-worktrees/` | Verify merge & remove worktrees |
+
+> Multi-ticket orchestration lives in the **maestro** plugin's `/orchestrate` skill (parallel agents, auto-restart). The work plugin's duplicate `/orchestrate` was removed.
 
 ### Jira Skills
 
@@ -98,8 +99,8 @@ Skills can invoke other skills and agents:
   │   └─ Task(spec-writer)
   ├─ /split-in-tasks (skill)
   ├─ Task(developer-react-senior)  ← implement step
-  ├─ Task(commit-writer)           ← commit step
-  ├─ /check2 (skill)
+  ├─ (session agent commits; commit-msg hook validates)  ← commit step
+  ├─ /check (skill)
   │   ├─ Task(code-checker)
   │   ├─ Task(quality-checker)
   │   ├─ Task(qa-feature-tester)

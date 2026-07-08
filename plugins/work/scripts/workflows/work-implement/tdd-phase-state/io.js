@@ -78,6 +78,33 @@ function runTestCommand(cmd) {
   return runTestCommandWithOutput(cmd).exitCode;
 }
 
+// GH-584 — recorder-side test-command timeout. Default 5 minutes; override
+// via TDD_PHASE_TEST_TIMEOUT_MS (mirrors task-next.js's
+// TASK_NEXT_TEST_TIMEOUT_MS), primarily so tests can exercise the
+// hang-rejection path without waiting minutes.
+const DEFAULT_TEST_TIMEOUT_MS = 300000;
+
+function resolveTestTimeoutMs() {
+  const val = Number(process.env.TDD_PHASE_TEST_TIMEOUT_MS);
+  return Number.isFinite(val) && val > 0 ? val : DEFAULT_TEST_TIMEOUT_MS;
+}
+
+/** Human-readable timeout label: "5min" for whole minutes, else seconds. */
+function formatTestTimeout(ms) {
+  if (ms % 60000 === 0) return `${ms / 60000}min`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * GH-584 — did this spawnSync result die at the timeout? spawnSync surfaces a
+ * timeout as error.code === 'ETIMEDOUT' (with error.killed) and/or
+ * status === null plus the kill signal.
+ */
+function spawnResultTimedOut(result) {
+  if (result.error && (result.error.code === 'ETIMEDOUT' || result.error.killed)) return true;
+  return result.status === null && (result.signal === 'SIGTERM' || result.signal === 'SIGKILL');
+}
+
 /**
  * Like runTestCommand but also captures stdout+stderr so callers can
  * inspect the test runner's summary line (passed/skipped/failed counts).
@@ -100,25 +127,30 @@ function runTestCommandWithOutput(cmd) {
   // dash would fail with "set: Illegal option -o pipefail". bash also
   // matches what task-next.js's own runTest() uses for the initial
   // execution, keeping recorder and caller in lockstep.
+  const timeoutMs = resolveTestTimeoutMs();
   const result = spawnSync('bash', ['-lc', cmd], {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 300000,
+    timeout: timeoutMs,
   });
-  if (result.error) {
-    if (result.error.code === 'ETIMEDOUT' || result.signal === 'SIGTERM') {
-      process.stderr.write(`Test command timed out after 5 minutes: ${cmd}\n`);
-    }
-    return {
-      exitCode: result.status === null ? 1 : result.status,
-      stdout: result.stdout || '',
-      stderr: result.stderr || '',
-    };
+  // GH-584: a run killed by the timeout is a HANG, not a test outcome. Flag
+  // it so callers reject instead of misreading exit!=0 as a failing (RED)
+  // run.
+  const timedOut = spawnResultTimedOut(result);
+  let stderr = result.stderr || '';
+  if (timedOut) {
+    // GH-584: the diagnostic must land in result.stderr — callers embed it in
+    // rejection messages — not only on the host process's stderr.
+    const note = `Test command timed out after ${formatTestTimeout(timeoutMs)}: ${cmd}\n`;
+    stderr = stderr ? `${stderr}\n${note}` : note;
+    process.stderr.write(note);
   }
   return {
     exitCode: result.status === null ? 1 : result.status,
     stdout: result.stdout || '',
-    stderr: result.stderr || '',
+    stderr,
+    timedOut,
+    timeoutMs,
   };
 }
 
@@ -191,6 +223,8 @@ module.exports = {
   parseCategory,
   runTestCommand,
   runTestCommandWithOutput,
+  resolveTestTimeoutMs,
+  formatTestTimeout,
   parseTestSummary,
   getCurrentCycleRecord,
 };

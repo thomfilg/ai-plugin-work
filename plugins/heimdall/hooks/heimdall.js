@@ -18,6 +18,7 @@ const { discoverStores, readConfig, getRepoRoot } = require(
   path.join(__dirname, '..', 'lib', 'lock-store')
 );
 const { buildEntries, evaluate } = require(path.join(__dirname, '..', 'lib', 'guard'));
+const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime'));
 
 async function readStdin() {
   let input = '';
@@ -25,12 +26,18 @@ async function readStdin() {
   return input;
 }
 
-/** Merge lock blocks from every active store at cwd; '' when none apply. */
+/**
+ * Merge lock blocks from every active store at cwd; [] when none apply. Each
+ * block is tagged with its store kind (`_storeKind`) so a rejection can surface
+ * that it came from the shared (cross-project) store. See GH-585.
+ */
 function collectLocks(cwd) {
   const locks = [];
   for (const store of discoverStores(cwd)) {
     const cfg = readConfig(store.dir);
-    if (cfg && Array.isArray(cfg.locks)) locks.push(...cfg.locks);
+    if (cfg && Array.isArray(cfg.locks)) {
+      for (const lock of cfg.locks) locks.push({ ...lock, _storeKind: store.kind });
+    }
   }
   return locks;
 }
@@ -46,20 +53,37 @@ async function main() {
     process.exit(0);
   }
 
-  const cwd = hookData.cwd || process.cwd();
+  const rt = getRuntime(hookData);
+  const evt = rt.normalizeHookPayload(hookData, { event: 'PreToolUse' });
+  const cwd = evt.cwd;
   const locks = collectLocks(cwd);
   if (locks.length === 0) process.exit(0);
 
   const result = evaluate({
-    toolName: hookData.tool_name || '',
-    toolInput: hookData.tool_input || {},
-    transcriptPath: hookData.transcript_path || hookData.transcriptPath || '',
+    toolName: evt.rawToolName || '',
+    toolInput: evt.toolInput || {},
+    transcriptPath: evt.transcriptPath || hookData.transcriptPath || '',
     entries: buildEntries(locks, getRepoRoot(cwd)),
+    runtime: rt.name,
+    mode: rt.mode(),
+    cwd,
+    // Lets the codex exec block message emit the exact verified resume form
+    // (`codex exec resume <SESSION_ID> '<phrase>'`) instead of the cwd-filtered
+    // `--last` fallback (WP-12, design §0 C3 RESOLVED).
+    sessionId: evt.sessionId || '',
   });
 
-  if (result.exitCode === 2) {
-    process.stderr.write(result.message);
-    process.exit(2);
+  if (result.exitCode === 2) rt.emit.block(result.message);
+  // GH-657: allow the command but run it with the runtime write-guard preloaded.
+  // PreToolUse honors hookSpecificOutput.updatedInput to rewrite the tool input;
+  // codex only accepts updatedInput paired with permissionDecision:'allow' (C16),
+  // while claude keeps the bare form (adding 'allow' would auto-approve past the
+  // user's permission prompt).
+  if (result.rewrite) {
+    rt.emit.allowWithUpdatedCommand(
+      result.rewrite,
+      'heimdall: runtime write-guard preloaded (best-effort on codex — static analysis is authoritative)'
+    );
   }
   process.exit(0);
 }

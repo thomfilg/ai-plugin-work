@@ -106,7 +106,7 @@ grep -r "pattern" <paths>
 
 ### Planning Artifact Verification (MANDATORY)
 
-**Your prompt includes a pre-loaded "Verification Context" section** with 4 layers extracted from the planning artifacts (ticket → brief → spec → tasks). This context is injected automatically by the check2 orchestrator — you do NOT need to read the artifact files yourself.
+**Your prompt includes a pre-loaded "Verification Context" section** with 4 layers extracted from the planning artifacts (ticket → brief → spec → tasks). This context is injected automatically by the check orchestrator — you do NOT need to read the artifact files yourself.
 
 **Verify each layer in order against the actual code diff:**
 
@@ -126,7 +126,7 @@ grep -r "pattern" <paths>
 - Check the Requirement Coverage table — every requirement must be DELIVERED
 
 **Layer 5 — Regressions:**
-- Verify no files outside `### Suggested Scope` were modified unexpectedly
+- Verify no files outside `### Files in scope` were modified unexpectedly
 - Check that existing functionality wasn't broken (imports, exports still intact)
 
 **If the Verification Context section is missing from your prompt**, fall back to reading the files directly from `${TASKS_BASE}/${TICKET_ID}/` (ticket.json, brief.md, spec.md, tasks.md).

@@ -83,10 +83,7 @@ function writePassingTestFile(repo) {
 }
 
 function writeTasksMd(tasksDir, repo) {
-  const colocated = path.relative(
-    repo,
-    path.join(repo, 'src', 'feature.test.js')
-  );
+  const colocated = path.relative(repo, path.join(repo, 'src', 'feature.test.js'));
   const source = path.relative(repo, path.join(repo, 'src', 'feature.js'));
   const md = [
     '# Tasks',
@@ -99,13 +96,14 @@ function writeTasksMd(tasksDir, repo) {
     '### Description',
     'Fixture task for the synthesized-cycle orchestrator integration test.',
     '',
-    '### Suggested Scope',
+    '### Files in scope',
     '- ' + source,
     '- ' + colocated,
     '',
-    '### Test Command',
-    '```bash',
-    'node --test ' + colocated,
+    '### Test Strategy',
+    '```',
+    'kind: custom',
+    'command: node --test ' + colocated,
     '```',
     '',
     '### Scenarios',
@@ -154,11 +152,11 @@ function runTaskNext(tasksBase, cwd) {
 }
 
 function runTddInit(tasksBase, cwd) {
-  const r = spawnSync(
-    'node',
-    [TDD_CLI, 'init', TICKET, '--task', String(TASK_NUM)],
-    { cwd, encoding: 'utf8', env: childEnv(tasksBase) }
-  );
+  const r = spawnSync('node', [TDD_CLI, 'init', TICKET, '--task', String(TASK_NUM)], {
+    cwd,
+    encoding: 'utf8',
+    env: childEnv(tasksBase),
+  });
   return {
     stdout: r.stdout || '',
     stderr: r.stderr || '',
@@ -219,11 +217,7 @@ describe('synthesized-cycle orchestrator integration', () => {
     writeGherkin(path.join(tasksBase, TICKET));
 
     const init = runTddInit(tasksBase, repo);
-    assert.equal(
-      init.exitCode,
-      0,
-      'init failed: ' + init.stderr + ' / ' + init.stdout
-    );
+    assert.equal(init.exitCode, 0, 'init failed: ' + init.stderr + ' / ' + init.stdout);
   });
 
   afterEach(() => {
@@ -252,23 +246,13 @@ describe('synthesized-cycle orchestrator integration', () => {
 
     // The developer agent invokes the synthesized-cycle bypass with a
     // justification. The supplied --cmd is the same passing test command.
-    const passingCmd =
-      'node --test ' + path.join('src', 'feature.test.js');
-    const reason =
-      'regression backfill: pre-existing test already covers this behavior';
-    const bypass = runTddRecordRedSynthesized(
-      tasksBase,
-      repo,
-      passingCmd,
-      reason
-    );
+    const passingCmd = 'node --test ' + path.join('src', 'feature.test.js');
+    const reason = 'regression backfill: pre-existing test already covers this behavior';
+    const bypass = runTddRecordRedSynthesized(tasksBase, repo, passingCmd, reason);
     assert.equal(
       bypass.exitCode,
       0,
-      'synthesized bypass failed: ' +
-        bypass.stderr +
-        ' / ' +
-        bypass.stdout
+      'synthesized bypass failed: ' + bypass.stderr + ' / ' + bypass.stdout
     );
 
     // State must now be green on disk (bypass transitions red → green).
@@ -276,8 +260,7 @@ describe('synthesized-cycle orchestrator integration', () => {
     assert.equal(
       stateAfterBypass.currentPhase,
       'green',
-      'expected currentPhase=green after synthesized bypass, got ' +
-        stateAfterBypass.currentPhase
+      'expected currentPhase=green after synthesized bypass, got ' + stateAfterBypass.currentPhase
     );
 
     // (b) Next task-next.js invocation reports GREEN phase and runs the
@@ -298,31 +281,25 @@ describe('synthesized-cycle orchestrator integration', () => {
     assert.match(
       post.stdout,
       /ADVANCED → refactor|# GREEN phase|phase: green|in green/i,
-      'expected post-bypass output to mention the GREEN phase, got:\n' +
-        post.stdout
+      'expected post-bypass output to mention the GREEN phase, got:\n' + post.stdout
     );
     // And it must have actually executed the GREEN test command — the
     // header line is `  test cmd:   <cmd>` followed by `  ran: exit=0`.
     assert.match(
       post.stdout,
       /test cmd:\s+node --test .*feature\.test\.js/,
-      'expected post-bypass output to show the resolved GREEN test cmd, got:\n' +
-        post.stdout
+      'expected post-bypass output to show the resolved GREEN test cmd, got:\n' + post.stdout
     );
     assert.match(
       post.stdout,
       /ran:\s+exit=0/,
-      'expected post-bypass invocation to record the test as passing (exit=0), got:\n' +
-        post.stdout
+      'expected post-bypass invocation to record the test as passing (exit=0), got:\n' + post.stdout
     );
 
     // (c) Exactly one tdd-synthesized-cycle audit row for this task.
     const rows = readActions(tasksBase);
     const synRows = rows.filter(
-      (r) =>
-        r &&
-        r.action === 'tdd-synthesized-cycle' &&
-        (r.task === TASK_NUM || r.task == null)
+      (r) => r && r.action === 'tdd-synthesized-cycle' && (r.task === TASK_NUM || r.task == null)
     );
     assert.equal(
       synRows.length,
@@ -334,10 +311,6 @@ describe('synthesized-cycle orchestrator integration', () => {
         ': ' +
         JSON.stringify(rows, null, 2)
     );
-    assert.equal(
-      synRows[0].reason,
-      reason,
-      'audit row must carry the supplied reason'
-    );
+    assert.equal(synRows[0].reason, reason, 'audit row must carry the supplied reason');
   });
 });

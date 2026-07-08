@@ -10,16 +10,11 @@
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-
-function expandHome(p) {
-  if (!p) return p;
-  return p
-    .replace(/^~(?=\/|$)/, os.homedir())
-    .replace(/^\$HOME(?=\/|$)/, os.homedir())
-    .replace(/^\$\{HOME\}(?=\/|$)/, os.homedir());
-}
+// Anchored ~ / $HOME / ${HOME} expansion (homedir resolved per call) comes
+// from the vendored pathSafe factory. Re-exported below — guard.js exposes
+// expandHome from this module.
+const { expandHome } = require('../pathSafe');
 
 /**
  * Decide whether a path denotes a file or directory. Prefer the real
@@ -55,6 +50,10 @@ function buildEntry(raw, lock, baseDir) {
     unlockPhrase: String(lock.unlockPhrase || '').trim(),
     allowedPaths: Array.isArray(lock.allowedPaths) ? lock.allowedPaths : null,
     trustedSubdirs: Array.isArray(lock.trustedSubdirs) ? lock.trustedSubdirs : [],
+    // Store kind the block came from (local|worktree|global|shared), tagged by
+    // the hook's collectLocks so a rejection can flag a cross-project origin.
+    // See GH-585.
+    kind: lock._storeKind || null,
   };
 }
 

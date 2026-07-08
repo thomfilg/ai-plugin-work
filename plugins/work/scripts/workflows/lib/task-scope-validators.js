@@ -4,9 +4,6 @@
  * Validation functions extracted from task-scope.js. Each validator returns
  * an array of human-readable error messages (empty when clean).
  *
- * `validateTaskTestScope` lives in `task-scope-test-validator.js` (large
- * enough to warrant its own file) and is re-exported via task-scope.js.
- *
  * Behavior preserved exactly — refactor only reduces cyclomatic complexity
  * and nesting depth via helper extraction.
  */
@@ -14,6 +11,7 @@
 'use strict';
 
 const { _isAbsolutePathEntry, fileMatchesScope } = require('./task-scope-globs');
+const { TASK_TYPES, isKnownTaskType } = require('../../../skills/split-in-tasks/lib/task-types');
 
 // ---------------------------------------------------------------------------
 // validateTask
@@ -24,14 +22,32 @@ function _isCheckpointTask(task) {
   return taskType === 'checkpoint' || task.isCheckpoint === true;
 }
 
+/**
+ * `### Type` must be a member of the closed gate-contract enum
+ * (task-types.js). An unknown value is not cosmetic: `gateContractFor()`
+ * falls back to the strictest tdd-code contract at implement, so a docs or
+ * config task carrying a freeform Type wedges at RED demanding test files
+ * (GH-498 shape). Catch it here — at tasks_gate, where tasks.md is still
+ * editable — instead of at implement where it is hook-locked.
+ */
+function _checkTypeKnown(task, label, errors) {
+  const t = typeof task.type === 'string' ? task.type.trim() : '';
+  if (!t) {
+    errors.push(`${label} is missing \`### Type\` — must be one of: ${TASK_TYPES.join(', ')}.`);
+    return;
+  }
+  if (!isKnownTaskType(t)) {
+    errors.push(
+      `${label} \`### Type\` "${task.type}" is not in the closed enum (${TASK_TYPES.join(', ')}). ` +
+        'Unknown Types fall back to the strictest tdd-code gate contract at implement and wedge non-code tasks at RED.'
+    );
+  }
+}
+
 function _checkScopePresence(task, label, errors) {
   const hasInScope = Array.isArray(task.filesInScope) && task.filesInScope.length > 0;
-  const hasLegacyScope =
-    typeof task.suggestedScope === 'string' && task.suggestedScope.trim().length > 0;
-  if (!hasInScope && !hasLegacyScope) {
-    errors.push(
-      `${label} is missing both \`### Files in scope\` AND \`### Suggested Scope\` (need at least one)`
-    );
+  if (!hasInScope) {
+    errors.push(`${label} is missing \`### Files in scope\` (non-empty list required)`);
   }
   if (task.filesOutOfScope !== undefined && !Array.isArray(task.filesOutOfScope)) {
     errors.push(`${label} has malformed \`### Files explicitly out of scope\` section`);
@@ -75,6 +91,12 @@ function validateTask(task) {
   if (!task || typeof task !== 'object') return ['task must be an object'];
   const errors = [];
   const label = `Task ${task.num ?? '?'}`;
+  // Runs BEFORE the checkpoint early-return on purpose: a title-derived
+  // checkpoint (`isCheckpoint: true`) with no `### Type` line is NOT safe —
+  // the implement-side isCheckpointTask() (exception-validator.js) honors
+  // only `type === 'checkpoint'`, so without the explicit line the task
+  // falls to the strictest tdd-code contract and wedges. Require the line.
+  _checkTypeKnown(task, label, errors);
   if (_isCheckpointTask(task)) return errors;
 
   _checkScopePresence(task, label, errors);

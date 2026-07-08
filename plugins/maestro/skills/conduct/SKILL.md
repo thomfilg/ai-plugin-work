@@ -23,20 +23,25 @@ Runs `node plugins/maestro/scripts/maestro-conduct.js --daemon` in the backgroun
 
 Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs through this detector pipeline (per-phase via `phase-registry.js`):
 
-- **Question** — pane shows `Do you want to proceed?` / menu prompt → emit `QUESTION-DETECTED`. Always wins; no nudges while the agent is waiting on the operator.
-- **Silence / auto-restart** — pane content is static (no live spinner, no token change, no hash change) for `SILENCE_LIMIT_SEC` (default 300s) → kill the session and relaunch `claude --dangerously-skip-permissions '/work <TICKET>'`. `/work` resumes from `.work-state.json`. Only `-work` sessions are restart-eligible; `-dev`/`-listen` helpers are surfaced informationally.
-- **Spinner hang** — Claude TUI spinner stuck >threshold → Esc + nudge (cooldown so we don't flood the pane).
-- **Phase budget stall** — current `/work` step has been current longer than `phaseFor(phase).budgetMin` → soft → interrupt → alert escalation.
+- **Question** — pane shows `Do you want to proceed?` / menu prompt / a `❯ 1.` option cursor → emit an `ACTION` alert with `kind=question-pending`. Always wins; no nudges while the agent is waiting on the operator. Re-alerts on a `Q_RE_NUDGE_MIN` cooldown; rotation only after `Q_DEAD_END_MIN` AND only when queued work exists.
+- **Silence / auto-restart** — pane content is static for `SILENCE_LIMIT_SEC` (default 300s) AND the worktree isn't changing AND no live tool subprocess runs under the pane AND the agent isn't waiting on a human → kill + relaunch (fresh `/skill <TICKET>` for work/follow-up; `claude --continue` for generic commands). Only `-work` sessions are restart-eligible.
+- **Spinner hang** — spinner past threshold with NO worktree change → `spinner-hang` alert (Esc only with `SPINNER_AUTO_INTERRUPT=1`).
+- **Stuck input** — text sitting unsubmitted in an idle composer ≥5m → `stuck-input` alert (auto End+C-m with `STUCK_INPUT_AUTO_SUBMIT=1`).
+- **No progress** — worktree unchanged ≥45m while the pane looks active → `no-progress` alert (the backstop for panes that defeat silence detection).
+- **Phase budget stall** — the skill's phase has been current longer than `phaseFor(phase).budgetMin` AND the worktree isn't changing → soft → interrupt → alert escalation, in the agent's own skill vocabulary. Generic commands (qc-work…) have no /work phases and are never phase-coached.
 - **Commit stall** (implement phase only) — no commits in N min, surfaces as info log.
 - **PR comments** (follow_up phase only) — unaddressed bot review comments at CURRENT diff positions, HEAD unchanged → soft → interrupt → alert.
 
 ## Env
 
+Full tunables table (progress gating, question cooldowns, restart modes, branch
+template): `skills/orchestrate/SKILL.md` → "Env". The core ones:
+
 | Var | Default | Effect |
 |-----|---------|--------|
 | `MAESTRO_NS` | (unset) | Namespace key (`[A-Za-z0-9_-]+`). When set, isolates state/log/alert/inbox/lock **and** tmux session names so N conductors run on one machine without racing (GH-622). |
-| `MAESTRO_FORCE` | (unset) | `1` takes over a live per-namespace conductor lock instead of refusing. Use only when the prior conductor is gone. |
-| `SILENCE_LIMIT_SEC` | `300` | Real-silence threshold before auto-restart |
+| `MAESTRO_FORCE` | (unset) | `1` takes over a live per-namespace conductor lock instead of refusing. The usurped daemon detects the takeover on its next tick and exits by itself (`CONDUCTOR-USURPED`). |
+| `SILENCE_LIMIT_SEC` | `300` | Real-silence threshold before auto-restart. Progress/subprocess/waiting-on-user signals defer it, so it can stay short without reaping long builds |
 | `TICK_SEC` | `60` | Tick cadence |
 | `CLAUDE_BIN` | `claude` | Binary used for auto-restart |
 | `SKILL_NAME` | `work` | Skill name passed to the auto-restart command |
@@ -48,6 +53,44 @@ Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs th
 Concurrent instances: see the "Running concurrent maestro instances" section in
 `docs/OPERATOR_PLAYBOOK.md` for the one-conductor rule and the `MAESTRO_NS`
 isolation recipe.
+
+## Anti-pattern — don't re-confirm what the state file already answers
+
+Every conductor wake burns a model turn. The daemon has already done the polling
+for you: the alert line, the `_heartbeat.json` marker, and the state file under
+`STATE_DIR` carry the current fleet answer (PR status, mergeState, phase, attempt
+counts). Do **not** re-run `gh pr view` / `gh pr checks` or `tmux capture-pane`
+just to re-confirm a fact the emitted event already stated — that is a redundant
+confirmation that costs a turn and adds no signal. Act on the state you were
+woken with; only capture the pane when the event itself tells you to look
+(`question-pending`, `spinner-hang`, `no-progress`, `stuck-input`) or when the
+state file is genuinely stale/absent. Repeats of the same pending alert are
+backoff-throttled (`PENDING_REWAKE_MIN`), so a wake for a kind you already saw
+means the backoff elapsed — re-check the state files, not the same assumption.
+See the wake-filter and anti-pattern notes in `docs/OPERATOR_PLAYBOOK.md`.
+
+## Under Codex
+
+- **Invocation**: mention `$conduct` (maestro:conduct) — codex has no
+  `/plugin:skill` slash commands.
+- **Per-session runtime**: the daemon resolves each ticket's runtime
+  independently (`.maestro-runtime` file → manifest task/pool `runtime` keys
+  via `manifest.runtimeForTask` → `MAESTRO_RUNTIME` → `claude`), so one
+  conductor watches a mixed claude/codex fleet.
+- **Codex exec sessions** (launched with `--runtime=codex`) are detected via
+  their teed `<state>/<TICKET>.exec.jsonl` stream — bytes appended = alive,
+  `turn.completed` = progress, process exit = done — not pane regexes.
+  Restarts resume via `codex exec resume` (probe:
+  `transcript.listSessionsForCwd(worktree)`).
+- **Codex TUI panes** (no exec stream) run the `codex-tui-conservative`
+  dialect: spinner/question/stuck-input detectors report
+  unsupported-capability instead of guessing, and the session is NEVER
+  auto-killed or auto-restarted on pane-glyph evidence (DEAD-END-HOLD keeps it
+  alive for the operator).
+- **No Monitor tool**: run the daemon detached instead of piping through
+  Monitor — `nohup node plugins/maestro/scripts/maestro-conduct.js --daemon
+  >/tmp/maestro-conduct-daemon.log 2>&1 &` — and poll `LOG_FILE` /
+  `/tmp/maestro-alerts.jsonl` with `tail`.
 
 ## Stop
 

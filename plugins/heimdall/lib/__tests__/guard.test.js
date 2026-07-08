@@ -190,16 +190,21 @@ describe('evaluate: bash', () => {
     assert.equal(r.exitCode, 0);
   });
 
-  it('blocks running an EXTERNAL script whose content writes into a protected dir', () => {
+  it('fail-closed fallback blocks an EXTERNAL script when the runtime shim is unavailable', () => {
+    // With the shim disabled (non-Linux, missing .so, or kill-switch) the static
+    // fail-closed check still blocks. GH-657: with the shim available the command
+    // is instead routed through it (covered below and in the runtime e2e).
     const evil = path.join(os.tmpdir(), `heimdall-evil-${process.pid}.js`);
     fs.writeFileSync(
       evil,
       `require('fs').writeFileSync('${path.join(baseDir, '.claude', 'x')}', 'y')\n`
     );
+    process.env.HEIMDALL_DISABLE_SHIM = '1';
     try {
       const r = run(`node ${evil}`);
       assert.equal(r.exitCode, 2, 'external script writing to a protected dir must be blocked');
     } finally {
+      delete process.env.HEIMDALL_DISABLE_SHIM;
       fs.rmSync(evil, { force: true });
     }
   });
@@ -238,6 +243,137 @@ describe('evaluate: bash', () => {
     );
     assert.equal(r.exitCode, 2);
     assert.match(r.message, /edit repository config/);
+  });
+
+  // ─── GH-642: bare-basename markers must anchor to path boundaries ──────────
+  // Short protect basenames (ui, db, api, lib, src) were matched with a raw
+  // String.includes, so any command whose text merely CONTAINED the basename as
+  // a mid-word substring (build → "ui", require → "ui", glibc → "lib") was
+  // wrongly treated as touching the protected dir. These cases assert the
+  // marker only matches on a path-like boundary.
+  const BOUNDARY_LOCKS = [
+    {
+      protect: ['packages/ui', 'packages/db', 'packages/api', 'packages/lib', 'src'],
+      unlockPhrase: 'edit boundary',
+    },
+  ];
+  const runB = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: buildEntries(BOUNDARY_LOCKS, baseDir),
+    });
+
+  // NEGATIVE — basename appears only as a mid-word substring → must be ALLOWED.
+  it('ui: allows `pnpm build` (basename buried in "build")', () => {
+    assert.equal(runB('pnpm build').exitCode, 0);
+  });
+
+  it('ui: allows `node -e "require(...)"` (basename buried in "require")', () => {
+    assert.equal(runB(`node -e "require('x')"`).exitCode, 0);
+  });
+
+  it('ui: allows `cat guide.md` (basename buried in "guide")', () => {
+    assert.equal(runB('cat guide.md').exitCode, 0);
+  });
+
+  it('ui: allows a write to an unrelated mid-word file `equityuikit.txt`', () => {
+    assert.equal(runB('sed -i s/x/y/ equityuikit.txt').exitCode, 0);
+  });
+
+  it('ui: allows `rm guidance.txt` (basename buried in "guidance")', () => {
+    assert.equal(runB('rm guidance.txt').exitCode, 0);
+  });
+
+  it('ui: allows `mv buildkit.tar /tmp/x` (basename buried in "buildkit")', () => {
+    assert.equal(runB('mv buildkit.tar /tmp/x').exitCode, 0);
+  });
+
+  it('db: allows `pnpm dbml` (basename buried in "dbml")', () => {
+    assert.equal(runB('pnpm dbml').exitCode, 0);
+  });
+
+  it('api: allows `echo apiary` (basename buried in "apiary")', () => {
+    assert.equal(runB('echo apiary').exitCode, 0);
+  });
+
+  it('lib: allows `cat glibc.txt` (basename buried in "glibc")', () => {
+    assert.equal(runB('cat glibc.txt').exitCode, 0);
+  });
+
+  it('src: allows `rm usrconfig.txt` (basename buried mid-word in "usrconfig")', () => {
+    // "usrconfig" embeds the substring "src" mid-word — the pre-fix
+    // String.includes would have wrongly blocked this; the boundary anchor must
+    // not. (The old `echo transcript` case was inert: "transcript" has no "src".)
+    assert.equal(runB('rm usrconfig.txt').exitCode, 0);
+  });
+
+  it('ui: allows a bare assignment `x=ui` (not a path token)', () => {
+    // `=` precedes the marker but there is no trailing `/`, so `ui` is an
+    // assignment value, not a path INTO the protected dir. Must stay allowed —
+    // the `=marker/` alternative must not over-block. See GH-642.
+    assert.equal(runB('x=ui').exitCode, 0);
+  });
+
+  // POSITIVE — basename sits on a real path boundary → must be BLOCKED.
+  it('ui: blocks `rm packages/ui/config.json`', () => {
+    assert.equal(runB('rm packages/ui/config.json').exitCode, 2);
+  });
+
+  it('ui: blocks a `./`-prefixed write `rm ./packages/ui/config.json` (GH-642)', () => {
+    // Settles the skipped review claim that a `./` prefix bypasses the boundary:
+    // the char before `ui` in `./packages/ui/` is `/`, which IS in the boundary
+    // class, so this stays blocked.
+    assert.equal(runB('rm ./packages/ui/config.json').exitCode, 2);
+    assert.equal(runB('rm ./src/config.json').exitCode, 2);
+  });
+
+  it('ui: blocks a redirect-write `echo hi > ui/x`', () => {
+    assert.equal(runB('echo hi > ui/x').exitCode, 2);
+  });
+
+  it('ui: blocks a no-space redirect-write `echo hi >ui/x`', () => {
+    // No space after `>`: `ui` is preceded by `>` and followed by `/` — still a
+    // genuine path-token write, must stay blocked (fail-closed). See GH-642.
+    assert.equal(runB('echo hi >ui/x').exitCode, 2);
+  });
+
+  it('ui: blocks `sed -i s/a/b/ packages/ui/secret`', () => {
+    assert.equal(runB('sed -i s/a/b/ packages/ui/secret').exitCode, 2);
+  });
+
+  it('ui: blocks `rm packages/ui` (basename at trailing boundary)', () => {
+    assert.equal(runB('rm packages/ui').exitCode, 2);
+  });
+
+  it('ui: allows `node -e "require(\'ui\')"` (a read, not a write) — GH-656', () => {
+    // `require('ui')` reads the package; the lock is a WRITE gate, so this must
+    // NOT be blocked. Genuine interpreter writes (writeFileSync into the dir) are
+    // still caught by BASH_WRITE_GLOBAL. This corrects the GH-642-era assertion
+    // that treated any `node -e` naming the marker as a write.
+    assert.equal(runB(`node -e "require('ui')"`).exitCode, 0);
+    assert.equal(runB(`node -e "require('fs').writeFileSync('packages/ui/x','y')"`).exitCode, 2);
+  });
+
+  it('db: blocks `rm packages/db/schema.sql`', () => {
+    assert.equal(runB('rm packages/db/schema.sql').exitCode, 2);
+  });
+
+  it('api: blocks `sed -i s/a/b/ packages/api/x`', () => {
+    assert.equal(runB('sed -i s/a/b/ packages/api/x').exitCode, 2);
+  });
+
+  it('src: blocks `rm src/index.js`', () => {
+    assert.equal(runB('rm src/index.js').exitCode, 2);
+  });
+
+  it('src: blocks a `flag=path` write `dd if=/dev/zero of=src/output.dat`', () => {
+    // Regression: `src` is preceded by `=` (from `of=src`) and followed by `/` —
+    // a genuine write INTO the protected dir. The boundary anchor originally
+    // omitted `=`, letting this bypass the write guard that String.includes had
+    // caught. The `=marker/` alternative restores the block. See GH-642.
+    assert.equal(runB('dd if=/dev/zero of=src/output.dat').exitCode, 2);
   });
 });
 
@@ -279,5 +415,203 @@ describe('evaluate: passthrough', () => {
   it('ignores tools it does not guard', () => {
     const r = evaluate({ toolName: 'Read', toolInput: {}, transcriptPath: '', entries: entries() });
     assert.equal(r.exitCode, 0);
+  });
+});
+
+// ─── Shell-obfuscation resistance + temp-path parity (GH-655 / GH-658) ─────────
+
+describe('evaluate: bash obfuscation (GH-655)', () => {
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+  const dir = path.join(baseDir, '.claude');
+
+  it('blocks obfuscated writes into a protected dir', () => {
+    for (const command of [
+      `echo x > ${path.join(baseDir, '.cl[a]ude')}/settings.json`,
+      `echo x > ${path.join(baseDir, '.cl""aude')}/settings.json`,
+      `echo x > ${path.join(baseDir, '.cla\\ude')}/settings.json`,
+      `echo x > ${path.dirname(dir)}/.cl*ude/settings.json`,
+      `echo x > ${path.join(baseDir, '{.claude,z}')}/settings.json`,
+    ]) {
+      assert.equal(bash(command).exitCode, 2, `should block: ${command}`);
+    }
+  });
+
+  it('does not flag unrelated globs / build commands', () => {
+    for (const command of ['ls src/*', 'rm *.log', 'pnpm build', 'require("x")']) {
+      assert.equal(bash(command).exitCode, 0, `should allow: ${command}`);
+    }
+  });
+});
+
+describe('evaluate: script-bypass routing (GH-657)', () => {
+  const os2 = require('node:os');
+  let scriptsDir;
+
+  before(() => {
+    scriptsDir = fs.mkdtempSync(path.join(os2.tmpdir(), 'heimdall-scripts-'));
+  });
+  after(() => fs.rmSync(scriptsDir, { recursive: true, force: true }));
+
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+  const write = (name, body) => {
+    const p = path.join(scriptsDir, name);
+    fs.writeFileSync(p, body);
+    return p;
+  };
+  const target = path.join(baseDir, '.claude', 'settings.json');
+
+  // With the runtime shim available, a script-running command is ALLOWED but
+  // rewritten to preload the interposer, which denies the write at runtime — so
+  // static indirection (variable / path.join / separate line) no longer needs to
+  // be detected. The actual EACCES enforcement is proven in the runtime e2e.
+  const shimAvailable = require(path.resolve(__dirname, '..', 'guard', 'fsguard')).shimPath();
+
+  const cases = [
+    ['direct.js', `require('fs').writeFileSync('${target}', 'x');\n`],
+    ['viavar.js', `const t = '${target}';\nrequire('fs').writeFileSync(t, 'x');\n`],
+    [
+      'split.js',
+      `// touches ${path.join(baseDir, '.claude')}/config\n` +
+        "require('fs').writeFileSync('/tmp/heimdall-split-out', 'x');\n",
+    ],
+  ];
+
+  for (const [name, body] of cases) {
+    it(`routes '${name}' through the runtime shim when available, else fail-closed`, () => {
+      const s = write(name, body);
+      const r = bash(`node ${s}`);
+      if (shimAvailable) {
+        assert.equal(r.exitCode, 0);
+        assert.match(r.rewrite || '', /LD_PRELOAD=.*heimdall-fsguard/);
+        assert.match(r.rewrite || '', /HEIMDALL_PROTECTED=/);
+      } else {
+        assert.equal(r.exitCode, 2);
+      }
+    });
+  }
+
+  it('fail-closed fallback blocks when the shim is force-disabled', () => {
+    const s = write('direct2.js', `require('fs').writeFileSync('${target}', 'x');\n`);
+    process.env.HEIMDALL_DISABLE_SHIM = '1';
+    try {
+      assert.equal(bash(`node ${s}`).exitCode, 2);
+    } finally {
+      delete process.env.HEIMDALL_DISABLE_SHIM;
+    }
+  });
+});
+
+describe('evaluate: skills subdir is execute-trusted but edit-gated (GH-637)', () => {
+  const os2 = require('node:os');
+  let cfgRoot;
+  let skillScript;
+  const skillLocks = () => [
+    {
+      protect: ['.claude'],
+      unlockPhrase: 'edit .claude',
+      trustedSubdirs: ['hooks', 'plugins', 'external_scripts', 'skills'],
+    },
+  ];
+  const ent = () => buildEntries(skillLocks(), cfgRoot);
+
+  before(() => {
+    cfgRoot = fs.mkdtempSync(path.join(os2.homedir(), '.heimdall-skills-'));
+    skillScript = path.join(cfgRoot, '.claude', 'skills', 'demo', 'run.js');
+    fs.mkdirSync(path.dirname(skillScript), { recursive: true });
+    // Script both references the protected dir and performs a write op — without
+    // the skills trust it would be flagged as a script-bypass write.
+    fs.writeFileSync(
+      skillScript,
+      "const fs = require('fs');\nfs.writeFileSync('/tmp/out', '.claude ran');\n"
+    );
+  });
+
+  after(() => fs.rmSync(cfgRoot, { recursive: true, force: true }));
+
+  it('allows executing a skill script under .claude/skills without unlock', () => {
+    const r = evaluate({
+      toolName: 'Bash',
+      toolInput: { command: `node ${skillScript} --flag` },
+      transcriptPath: transcriptEmpty,
+      entries: ent(),
+    });
+    assert.equal(r.exitCode, 0, r.message);
+  });
+
+  it('still blocks EDITING a file under .claude/skills', () => {
+    const r = evaluate({
+      toolName: 'Edit',
+      toolInput: { file_path: skillScript },
+      transcriptPath: transcriptEmpty,
+      entries: ent(),
+    });
+    assert.equal(r.exitCode, 2);
+  });
+});
+
+describe('evaluate: bash interpreter reads are not writes (GH-656)', () => {
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+  const dir = path.join(baseDir, '.claude');
+
+  it('allows read-only interpreter idioms that merely name a protected path', () => {
+    for (const command of [
+      `node -e "const c = require('${dir}/config'); console.log(c)"`,
+      `node -e "require('./package.json')"`,
+      `python3 -c "print(open('${dir}/x').read())"`,
+      `node ${dir}/../thing.js --flag`,
+    ]) {
+      assert.equal(bash(command).exitCode, 0, `should allow: ${command}`);
+    }
+  });
+
+  it('still blocks genuine interpreter writes into a protected path', () => {
+    for (const command of [
+      `node -e "require('fs').writeFileSync('${dir}/x','y')"`,
+      `python3 -c "open('${dir}/x','w').write('y')"`,
+      `python3 -c "open('${dir}/x','r+').write('y')"`,
+      `echo x > ${dir}/x`,
+    ]) {
+      assert.equal(bash(command).exitCode, 2, `should block: ${command}`);
+    }
+  });
+});
+
+describe('evaluate: bash temp-path parity (GH-658)', () => {
+  const os2 = require('node:os');
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+
+  it('allows a write into a throwaway temp .claude fixture', () => {
+    const tmp = fs.mkdtempSync(path.join(os2.tmpdir(), 'heimdall-fixture-'));
+    const r = bash(`mkdir -p ${tmp}/.claude && echo x > ${tmp}/.claude/settings.json`);
+    fs.rmSync(tmp, { recursive: true, force: true });
+    assert.equal(r.exitCode, 0);
+  });
+
+  it('still blocks a write into the real protected .claude', () => {
+    assert.equal(bash(`echo x > ${path.join(baseDir, '.claude')}/settings.json`).exitCode, 2);
   });
 });

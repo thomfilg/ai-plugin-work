@@ -87,7 +87,10 @@ describe('reports step', () => {
         const blob = `${e.command || ''} ${e.agentPrompt || ''} ${e.content || ''}`;
         return blob.includes('cost-report.md');
       });
-      assert.ok(entry, `expected a queued action referencing cost-report.md, got: ${JSON.stringify(entries)}`);
+      assert.ok(
+        entry,
+        `expected a queued action referencing cost-report.md, got: ${JSON.stringify(entries)}`
+      );
       assert.equal(entry.step, STEPS.reports);
       assert.equal(entry.action, 'RUN');
 
@@ -98,8 +101,14 @@ describe('reports step', () => {
       assert.ok(payload.includes('Per-step'), `expected per-step table, got: ${payload}`);
       assert.ok(payload.includes('Per-agent'), `expected per-agent table, got: ${payload}`);
       // Per-agent rows carry the dispatched agent types
-      assert.ok(payload.includes('developer-nodejs-tdd'), `expected developer-nodejs-tdd agent row, got: ${payload}`);
-      assert.ok(payload.includes('code-checker'), `expected code-checker agent row, got: ${payload}`);
+      assert.ok(
+        payload.includes('developer-nodejs-tdd'),
+        `expected developer-nodejs-tdd agent row, got: ${payload}`
+      );
+      assert.ok(
+        payload.includes('code-checker'),
+        `expected code-checker agent row, got: ${payload}`
+      );
       // Per-step rows carry the steps + analyzeActions duration column (R5)
       assert.ok(payload.includes('implement'), `expected implement step row, got: ${payload}`);
       assert.ok(payload.includes('Duration'), `expected a duration column, got: ${payload}`);
@@ -124,7 +133,11 @@ describe('reports step', () => {
         const p = e.agentPrompt || '';
         return p.includes('*.check.md') && !p.includes('cost-report.md');
       });
-      assert.equal(lsOnly, undefined, 'reports step should no longer queue the bare ls *.check.md command');
+      assert.equal(
+        lsOnly,
+        undefined,
+        'reports step should no longer queue the bare ls *.check.md command'
+      );
     });
 
     it('honors WORK_PRICING set as an env var (parsed table → non-zero USD)', () => {
@@ -174,6 +187,33 @@ describe('reports step', () => {
       }
     });
 
+    it('description mode: null ticket does not throw and emits a placeholder-labelled report', () => {
+      // Regression: in description mode generatePlan passes ctx.ticket = null
+      // (no ticket exists until the plan's ticket step runs). loadActions(null)
+      // throws on the path join, which crashed the whole plan generation.
+      const tasksDir = path.join(tmpBase, 'TBD');
+
+      const { add, entries } = makeAdd();
+      assert.doesNotThrow(() => {
+        reportsStep(add, {}, makeCtx({ ticket: null, t: '{TICKET}', tasksDir }));
+      });
+
+      const entry = entries.find((e) => {
+        const blob = `${e.command || ''} ${e.agentPrompt || ''} ${e.content || ''}`;
+        return blob.includes('cost-report.md');
+      });
+      assert.ok(
+        entry,
+        `expected a cost-report.md write in description mode, got: ${JSON.stringify(entries)}`
+      );
+      const payload = `${entry.command || ''} ${entry.agentPrompt || ''} ${entry.content || ''}`;
+      assert.ok(
+        payload.includes('{TICKET}'),
+        `expected {TICKET} placeholder label, got: ${payload}`
+      );
+      assert.ok(payload.includes('Grand total'), `expected grand-total header, got: ${payload}`);
+    });
+
     it('degrades gracefully: still emits cost-report.md when there are no usage rows', () => {
       const ticket = 'GH-702';
       const tasksDir = path.join(tmpBase, ticket);
@@ -188,9 +228,15 @@ describe('reports step', () => {
         const blob = `${e.command || ''} ${e.agentPrompt || ''} ${e.content || ''}`;
         return blob.includes('cost-report.md');
       });
-      assert.ok(entry, `expected a cost-report.md write even with no usage rows, got: ${JSON.stringify(entries)}`);
+      assert.ok(
+        entry,
+        `expected a cost-report.md write even with no usage rows, got: ${JSON.stringify(entries)}`
+      );
       const payload = `${entry.command || ''} ${entry.agentPrompt || ''} ${entry.content || ''}`;
-      assert.ok(payload.includes('Grand total'), `expected grand-total header in zero-usage report, got: ${payload}`);
+      assert.ok(
+        payload.includes('Grand total'),
+        `expected grand-total header in zero-usage report, got: ${payload}`
+      );
     });
   });
 });

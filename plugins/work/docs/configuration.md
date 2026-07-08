@@ -50,14 +50,24 @@ The plugin uses environment variables for configuration, resolved through `scrip
 | `TEST_UNIT_COMMAND` | | Per-suite scoped test command for **dev** (use `$CHANGED_FILES`). Example: `pnpm test $CHANGED_FILES` |
 | `TEST_INTEGRATION_COMMAND` | | Per-suite scoped integration test command for **dev** |
 | `TEST_E2E_COMMAND` | | Per-suite scoped e2e test command for **dev** |
-| `SCRIPT_RUN_AFFECTED_UNIT` | | Affected-suite script for **/check2** (computes affected internally). Example: `pnpm exec tsx ./scripts/run-affected-tests.ts --unit` |
-| `SCRIPT_RUN_AFFECTED_INTEGRATION` | | Affected-suite script for **/check2** |
-| `SCRIPT_RUN_AFFECTED_E2E` | | Affected-suite script for **/check2** |
+| `SCRIPT_RUN_AFFECTED_UNIT` | | Affected-suite script for **/check** (computes affected internally). Example: `pnpm exec tsx ./scripts/run-affected-tests.ts --unit`. Additionally receives `IMPACT_TEST_FILES` (newline-separated test files that import a changed source file — one hop) and `IMPACT_TEST_FILES_BASE` in its environment, so api-contract changes that break consumer-test mocks run those tests too (echo-5820) |
+| `SCRIPT_RUN_AFFECTED_INTEGRATION` | | Affected-suite script for **/check** |
+| `SCRIPT_RUN_AFFECTED_E2E` | | Affected-suite script for **/check**. Receives `CHANGED_SPECS` (newline-separated, strictly-changed spec files + specs importing a changed helper), `CHANGED_SPECS_BASE`, and `E2E_PER_SPEC_TIMEOUT_MS` in its environment |
+| `CHECK_FLAKE_RETRY` | `1` | Set to `0` to disable the /check single flake-retry round on small/transient test failures |
+| `CHECK_FLAKE_RETRY_MAX` | `5` | Max failing tests for a run to qualify for the flake retry (transient signatures always qualify) |
+| `CHECK_TESTS_BASELINE` | `1` | Set to `0` to disable the `tests-baseline.json` net-new vs pre-existing failure split in /check (the baseline file lives in the ticket tasks dir, next to `.check-state.json`) |
+| `SCRIPT_TYPECHECK_COMMAND` | | Full-repo typecheck command for the **/check** typecheck-error delta (echo-5137-issue-4). Example: `pnpm exec tsc --noEmit`. Unlike `TYPECHECK_COMMAND` (dev, `$CHANGED_FILES`-scoped), this runs the whole project so inherited base-branch errors can be split from yours: output is parsed into stable keys (file + TS code + message prefix; line numbers excluded) and diffed against a per-ticket `typecheck-baseline.json` in the ticket tasks dir. Net-new errors fail `4_run_tests` with the per-key list; pre-existing errors are reported as "not yours" and never block. Validated through the safe-env-command allowlist — unsafe values are ignored, never executed. Unset → the delta is silently skipped |
+| `CHECK_TYPECHECK_BASELINE` | `1` | Set to `0` to disable the /check typecheck-error delta entirely (no typecheck run, no baseline read/write) even when `SCRIPT_TYPECHECK_COMMAND` is set. The baseline is captured on the first classified run for the ticket (those errors report as pre-existing, never "clean") and ratchets down whenever a run has zero net-new errors. Limitation: the net-new signal only discriminates from the second run onward — errors already on the branch at first capture are recorded as pre-existing, not attributed to the branch |
+| `CHECK_E2E_SPEC_TIMEOUT_MS` | `60000` | Per-spec time budget exported to the e2e suite as `E2E_PER_SPEC_TIMEOUT_MS` (30s is too tight under `--repeat-each --workers=1`) |
+| `CHECK_IMPACT_TESTS` | `1` | Set to `0` to disable /check impact-aware unit-test selection (the one-hop `IMPACT_TEST_FILES` set of test files importing a changed source file, exported to `SCRIPT_RUN_AFFECTED_UNIT`) |
+| `CHECK_GHERKIN_SCOPE` | `1` | Set to `0` to disable the /check `4b_gherkin_scope` step (declared Gherkin scope in spec.md vs actual committed diff) — the step auto-passes with a SKIPPED note in `gherkin-scope.check.md` |
+| `CHECK_GHERKIN_COVERAGE` | warn | Static Gherkin-to-test coverage inside `4b_gherkin_scope`: each spec.md scenario name is keyword-matched against `it`/`test`/`describe` descriptions in the diff's test files (manual override: `<!-- gherkin-covered: scenario name → test-file.js:line -->` in spec.md). Unset/default → uncovered scenarios add a WARNING to `gherkin-scope.check.md`; `strict` → uncovered scenarios fail the step; `0` → disabled. Missing spec.md or zero scenarios always skip silently |
 | `SESSION_GUARD_ENABLED` | `1` | Prevent concurrent /work sessions |
 | `TASK_REVIEW_MAX_FIXES` | `2` | Max fix rounds per task review |
 | `READ_DOCS_ON_BRIEF` | | Paths to docs the brief-writer should read |
 | `READ_DOCS_ON_SPEC` | | Paths to docs the spec-writer should read |
-| `WORK_SKIP_E2E` | | Set to `1` to make implement-gate skip executing E2E test commands. Detected E2E patterns (`pnpm e2e`, `playwright`, `$TEST_E2E_COMMAND`) get skip-stub evidence so the workflow advances without spending minutes on browser tests. Alias: `WORK_SKIP_E2E_TESTS=1`. |
+| `WORK_SKIP_E2E` | | Set to `1` to make implement-gate skip executing E2E test commands. Detected E2E patterns (`pnpm e2e`, `playwright`, `$TEST_E2E_COMMAND`) get skip-stub evidence so the workflow advances without spending minutes on browser tests. Each stub is written via the shared gate-writer and audited to `.work-actions.json` as `tdd-e2e-skip-stub` so the fabricated cycle stays visible. Alias: `WORK_SKIP_E2E_TESTS=1`. |
+| `WORK_OPERATOR_TOKEN` | | Set to `1` to enable the operator-only `tdd-phase-state.js exception` subcommand. Agent environments never carry it. |
 | `WORK_PRICING` | `{"claude-opus-4":{"usdPer1MTokens":15}}` | Model-keyed pricing table for the `reports`-step cost report. JSON object of shape `{ <model>: { usdPer1MTokens: <number> } }` where the rate is USD per 1,000,000 tokens. Ships a non-zero default so `cost-report.md` shows a figure without operator config; invalid JSON falls back to the default table. The reported USD is labelled **estimated** — it is a token-rate approximation, never billed accuracy. |
 
 ### Debug Variables
@@ -115,7 +125,7 @@ Provider resolution uses this precedence:
 
 ## WEB_APPS Configuration
 
-The `WEB_APPS` variable controls QA agent routing during `/check2`:
+The `WEB_APPS` variable controls QA agent routing during `/check`:
 
 ```json
 [

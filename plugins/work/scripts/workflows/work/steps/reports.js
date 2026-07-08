@@ -16,9 +16,9 @@ const { renderCostReport } = require('../lib/cost-report');
 const { WORK_PRICING } = require('../../lib/config');
 
 module.exports = function reportsStep(add, s, ctx) {
-  const { STEPS, tasksDir, ticket } = ctx;
+  const { STEPS, tasksDir, ticket, t } = ctx;
 
-  const markdown = buildCostReport(ticket);
+  const markdown = buildCostReport(ticket, t);
   const reportPath = `${tasksDir}/cost-report.md`;
 
   add(STEPS.reports, 'RUN', 'Task(Bash)', 'Emit cost-report.md', {
@@ -31,11 +31,17 @@ module.exports = function reportsStep(add, s, ctx) {
  * Load usage rows + per-step durations for `ticket` and render the cost report
  * markdown. Tolerates a missing/empty actions file (zero-row report).
  *
- * @param {string} ticket
+ * Description mode passes `ticket = null` (no ticket exists until the plan's
+ * ticket step runs) — `loadActions(null)` would throw on the path join, so a
+ * null ticket skips the load and renders a zero-row report labelled with the
+ * `displayName` placeholder (ctx.t, e.g. `{TICKET}`).
+ *
+ * @param {string|null} ticket
+ * @param {string} [displayName] — fallback report label when `ticket` is null.
  * @returns {string} Rendered `cost-report.md` markdown.
  */
-function buildCostReport(ticket) {
-  const actions = loadActions(ticket) || [];
+function buildCostReport(ticket, displayName) {
+  const actions = (ticket ? loadActions(ticket) : []) || [];
   const usageRecords = actions.filter((a) => a && a.kind === USAGE_KIND);
   const stepDurations = stepDurationMap(analyzeActions(actions));
   // GH-311 fix: read the parsed pricing table from config.js (its IIFE
@@ -46,7 +52,13 @@ function buildCostReport(ticket) {
   const pricingTable = WORK_PRICING || {};
   const model = Object.keys(pricingTable)[0];
 
-  return renderCostReport({ ticket, usageRecords, stepDurations, model, pricingTable });
+  return renderCostReport({
+    ticket: ticket || displayName || '{TICKET}',
+    usageRecords,
+    stepDurations,
+    model,
+    pricingTable,
+  });
 }
 
 /**

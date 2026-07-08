@@ -1,9 +1,10 @@
 /**
  * task-parser-strategy.js
  *
- * GH-590: ### Test Strategy + ### Test Command extraction helpers, split out
- * of task-parser.js to satisfy the static-quality gate (max-lines /
- * cognitive-complexity). No I/O; pure parsing of task-body strings.
+ * GH-590: ### Test Strategy extraction helpers, split out of task-parser.js
+ * to satisfy the static-quality gate (max-lines / cognitive-complexity).
+ * No I/O; pure parsing of task-body strings. The legacy `### Test Command`
+ * extractor was removed in GH-653 — generation rejects that block at draft.
  */
 
 'use strict';
@@ -30,6 +31,14 @@ const STRATEGY_KEY_HANDLERS = Object.freeze({
   verifiedby: (out, value) => {
     out.verifiedBy = value;
   },
+  // GH-570 — optional ablation-RED declaration for regression-coverage
+  // tasks (authored at planning time, validated by the draft gate).
+  'red-mode': (out, value) => {
+    out.redMode = value;
+  },
+  redmode: (out, value) => {
+    out.redMode = value;
+  },
 });
 
 function _parseStrategyLine(line, out) {
@@ -49,7 +58,15 @@ function _parseStrategyLine(line, out) {
 }
 
 function _parseStrategyKeys(body) {
-  const out = { kind: null, entry: null, peer: null, cites: null, command: null, verifiedBy: null };
+  const out = {
+    kind: null,
+    entry: null,
+    peer: null,
+    cites: null,
+    command: null,
+    verifiedBy: null,
+    redMode: null,
+  };
   for (const raw of body.split('\n')) {
     _parseStrategyLine(raw, out);
   }
@@ -96,7 +113,7 @@ function _parseFromFences(fences) {
 }
 
 function _buildStrategyResult(parsed, customBody) {
-  const { kind, entry, peer, cites, command, verifiedBy } = parsed;
+  const { kind, entry, peer, cites, command, verifiedBy, redMode } = parsed;
   if (!kind) return null;
   const resolvedCommand = command || customBody || null;
   const resolvedPeer = peer || verifiedBy || null;
@@ -108,6 +125,7 @@ function _buildStrategyResult(parsed, customBody) {
     command: resolvedCommand,
     verifiedBy: verifiedBy || peer || null,
     customBody: resolvedCommand,
+    redMode: redMode || null,
   };
 }
 
@@ -123,52 +141,8 @@ function extractTestStrategy(taskBody, extractSectionByHeading) {
   return _buildStrategyResult(parsed, customBody);
 }
 
-const BARE_INTERPRETER_RE = /^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i;
-
-function _isCommandLine(stripped) {
-  if (!stripped) return false;
-  if (stripped.startsWith('#')) return false;
-  if (BARE_INTERPRETER_RE.test(stripped)) return false;
-  if (/^[`]+$/.test(stripped)) return false;
-  const bulletStripped = stripped.replace(/^[-*+]\s+/, '').trim();
-  if (/^_[^_]*_\s*$/.test(bulletStripped)) return false;
-  if (/^_/.test(bulletStripped) && /_$/.test(bulletStripped)) return false;
-  if (/^-{3,}$|^\*{3,}$|^_{3,}$/.test(stripped)) return false;
-  return true;
-}
-
-function _normalizeCommandLine(line) {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  const stripped = trimmed.replace(/^`+|`+$/g, '').trim();
-  return _isCommandLine(stripped) ? stripped : null;
-}
-
-function extractTestCommand(taskBody) {
-  const headingMatch = taskBody.match(
-    /### Test Command[^\n]*\n([\s\S]*?)(?=\n### |\n## |\n---\s*\n|$)/
-  );
-  if (!headingMatch) return null;
-  const cmdLines = [];
-  let inFence = false;
-  for (const raw of headingMatch[1].split('\n')) {
-    const line = raw.trimEnd();
-    if (/^\s*```/.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    const stripped = _normalizeCommandLine(line);
-    if (!stripped) continue;
-    cmdLines.push(stripped);
-    if (!stripped.endsWith('\\')) break;
-  }
-  if (cmdLines.length === 0) return null;
-  return cmdLines.map((l) => l.replace(/\\$/, '').trim()).join(' ');
-}
-
 module.exports = {
   extractTestStrategy,
-  extractTestCommand,
   _parseStrategyKeys,
   _extractFencedBlocks,
 };

@@ -63,11 +63,10 @@ const DEVELOPER_AGENTS = [
   'developer-nodejs-tdd',
   'developer-react-senior',
   'developer-react-ui-architect',
-  'commit-writer',
 ];
 
 // Only the three developer-* agents must cross-reference testing-anti-patterns.md (R10).
-// commit-writer is a developer agent for red-flags purposes but not for cross-ref.
+// (GH-539: commit-writer was removed — commits go through the commit-msg validator hook.)
 const CROSS_REF_AGENTS = [
   'developer-nodejs-tdd',
   'developer-react-senior',

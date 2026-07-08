@@ -22,6 +22,17 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {
+  normalizedVariants,
+  commandGlobReferencesMarker,
+  commandGlobReferencesPath,
+} = require('../lib/guard/shell-normalize');
+const {
+  toPosix,
+  resolveSafe,
+  applyPatchCandidates,
+  patchTargetsOnlyConfigFile,
+} = require('../lib/guard/conceal-paths');
 
 // Try to load the conceal config at <dir>/.claude/heimdall-conceal.json.
 // Returns the parsed config (stamped with __root = dir) when present, null when
@@ -155,27 +166,6 @@ function readStdin() {
   }
 }
 
-// Deny patterns are anchored on forward slashes (see heimdall-conceal.js
-// buildPatterns); normalize Windows backslash separators in the target so the
-// match holds cross-platform. (Match-only — the command is never executed from
-// this normalized copy.)
-const toPosix = (s) => s.replace(/\\/g, '/');
-
-// Resolve symlinks (tolerating a non-existent leaf, e.g. Write to a new file),
-// mirroring the lock guard's resolvePathSafe. A symlink whose own path doesn't
-// match the deny pattern must not reach a concealed target.
-function resolveSafe(p) {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    try {
-      return path.join(fs.realpathSync(path.dirname(p)), path.basename(p));
-    } catch {
-      return p;
-    }
-  }
-}
-
 // Path candidates for a file tool. Path-bearing fields are matched both raw AND
 // symlink-resolved (a symlink into a concealed dir must be caught). `pattern` is
 // a PATH glob ONLY for Glob — for Grep it is a content-search regex, so treating
@@ -209,30 +199,100 @@ function fileToolCandidates(toolName, input) {
   return candidates.filter(Boolean).map(toPosix);
 }
 
-function evaluate(cfg, toolName, input) {
-  if (toolName === 'Bash') {
-    const cmd = toPosix(String(input.command || ''));
-    return cmdPatterns(cfg).find((re) => re.test(cmd)) || null;
+// Literal path strings a wildcard token could resolve onto: secretsFiles
+// basenames plus the literal core of each deny pattern (leading/trailing anchor
+// groups stripped, regex unescaped). Anything that isn't a plain literal path is
+// skipped — those are matched by the regex-over-variants pass instead.
+function literalCore(pattern) {
+  let s = String(pattern)
+    .replace(/^\([^)]*\)/, '') // drop a leading (^|/) / (^|[^\w.-]) anchor group
+    .replace(/^\^/, '')
+    .replace(/\([^)]*\)$/, '') // drop a trailing (/|$) anchor group
+    .replace(/\\b$/, '')
+    .replace(/\$$/, '');
+  s = s.replace(/\\(.)/g, '$1'); // unescape \x -> x
+  return /^[\w./-]+$/.test(s) ? s : '';
+}
+
+function concealLiterals(cfg) {
+  const out = new Set();
+  for (const f of cfg.secretsFiles || []) {
+    const b = path.basename(String(f));
+    if (b) out.add(b);
   }
-  if (FILE_TOOLS.has(toolName)) {
-    // Test each candidate SEPARATELY: joining with a separator would break the
-    // `(/|$)` right-boundary (a dir at a field's end is followed by the
-    // separator, not `/` or end-of-string).
-    const pats = filePatterns(cfg);
-    for (const t of fileToolCandidates(toolName, input)) {
-      const hit = pats.find((re) => re.test(t));
-      if (hit) return hit;
+  for (const key of ['denyFilePatterns', 'denyCommandPatterns']) {
+    for (const p of cfg[key] || []) {
+      const core = literalCore(p);
+      if (core) out.add(core);
     }
-    return null;
+  }
+  return [...out];
+}
+
+// A wildcard token (`*`, `?`) can't be reduced to a literal, so glob-match
+// command tokens against the known concealed literals. Returns a descriptive
+// match token (truthy) or null. See GH-655.
+function globMatchesConcealed(cfg, variants) {
+  const literals = concealLiterals(cfg);
+  if (!literals.length) return null;
+  for (const variant of variants) {
+    for (const lit of literals) {
+      const ref = lit.includes('/')
+        ? commandGlobReferencesPath(variant, lit)
+        : commandGlobReferencesMarker(variant, lit);
+      if (ref) return `glob:${lit}`;
+    }
+  }
+  return null;
+}
+
+// Test each candidate SEPARATELY: joining with a separator would break the
+// `(/|$)` right-boundary (a dir at a field's end is followed by the separator,
+// not `/` or end-of-string).
+function firstHit(pats, candidates) {
+  for (const candidate of candidates) {
+    const hit = pats.find((re) => re.test(candidate));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function evaluateBashCommand(cfg, input) {
+  const raw = String(input.command || '');
+  // Deobfuscate the RAW command first (a shell backslash escape must be
+  // resolved before toPosix would rewrite `\`→`/`), then also carry a toPosix
+  // form of each variant for Windows-separator configs. Quote/backslash/brace/
+  // [x] evasions (cat ~/.se[c]rets, .se""crets, {.sec,x}rets) collapse to the
+  // literal path before matching. See GH-655.
+  const variantSet = new Set();
+  for (const v of normalizedVariants(raw)) {
+    variantSet.add(v);
+    variantSet.add(toPosix(v));
+  }
+  const variants = [...variantSet];
+  return firstHit(cmdPatterns(cfg), variants) || globMatchesConcealed(cfg, variants);
+}
+
+function evaluate(cfg, toolName, input, root) {
+  if (toolName === 'apply_patch') {
+    return firstHit(filePatterns(cfg), applyPatchCandidates(input, root));
+  }
+  if (toolName === 'Bash') return evaluateBashCommand(cfg, input);
+  if (FILE_TOOLS.has(toolName)) {
+    return firstHit(filePatterns(cfg), fileToolCandidates(toolName, input));
   }
   return null;
 }
 
 // True when a file tool targets the given config path (raw or symlink-resolved).
 // Used to let the user edit a broken config to recover from a fail-closed state.
+// The apply_patch lane gets the same recovery: a patch whose EVERY target is the
+// config file is a repair edit (any other target keeps the fail-closed block).
 function targetsConfigFile(toolName, input, cfgPath) {
-  if (!cfgPath || !FILE_TOOLS.has(toolName)) return false;
+  if (!cfgPath) return false;
   const real = resolveSafe(cfgPath);
+  if (toolName === 'apply_patch') return patchTargetsOnlyConfigFile(input, cfgPath, real);
+  if (!FILE_TOOLS.has(toolName)) return false;
   for (const t of pathFieldsOf(input)) {
     if (t === cfgPath || resolveSafe(t) === real) return true;
   }
@@ -287,7 +347,7 @@ function main() {
   const cfg = resolveConfig(root, toolName, input);
   if (!cfg) process.exit(0); // no policy for this project → no-op
 
-  const matched = evaluate(cfg, toolName, input);
+  const matched = evaluate(cfg, toolName, input, root);
   if (!matched) process.exit(0);
 
   log(cfg, {

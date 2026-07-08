@@ -65,8 +65,19 @@ test('--scope=shared narrows discovery to the shared tier', () => {
   // project-tier memories (so the scope filter is actually distinguishing tiers).
   // We verify by asking for them via the programmatic `lintStore` entry point.
   const { lintStore } = require(CLI);
-  const sharedResult = lintStore({ cwd: PROJ_CWD, scope: 'shared' });
-  const projectResult = lintStore({ cwd: PROJ_CWD, scope: 'project' });
+  // In-process calls resolve stores via the REAL process HOME — pin it to the
+  // fixture home (like the spawned CLI does) so the machine's live shared
+  // store can't leak extra memories into the tier comparison.
+  const realHome = process.env.HOME;
+  let sharedResult;
+  let projectResult;
+  try {
+    process.env.HOME = FAKE_HOME;
+    sharedResult = lintStore({ cwd: PROJ_CWD, scope: 'shared' });
+    projectResult = lintStore({ cwd: PROJ_CWD, scope: 'project' });
+  } finally {
+    process.env.HOME = realHome;
+  }
   assert.ok(
     sharedResult.memories.length < projectResult.memories.length,
     `scope=shared (${sharedResult.memories.length}) must see fewer memories than scope=project (${projectResult.memories.length})`

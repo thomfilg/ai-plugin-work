@@ -146,14 +146,6 @@ const config = {
   SCRIPT_RUN_AFFECTED_INTEGRATION: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION || '',
   SCRIPT_RUN_AFFECTED_E2E: process.env.SCRIPT_RUN_AFFECTED_E2E || '',
 
-  // GH-590 (AC17) — feature flag for the tasks-draft Test Strategy validator
-  // (enum + command-existence dispatcher + TDD-ownership graph) and the GH-610
-  // implement-side synthesis/citation consumer. Default '1' (on) now that both
-  // the draft validator (GH-590) and the implement-gate/tdd-phase-state/stop-hook
-  // wiring (GH-610) have landed. Set to '0' to fall back to the legacy
-  // `### Test Command` path (e.g. for in-flight tasks.md authored pre-GH-590).
-  WORK_TEST_STRATEGY_VALIDATOR: process.env.WORK_TEST_STRATEGY_VALIDATOR || '1',
-
   // Model-keyed pricing table for cost estimation (GH-311).
   // Shape: { <model>: { usdPer1MTokens: <number> } } — rate is USD per 1,000,000 tokens.
   // Ships a non-zero default so cost reports show an estimate without operator config.

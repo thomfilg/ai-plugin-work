@@ -195,8 +195,9 @@ pnpm test x
     assert.ok(task.testStrategy, 'testStrategy should not be null when block present');
     assert.equal(task.testStrategy.kind, 'unit');
     assert.equal(task.testStrategy.entry, 'lib/__tests__/x.test.js');
-    // Legacy field still populated:
-    assert.ok(task.testCommand && task.testCommand.includes('pnpm test x'));
+    // GH-653: the legacy `### Test Command` reader was removed — a stray
+    // legacy block is ignored and no testCommand field is emitted.
+    assert.equal(task.testCommand, undefined);
   });
 
   it('emits testStrategy === null when only legacy Test Command is present', () => {
@@ -215,6 +216,48 @@ pnpm test legacy
     const task = tasks[0];
     assert.ok('testStrategy' in task);
     assert.equal(task.testStrategy, null);
-    assert.ok(task.testCommand && task.testCommand.includes('pnpm test legacy'));
+    // GH-653: legacy reader removed — the stray block yields no testCommand.
+    assert.equal(task.testCommand, undefined);
+  });
+});
+
+describe('extractTestStrategy — red-mode key (GH-570)', () => {
+  it('parses `red-mode: ablation` into strategy.redMode', () => {
+    const body = `### Test Strategy
+\`\`\`yaml
+kind: unit
+entry: lib/__tests__/x.test.js
+red-mode: ablation
+\`\`\`
+`;
+    const strategy = extractTestStrategy(body);
+    assert.ok(strategy);
+    assert.equal(strategy.kind, 'unit');
+    assert.equal(strategy.redMode, 'ablation');
+  });
+
+  it('defaults strategy.redMode to null when the key is absent', () => {
+    const body = `### Test Strategy
+\`\`\`yaml
+kind: unit
+entry: lib/__tests__/x.test.js
+\`\`\`
+`;
+    const strategy = extractTestStrategy(body);
+    assert.ok(strategy);
+    assert.equal(strategy.redMode, null);
+  });
+
+  it('preserves unknown red-mode values verbatim for the validator to reject', () => {
+    const body = `### Test Strategy
+\`\`\`yaml
+kind: unit
+entry: lib/__tests__/x.test.js
+red-mode: mutation-party
+\`\`\`
+`;
+    const strategy = extractTestStrategy(body);
+    assert.ok(strategy);
+    assert.equal(strategy.redMode, 'mutation-party');
   });
 });

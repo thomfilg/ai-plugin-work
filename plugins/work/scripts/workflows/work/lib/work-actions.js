@@ -79,8 +79,17 @@ function safeId(ticketId) {
   }
 }
 
+/**
+ * Explicit-base variant used by callers that resolve their own tasks base
+ * (e.g. the implement gate derives it from ctx.tasksDir rather than the
+ * TASKS_BASE env var, which may differ in the orchestrator process).
+ */
+function actionsFilePathAt(tasksBase, ticketId) {
+  return path.join(tasksBase, safeId(ticketId), '.work-actions.json');
+}
+
 function actionsFilePath(ticketId) {
-  return path.join(getTasksBase(), safeId(ticketId), '.work-actions.json');
+  return actionsFilePathAt(getTasksBase(), ticketId);
 }
 
 /**
@@ -94,8 +103,13 @@ function actionsFilePath(ticketId) {
  * @returns {Array<object>}
  */
 function loadActions(ticketId) {
+  return loadActionsFromFile(actionsFilePath(ticketId));
+}
+
+/** Load rows from an explicit `.work-actions.json` path; unreadable → []. */
+function loadActionsFromFile(filePath) {
   try {
-    return JSON.parse(fs.readFileSync(actionsFilePath(ticketId), 'utf-8'));
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
   } catch {
     return [];
   }
@@ -112,11 +126,19 @@ function loadActions(ticketId) {
  */
 function appendRow(ticketId, row) {
   try {
-    const filePath = actionsFilePath(ticketId);
+    appendRowToFile(actionsFilePath(ticketId), row);
+  } catch {
+    // Fail-open: TASKS_BASE resolution may throw; logging never breaks the workflow
+  }
+}
+
+/** Append a row to an explicit `.work-actions.json` path. Fail-open. */
+function appendRowToFile(filePath, row) {
+  try {
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    const actions = loadActions(ticketId);
+    const actions = loadActionsFromFile(filePath);
     actions.push(row);
     fs.writeFileSync(filePath, JSON.stringify(actions, null, 2));
   } catch {
@@ -167,7 +189,27 @@ function appendAction(ticketId, action) {
  * }} entry
  */
 function appendEnforcementAudit(ticketId, entry) {
-  appendRow(ticketId, {
+  appendRow(ticketId, buildEnforcementRow(entry));
+}
+
+/**
+ * Explicit-base variant of `appendEnforcementAudit` for callers that resolve
+ * the tasks base themselves (W11 — the implement gate's shared evidence
+ * writer derives it from ctx.tasksDir; the TASKS_BASE env var of the
+ * orchestrator process may be absent or point elsewhere). Same row shape,
+ * same fail-open policy.
+ *
+ * @param {string} tasksBase - resolved tasks base directory
+ * @param {string} ticketId
+ * @param {object} entry - same shape as `appendEnforcementAudit`
+ */
+function appendEnforcementAuditAt(tasksBase, ticketId, entry) {
+  appendRowToFile(actionsFilePathAt(tasksBase, ticketId), buildEnforcementRow(entry));
+}
+
+/** Build the enforcement audit row shape (R13). */
+function buildEnforcementRow(entry) {
+  return {
     kind: ENFORCEMENT_KIND,
     timestamp: new Date().toISOString(),
     origin: entry.origin,
@@ -178,7 +220,7 @@ function appendEnforcementAudit(ticketId, entry) {
     reason: entry.reason,
     outputPath: entry.outputPath ?? null,
     ...(entry.meta ? { meta: entry.meta } : {}),
-  });
+  };
 }
 
 /**
@@ -354,6 +396,7 @@ function analyzeActions(actions) {
 module.exports = {
   appendAction,
   appendEnforcementAudit,
+  appendEnforcementAuditAt,
   appendUsage,
   parseUsageBlock,
   loadActions,

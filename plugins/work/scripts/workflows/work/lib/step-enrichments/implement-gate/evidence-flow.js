@@ -16,6 +16,10 @@ const { readTaskTestCommand } = require(path.join(__dirname, 'test-command'));
 const { withEnvrcVars, runPreImplementTest, runTestAndRecord } = require(
   path.join(__dirname, 'test-runner')
 );
+// The ONE contract-aware evidence validator (unification invariant) — the
+// SAME function the SubagentStop hook and the check/complete validators use,
+// so exempt-type acceptance can never diverge between gate and downstream.
+const { validateTddEvidenceForType } = require(path.join(__dirname, '..', '..', 'tdd-enforcement'));
 
 /** Working directory for a task's test command. */
 function resolveWorkingDir(ctx, ws) {
@@ -115,14 +119,22 @@ function runPreImplementPhase(state) {
     gateTasksBase,
     taskType
   );
-  ws._preTestForTask = `${taskNum}`;
-  saveWorkState(safeName, ws);
+  // W5 §4 — only mark the pre-test done when it actually concluded. A hang /
+  // refused-envelope / rejected-RED pre-test produced NO evidence: leaving
+  // the marker unset makes the next gate pass (after the defect is fixed)
+  // re-run the pre-test instead of wedging on `noRedEvidence`.
+  if (!pre.preTestIncomplete) {
+    ws._preTestForTask = `${taskNum}`;
+    saveWorkState(safeName, ws);
+  }
 
   if (pre.decision === 'block') {
     recordRetry(pre.reason, {
       command: pre.command || testCmd,
       exitCode: pre.exitCode,
       outputTail: pre.outputTail,
+      plannerDefect: pre.plannerDefect,
+      defectKind: pre.defectKind,
     });
   }
   // The pre-test just ran on this gate pass. Return now — DO NOT fall through
@@ -136,6 +148,20 @@ function runPreImplementPhase(state) {
 
 /** Build the retry block for a post-implement result that is not a clean pass. */
 function postResultRetry(result, taskNum, ws, recordRetry, saveWorkState, safeName) {
+  // W5 §4 + W6 — planner-defect results (post-test hang, unset-envelope
+  // refusal) carry their own W3-policy reason and must mark the retry as a
+  // planner defect so the dispatch layer holds for the operator instead of
+  // burning developer re-dispatches on a defect the agent cannot fix.
+  if (result.plannerDefect) {
+    recordRetry(result.reason, {
+      command: result.command,
+      exitCode: result.exitCode ?? null,
+      outputTail: result.outputTail || '',
+      plannerDefect: true,
+      defectKind: result.defectKind,
+    });
+    return;
+  }
   if (result.noRedEvidence) {
     // GREEN ran cleanly but no authentic RED was captured. Clear the pre-test
     // marker so the next gate pass runs the pre-implement test again.
@@ -147,17 +173,8 @@ function postResultRetry(result, taskNum, ws, recordRetry, saveWorkState, safeNa
     );
     return;
   }
-  if (result.malformed) {
-    recordRetry(
-      `Test command for task ${taskNum} is malformed in tasks.md ` +
-        `(parser returned: ${JSON.stringify(String(result.command || '').slice(0, 120))}, ` +
-        `category: ${result.malformed}). ` +
-        `Open tasks.md and fix the \`### Test Command\` section under "## Task ${taskNum}".`,
-      { command: result.command, exitCode: null, outputTail: '' }
-    );
-    return;
-  }
   // Post-test ran and failed — capture the command + exit + tail.
+  // (Malformed commands arrive as plannerDefect results — handled above.)
   recordRetry(
     `Post-implement test for task ${taskNum} failed (exit ${result.exitCode}). Fix the source so the command below passes.`,
     { command: result.command, exitCode: result.exitCode, outputTail: result.outputTail }
@@ -170,7 +187,7 @@ function postResultRetry(result, taskNum, ws, recordRetry, saveWorkState, safeNa
  * { handled: false, exists, evidence } with possibly-refreshed evidence.
  */
 function runPostImplementPhase(state, evidenceState) {
-  const { ws, ctx, safeName, taskNum, gateTasksBase, recordRetry, saveWorkState } = state;
+  const { ws, ctx, safeName, taskNum, taskType, gateTasksBase, recordRetry, saveWorkState } = state;
   const { exists, evidence } = evidenceState;
 
   const workingDir = resolveWorkingDir(ctx, ws);
@@ -180,7 +197,15 @@ function runPostImplementPhase(state, evidenceState) {
   }
 
   const runEnv = buildRunEnv(gateTasksBase, workingDir);
-  const result = runTestAndRecord(testCmd, safeName, taskNum, workingDir, runEnv, gateTasksBase);
+  const result = runTestAndRecord(
+    testCmd,
+    safeName,
+    taskNum,
+    workingDir,
+    runEnv,
+    gateTasksBase,
+    taskType
+  );
 
   if (result && result.passed) {
     const reread = readEvidence(state);
@@ -193,30 +218,27 @@ function runPostImplementPhase(state, evidenceState) {
   return { handled: false, exists, evidence };
 }
 
-/** Evidence acceptable for a `test`-type task: any cycle, or exception evidence. */
-function testTaskEvidenceOk(evidence) {
-  const hasAnyCycle = Array.isArray(evidence?.cycles) && evidence.cycles.length > 0;
-  const hasException = evidence?.currentPhase === 'exception' && evidence?.exception;
-  return Boolean(hasAnyCycle || hasException);
-}
-
 /**
- * Validate evidence for a non-checkpoint task. Returns a retry reason string
- * when evidence is missing/invalid, or null when it is acceptable.
+ * Validate evidence for a non-checkpoint task via the SHARED contract-aware
+ * validator (tdd-enforcement.js validateTddEvidenceForType) — the same rule
+ * the SubagentStop hook and the check/complete validators apply, so evidence
+ * the gate advances on can never dead-end downstream. Returns a retry reason
+ * string when evidence is missing/invalid, or null when it is acceptable.
  */
-function validateNonCheckpointEvidence(exists, evidence, taskType, taskNum, validateTddEvidence) {
+function validateNonCheckpointEvidence(exists, evidence, taskType, taskNum) {
   if (!exists) {
-    return `No TDD evidence found at task${taskNum}/tdd-phase.json. The gate will record evidence by running the task's \`### Test Command\` — if you keep seeing this, the test command is missing or unrunnable in tasks.md under "## Task ${taskNum}".`;
+    return (
+      `No TDD evidence found at task${taskNum}/tdd-phase.json. The gate records ` +
+      "evidence by running the command synthesized from the task's " +
+      '`### Test Strategy`. If this repeats, the strategy for task ' +
+      `${taskNum} is missing or unrunnable — a planner defect. tasks.md is ` +
+      'planner-owned and LOCKED during implement — do NOT edit it. STOP and ' +
+      `report \`BLOCKED (planner-defect): Test Strategy missing or unrunnable ` +
+      `for task ${taskNum}\` back to the orchestrator.`
+    );
   }
 
-  if (taskType === 'test') {
-    // Accept any evidence (even RED-only) for test tasks, or exception evidence.
-    return testTaskEvidenceOk(evidence)
-      ? null
-      : `TDD evidence exists but has no cycles or exception. Gate will retry by running the task's \`### Test Command\`.`;
-  }
-
-  const validation = validateTddEvidence(evidence);
+  const validation = validateTddEvidenceForType(evidence, taskType);
   return validation.valid ? null : `TDD evidence invalid: ${validation.reason}`;
 }
 
@@ -227,7 +249,7 @@ function validateNonCheckpointEvidence(exists, evidence, taskType, taskNum, vali
  * should proceed to advance the task pointer.
  */
 function runNonCheckpointFlow(state) {
-  const { ws, ctx, taskNum, recordRetry, taskType, validateTddEvidence } = state;
+  const { ws, ctx, taskNum, recordRetry, taskType } = state;
 
   let { exists, evidence } = readEvidence(state);
 
@@ -246,13 +268,7 @@ function runNonCheckpointFlow(state) {
     evidence = post.evidence;
   }
 
-  const retry = validateNonCheckpointEvidence(
-    exists,
-    evidence,
-    taskType,
-    taskNum,
-    validateTddEvidence
-  );
+  const retry = validateNonCheckpointEvidence(exists, evidence, taskType, taskNum);
   if (retry) {
     recordRetry(retry, {});
     return { handled: true };
@@ -260,4 +276,7 @@ function runNonCheckpointFlow(state) {
   return { handled: false };
 }
 
-module.exports = { runNonCheckpointFlow };
+// resolveWorkingDir + buildRunEnv are exported for planner-hold.js's static
+// defect re-probe (it must evaluate detectUnsetEnvelopeCommand against the
+// EXACT env a gate run would use — a parallel env-building copy would drift).
+module.exports = { runNonCheckpointFlow, resolveWorkingDir, buildRunEnv };

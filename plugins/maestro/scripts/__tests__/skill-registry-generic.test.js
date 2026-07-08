@@ -37,24 +37,30 @@ test('non-whitelisted command rejected without oracle, allowed with', () => {
   assert.equal(reg.isAllowedSkill('Bad Name', { hasOracle: true }), false);
 });
 
-test('get() returns a generic row for oracle-backed unknown commands', () => {
+test('get() returns a generic row for ANY regex-valid unknown command', () => {
   const reg = freshReg(tmp());
-  assert.equal(reg.get('qc-work'), undefined);
-  const row = reg.get('qc-work', { hasOracle: true });
-  assert.ok(row);
-  assert.equal(row.generic, true);
-  assert.equal(row.snapshot('GH-1'), null);
-  assert.equal(row.isHealthyIdle({ status: 'complete' }), false);
+  // With or without the oracle hint: a valid unknown command must NEVER fall
+  // through to the /work row (stale .work-state.json → phantom phase coaching).
+  for (const row of [reg.get('qc-work'), reg.get('qc-work', { hasOracle: true })]) {
+    assert.ok(row);
+    assert.equal(row.generic, true);
+    assert.equal(row.snapshot('GH-1'), null);
+    assert.equal(row.isHealthyIdle({ status: 'complete' }), false);
+  }
+  // Malformed names still resolve to nothing.
+  assert.equal(reg.get('Bad Name'), undefined);
 });
 
 test('writeTicketSkill: rejects unknown without oracle, persists with', () => {
   const base = tmp();
   const reg = freshReg(base);
+  // The WRITE path keeps the whitelist-or-oracle gate (typo guard at launch).
   assert.throws(() => reg.writeTicketSkill('GH-1', 'qc-work'), /without a stop-condition oracle/);
 
   reg.writeTicketSkill('GH-1', 'qc-work', { hasOracle: true });
-  // round-trips only when the reader is also told the ticket is oracle-backed
+  // The READ path trusts any regex-valid persisted value — the old
+  // whitelist-or-oracle read gate relaunched /work on qc-work fleets whenever
+  // the oracle hint was missing (observed live on delivered tickets).
   assert.equal(reg.readTicketSkill('GH-1', { hasOracle: true }), 'qc-work');
-  // without the oracle hint the reader falls open to /work (GH-514 typo guard)
-  assert.equal(reg.readTicketSkill('GH-1'), 'work');
+  assert.equal(reg.readTicketSkill('GH-1'), 'qc-work');
 });

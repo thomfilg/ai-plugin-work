@@ -1172,3 +1172,60 @@ describe('per-task path enforcement for .check.md', () => {
     assert.equal(result.blocked, false);
   });
 });
+
+// ─── bashReferencesBasename (ECHO-5538 secondary — substring false positives) ─
+
+describe('bashReferencesBasename', () => {
+  const { bashReferencesBasename } = require('../protect-artifact-files');
+
+  it('matches a bare basename token', () => {
+    assert.ok(bashReferencesBasename('echo x > tasks.md', 'tasks.md'));
+  });
+
+  it('matches a path-qualified basename', () => {
+    assert.ok(bashReferencesBasename('echo x >> /tasks/T-1/tasks.md', 'tasks.md'));
+  });
+
+  it('matches a quoted path', () => {
+    assert.ok(bashReferencesBasename('tee "/tasks/T-1/tasks.md"', 'tasks.md'));
+  });
+
+  it('does NOT match a prefixed name (subtasks.md)', () => {
+    assert.ok(!bashReferencesBasename('echo x > /tasks/T-1/subtasks.md', 'tasks.md'));
+  });
+
+  it('does NOT match a suffixed name (tasks.md.bak)', () => {
+    assert.ok(!bashReferencesBasename('cp a /tasks/T-1/tasks.md.bak', 'tasks.md'));
+  });
+
+  it('does NOT match an extension superset (tasks.mdx)', () => {
+    assert.ok(!bashReferencesBasename('echo x > /tasks/T-1/tasks.mdx', 'tasks.md'));
+  });
+
+  it('escapes regex metacharacters in the basename (dot must not be a wildcard)', () => {
+    assert.ok(!bashReferencesBasename('echo x > /tasks/T-1/tasksXmd', 'tasks.md'));
+  });
+});
+
+describe('createArtifactProtector — Bash whole-basename matching (ECHO-5538)', () => {
+  const TICKET = 'TEST-123';
+  function makeBashProtector() {
+    return createArtifactProtector({
+      artifacts: [{ basename: 'tasks.md', step: 'tasks' }],
+      getStepInProgress: () => 'implement',
+      getTicketId: () => TICKET,
+    });
+  }
+
+  it('does not block Bash writes to files that merely contain the basename as a substring', () => {
+    const p = makeBashProtector();
+    const result = p.check('Bash', { command: `echo notes >> /tasks/${TICKET}/subtasks.md` });
+    assert.equal(result.blocked, false, 'subtasks.md must not trip the tasks.md rule');
+  });
+
+  it('still blocks Bash writes to the real artifact — regression', () => {
+    const p = makeBashProtector();
+    const result = p.check('Bash', { command: `echo sneaky >> /tasks/${TICKET}/tasks.md` });
+    assert.equal(result.blocked, true, 'real tasks.md write must still be blocked');
+  });
+});

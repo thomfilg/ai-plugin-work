@@ -155,13 +155,16 @@ test('draft.js exports the two new strategy validators (Task 11 wiring)', () => 
   );
 });
 
-test('flag-off: legacy ### Test Command path still passes draft validation', () => {
+test('legacy ### Test Command is rejected even with the removed flag set to 0', () => {
   const dir = mkTasksDir();
   writeSpec(dir);
   writeTasks(dir, LEGACY_TASKS_MD);
 
   const errors = withFlag('0', () => draft.validateArtifacts(dir));
-  assert.deepEqual(errors, [], `flag-off legacy path should pass; got: ${JSON.stringify(errors)}`);
+  assert.ok(
+    errors.some((e) => /still uses legacy `### Test Command`/.test(e)),
+    `expected the migration error; got: ${JSON.stringify(errors)}`
+  );
 });
 
 test('flag-on: valid kind=unit ### Test Strategy passes draft validation', () => {
@@ -263,7 +266,7 @@ test('flag-on: kind=unit without entry surfaces the shape error via runStrategyV
   );
 });
 
-test('flag-on no-op when validator flag is off — same fixture, no strategy errors', () => {
+test('strategy validators run even with the removed flag set to 0', () => {
   const dir = mkTasksDir();
   writeSpec(dir);
   writeTasks(dir, STRATEGY_TASKS_MD_BAD_CUSTOM);
@@ -274,11 +277,11 @@ test('flag-on no-op when validator flag is off — same fixture, no strategy err
     'utf8'
   );
 
-  const errors = withFlag('0', () => draft.validateArtifacts(dir));
+  const errors = withFlag('0', () => draft.validateArtifacts(dir, { workDir: dir }));
   const joined = errors.join('\n');
   assert.ok(
-    !/dev:typecheck/.test(joined),
-    `flag-off must NOT run the new strategy/dispatcher validators; got: ${joined}`
+    /dev:typecheck/.test(joined),
+    `validators are always on — expected the dev:typecheck dispatcher miss; got: ${joined}`
   );
 });
 
@@ -298,4 +301,162 @@ test('parser-failure surfacing (cursor[bot] 3423427166): flag-on parseTasks fail
     if (prev === undefined) delete process.env.WORK_TEST_STRATEGY_VALIDATOR;
     else process.env.WORK_TEST_STRATEGY_VALIDATOR = prev;
   }
+});
+
+// --- #606 defense: missing verification block -------------------------------
+
+function tasksMdWithoutVerification(type) {
+  return [
+    '## Extracted Requirements',
+    '',
+    '- R1',
+    '',
+    `## Task 1 — ${type} task with no Test Strategy at all`,
+    '',
+    '### Type',
+    type,
+    '',
+    '### Dependencies',
+    'none',
+    '',
+    '### Requirements Covered',
+    '- R1',
+    '',
+    '### Acceptance Criteria',
+    '- content updated',
+    '',
+    '### Files in scope',
+    '- `README.md`',
+    '',
+  ].join('\n');
+}
+
+test('flag-on: docs task with neither Test Strategy nor Test Command is blocked (#606)', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, tasksMdWithoutVerification('docs'));
+
+  const errors = withFlag('1', () => draft.validateArtifacts(dir), dir);
+  const joined = errors.join('\n');
+  assert.ok(
+    /has neither `### Test Strategy` nor legacy `### Test Command`/.test(joined),
+    `expected missing-verification error; got: ${JSON.stringify(errors)}`
+  );
+  assert.ok(
+    /kind: custom/.test(joined),
+    `error should carry the docs-task remediation hint; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('flag-on: checkpoint task without a Test Strategy stays exempt', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, tasksMdWithoutVerification('checkpoint'));
+
+  const errors = withFlag('1', () => draft.validateArtifacts(dir), dir);
+  assert.ok(
+    !errors.some((e) => /has neither/.test(e)),
+    `checkpoint should not require a verification block; got: ${JSON.stringify(errors)}`
+  );
+});
+
+// --- W12: generation-time strategy satisfiability --------------------------
+
+function strategyTasksMd({ entry, scope }) {
+  return [
+    '## Extracted Requirements',
+    '',
+    '- R1',
+    '',
+    '## Task 1 — satisfiability probe',
+    '',
+    '### Type',
+    'tdd-code',
+    '',
+    '### Dependencies',
+    'none',
+    '',
+    '### Requirements Covered',
+    '- R1',
+    '',
+    '### Acceptance Criteria',
+    '- does the thing',
+    '',
+    '### Files in scope',
+    ...scope.map((s) => `- \`${s}\``),
+    '',
+    '### Test Strategy',
+    '```yaml',
+    'kind: unit',
+    `entry: ${entry}`,
+    '```',
+    '',
+  ].join('\n');
+}
+
+function writeManifest(dir) {
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ name: 'fixture', scripts: { test: 'node --test' } }),
+    'utf8'
+  );
+}
+
+test('W12: kind=unit entry naming a non-test file is rejected at the draft gate', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, strategyTasksMd({ entry: 'src/foo.ts', scope: ['src/foo.ts'] }));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src/foo.ts'), '// noop\n', 'utf8');
+  writeManifest(dir);
+
+  const errors = draft.validateArtifacts(dir, { workDir: dir });
+  assert.ok(
+    errors.some((e) => /not a test file/.test(e)),
+    `expected the non-test-entry satisfiability error; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('W12: kind=unit entry that neither exists nor is in scope is rejected', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(
+    dir,
+    strategyTasksMd({ entry: 'src/ghost.test.ts', scope: ['src/other.ts', 'src/other.test.ts'] })
+  );
+  writeManifest(dir);
+
+  const errors = draft.validateArtifacts(dir, { workDir: dir });
+  assert.ok(
+    errors.some((e) => /does not exist and is not covered/.test(e)),
+    `expected the unsatisfiable-entry error; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('W12: kind=unit entry missing from disk but created by the task scope passes', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(
+    dir,
+    strategyTasksMd({ entry: 'src/new.test.ts', scope: ['src/new.ts', 'src/new.test.ts'] })
+  );
+  writeManifest(dir);
+
+  const errors = draft.validateArtifacts(dir, { workDir: dir });
+  assert.ok(
+    !errors.some((e) => /does not exist and is not covered|not a test file/.test(e)),
+    `entry creatable by this task must not trip satisfiability; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('missing verification block is enforced even with the removed flag set to 0', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, tasksMdWithoutVerification('docs'));
+
+  const errors = withFlag('0', () => draft.validateArtifacts(dir));
+  assert.ok(
+    errors.some((e) => /has neither/.test(e)),
+    `validators are always on; got: ${JSON.stringify(errors)}`
+  );
 });

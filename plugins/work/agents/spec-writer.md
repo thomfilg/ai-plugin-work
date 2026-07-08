@@ -84,7 +84,7 @@ When designing API / schema changes, also enumerate every consumer of a modified
       - **Extend**: Component exists but needs minor additions → extend/wrap it
       - **Extract & refactor**: Multiple pages have similar inline implementations but no shared component → propose extracting into a shared component as part of this task
       - **Create new**: Nothing similar exists → create new, but explain why existing code can't be reused
-   d. Document findings in the Reuse Audit tables BEFORE writing Architecture Decisions. The Reuse Audit text MUST include evidence of the broad searches you ran — the spec gate looks for the substrings `codegraph_search`, an explicit `Codebase search:` / `Filesystem search:` subheading, and a `Linear search:` / `Jira search:` / `Issue search:` subheading (whichever matches your provider).
+   d. Document findings in the Reuse Audit tables BEFORE writing Architecture Decisions, then distill them into the machine-parsed `### Reuse Declarations` bullets (grammar in the template — the completion gate reads only those bullets). The Reuse Audit text MUST include evidence of the broad searches you ran — the spec gate looks for the substrings `codegraph_search`, an explicit `Codebase search:` / `Filesystem search:` subheading, and a `Linear search:` / `Jira search:` / `Issue search:` subheading (whichever matches your provider).
    e. **Agnostic component decision** — for every NEW UI component you propose, fill the `## Component Shape Decision` table (see template below). The default for layout/list/sidebar/table/panel components that consume a typed data array is **Generic** (data-shape-agnostic, lives in `shared/` or `ui/`). Choosing **Specific** requires a one-sentence rationale naming a hard constraint (e.g., "uses page-local hooks that cannot be lifted"). The table is mandatory even when there is only one new component — its purpose is to force the "could this be agnostic?" question that was skipped on the Lineage tickets.
 3. **Explore the codebase** - Use Grep and Glob to understand:
    - Project structure and file organization
@@ -124,7 +124,19 @@ When designing API / schema changes, also enumerate every consumer of a modified
 |---|---|---|---|
 | {Existing component/utility/pattern} | `{file path}` | Reuse / Extend / Extract / Create New | {why this decision} |
 
-{If nothing reusable was found, state: "No existing patterns found that match this feature's requirements." with evidence of what was searched.}
+### Reuse Declarations
+**MANDATORY, machine-parsed.** The completion checker's `reuse_audit_enforcement` gate parses ONLY this bullet grammar (tables above are for humans; the parser cannot read them — an unparseable section hard-blocks the ticket at `check`, where spec.md is locked). One bullet per Reuse/Extend row from the table above, in EXACTLY this shape — symbol backtick first, verb immediately after, path after the verb (the parser also tolerates a parenthesized path or a ``from `path` `` clause between symbol and verb, but prefer the canonical shape below):
+
+- `{Symbol}` MUST be reused from `{path/to/file.ext:line}` — {one-line reason}
+- `{PatternName}` may be reused from `{path}` — {mirrored pattern, not imported}
+
+Verb semantics — get this right or the gate false-fails:
+- **`MUST be reused`** — ONLY for symbols the implementation will literally reference (import/require/call). The gate verifies each MUST symbol appears on the PR's added lines and fails the ticket if it doesn't.
+- **`may be reused`** — for patterns/conventions that are *mirrored* but not imported by symbol (a dispatcher shape, a logging convention, a naming scheme). Never mark these MUST.
+
+If nothing reusable was found, emit exactly:
+
+- None — no reusable symbols found (see Broad Search Evidence)
 
 ### Broad Search Evidence
 Show the queries you ran and where (one line each). Required substrings for the spec gate are noted in parentheses.

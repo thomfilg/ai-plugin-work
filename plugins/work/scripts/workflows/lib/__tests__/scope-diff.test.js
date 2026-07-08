@@ -38,7 +38,7 @@ describe('compareDiffToScope', () => {
     assert.deepEqual(r.inScope, []);
   });
 
-  it('uses legacy suggestedScope when filesInScope is missing', () => {
+  it('ignores the removed legacy suggestedScope field (canonical filesInScope only)', () => {
     const tasks = [
       {
         suggestedScope: '- lib/legacy.ts\n- app/x.ts',
@@ -46,8 +46,8 @@ describe('compareDiffToScope', () => {
       },
     ];
     const r = compareDiffToScope(['lib/legacy.ts', 'unrelated.ts'], tasks);
-    assert.deepEqual(r.inScope, ['lib/legacy.ts']);
-    assert.deepEqual(r.unaccounted, ['unrelated.ts']);
+    assert.deepEqual(r.inScope, []);
+    assert.deepEqual(r.unaccounted.sort(), ['lib/legacy.ts', 'unrelated.ts']);
   });
 
   it('returns empty result for empty inputs', () => {

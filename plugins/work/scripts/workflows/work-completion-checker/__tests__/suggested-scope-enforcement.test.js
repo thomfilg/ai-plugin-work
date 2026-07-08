@@ -27,7 +27,7 @@ function buildCtx({ tasks, changedFiles = [] }) {
   fs.writeFileSync(
     path.join(tasksDir, 'pr-context.json'),
     JSON.stringify({ files: changedFiles }, null, 2),
-    'utf8',
+    'utf8'
   );
   return {
     ctx: {
@@ -108,7 +108,7 @@ test.describe('suggested_scope_enforcement phase', () => {
       assert.equal(
         ctx.failures.filter((f) => f.checkType === 'suggested_scope').length,
         0,
-        'no failure records pushed',
+        'no failure records pushed'
       );
     } finally {
       restore();
@@ -144,16 +144,8 @@ test.describe('suggested_scope_enforcement phase', () => {
     }
   });
 
-  test('tasks.md without a Suggested Scope section is skipped (backward compatible)', async () => {
-    const tasks = [
-      '# Tasks',
-      '',
-      '## Task 1 — example',
-      '',
-      '### Type',
-      'wiring',
-      '',
-    ].join('\n');
+  test('tasks.md without any Files in scope sections is skipped', async () => {
+    const tasks = ['# Tasks', '', '## Task 1 — example', '', '### Type', 'wiring', ''].join('\n');
     const { ctx, cleanup } = buildCtx({
       tasks,
       changedFiles: ['some/file.ts'],
@@ -162,7 +154,7 @@ test.describe('suggested_scope_enforcement phase', () => {
     try {
       const result = await phase.validate(ctx);
       assert.equal(result.ok, true);
-      assert.match(String(result.summary || ''), /no Suggested Scope section/i);
+      assert.match(String(result.summary || ''), /no Files in scope sections/i);
       assert.match(String(result.summary || ''), /skipped/i);
     } finally {
       restore();

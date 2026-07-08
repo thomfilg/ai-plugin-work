@@ -20,6 +20,7 @@ const {
 } = require('./monitor-infra-cache');
 const {
   buildInitialFailedJobs,
+  collectRunIds,
   resolveMissingRunIds,
   mapCiStatus,
   fetchClassifierContext,
@@ -27,6 +28,10 @@ const {
   extractFailedTestPaths,
 } = require('./monitor-ci-context');
 const { buildOutput, buildStatusLine } = require('./monitor-status-line');
+const {
+  demoteNonAllowlistedCommentedReviews,
+  notifyOnNewBlockingComments,
+} = require('./monitor-notices');
 
 /**
  * Check if any workflow run for the PR's branch has already failed.
@@ -67,14 +72,7 @@ function hasFailedJobs(prInfo, worktreeDir) {
 }
 
 // Synchronous sleep via Atomics.wait — no subprocess, no event-loop dependency.
-function sleepSync(ms) {
-  try {
-    const sab = new SharedArrayBuffer(4);
-    Atomics.wait(new Int32Array(sab), 0, 0, ms);
-  } catch {
-    /* sleep best-effort */
-  }
-}
+const { sleepSync } = require('../sleep');
 
 // GitHub returns `mergeable: UNKNOWN` for up to ~30s after a push or sibling-PR
 // merge. Retry a few times before trusting UNKNOWN. Bounded (3 * 3s = 9s).
@@ -230,12 +228,15 @@ function fetchReviews(prInfo, getReviews) {
 
 function emitStatusLine(state, ci, reviews) {
   if (!state._monitorStartTime) state._monitorStartTime = new Date().toISOString();
-  const { line1, detail } = buildStatusLine(state, ci, reviews);
-  process.stderr.write(line1 + '\n');
-  if (detail) process.stderr.write(detail + '\n');
-  process.stderr.write('\n');
+  const { line1, detail, parts } = buildStatusLine(state, ci, reviews);
+  // Progress is persisted to state (_ciStatusLine) and surfaced by the
+  // /follow-up status bar (agent-free) — no per-poll stderr spam. The final
+  // JSON instruction is what keeps the agent posted.
   state._ciStatusLine = line1;
   state._ciStatusDetail = detail || '';
+  // Structured parts let the status bar recompute the elapsed timer LIVE on
+  // every refresh instead of re-printing the string frozen at monitor time.
+  state._ciStatusParts = parts;
 }
 
 function populateFailedJobs(state, ci, worktreeDir) {
@@ -284,6 +285,12 @@ module.exports = function registerMonitor(register) {
     let prInfo = fetchPrInfoOrFail(state, getPRInfo, prArg);
     if (!prInfo) return null;
 
+    // Persist the discovered PR number: downstream consumers (fix-reviews
+    // `--snapshot --pr`, the /work follow-up gate's assessMergeable) bail on a
+    // null prNumber even after monitor printed the number itself (echo-5363,
+    // echo-5820).
+    if (!state.prNumber && prInfo.number) state.prNumber = prInfo.number;
+
     const refreshed = refreshPrUntilKnown(getPRInfo, prArg, prInfo);
     prInfo = refreshed.prInfo;
     const local = detectLocalConflict(prInfo.baseBranch, ctx && ctx.worktreeDir);
@@ -297,21 +304,39 @@ module.exports = function registerMonitor(register) {
 
     const ci = fetchCi(state, prInfo, checkCI, ctx.worktreeDir);
     if (!ci) return null;
-    const reviews = fetchReviews(prInfo, getReviews);
+    const reviews = demoteNonAllowlistedCommentedReviews(
+      fetchReviews(prInfo, getReviews),
+      followUpPr.isBotAuthorLogin
+    );
 
     const output = buildOutput(state, prInfo, ci, reviews, formatReport);
     const exitCode = computeExitCode(prInfo, ci, reviews);
     writeMonitorResult(state, { exitCode, output: output.substring(0, 3000) });
     state._ciRunningCount = ci.running ? ci.running.length : 0;
+    // GH-214: persist the observed run IDs so monitoring is resumable — a
+    // fresh invocation (or an operator) can inspect the same runs directly
+    // (`gh run view <id>`) instead of re-deriving them from output.
+    state._ciRunIds = collectRunIds(ci);
 
     emitStatusLine(state, ci, reviews);
     const initialFailedJobs = populateFailedJobs(state, ci, ctx.worktreeDir);
     attachClassifierContext(state, ci, initialFailedJobs, ctx.worktreeDir);
 
-    if (exitCode === 0) state.currentStep = computeNextStepOnGreen(state);
+    notifyOnNewBlockingComments(state, reviews);
+
+    if (exitCode === 0) routeOnGreen(state);
     return null;
   });
 };
+
+// Fully green (CI passed, reviews clear, mergeable). A failureCategory left
+// over from an earlier cycle (e.g. 'reviews' after comments were fixed) is
+// stale — clear it when routing to report so the report step completes
+// instead of surfacing forever (echo-6204).
+function routeOnGreen(state) {
+  state.currentStep = computeNextStepOnGreen(state);
+  if (state.currentStep === 'report') state.failureCategory = null;
+}
 
 /**
  * R15 (GH-508): when CI turns green after an infra-flake rerun, route through
@@ -344,4 +369,6 @@ module.exports.__test__ = {
   fetchClassifierContext,
   computeNextStepOnGreen,
   extractFailedTestPaths,
+  notifyOnNewBlockingComments,
+  demoteNonAllowlistedCommentedReviews,
 };

@@ -14,12 +14,21 @@
 
 'use strict';
 
-function waitSeconds(seconds) {
-  if (process.env.FOLLOW_UP2_NO_DELAY) return;
-  const { execSync } = require('child_process');
-  execSync(`node -e "setTimeout(()=>{},${seconds * 1000})"`, {
-    timeout: (seconds + 5) * 1000,
+const { sleepSyncInterruptible } = require('../sleep');
+const { readNewInboxMessages } = require('../notify');
+
+// Sleep without a subprocess (Atomics.wait) — the previous shell-out sleep
+// crashed uncaught with `spawnSync /bin/sh ETIMEDOUT` under load
+// (echo-6209). Wakes early when new operator inbox messages arrive; returns
+// them so the wait loop can surface instead of sleeping through the signal.
+function waitSeconds(seconds, state) {
+  if (process.env.FOLLOW_UP2_NO_DELAY) return [];
+  let messages = [];
+  sleepSyncInterruptible(seconds * 1000, () => {
+    messages = readNewInboxMessages(state.ticketId, state);
+    return messages.length > 0;
   });
+  return messages;
 }
 
 function buildBlocked(reason) {
@@ -84,10 +93,20 @@ function ongoingReviewInterval(state) {
   return state.attempt <= 5 ? 30 : 60;
 }
 
-// Wait, then route back to monitor for a fresh read. Returns null (advance).
+// Wait, then route back to monitor for a fresh read. Returns null (advance),
+// or a blocked instruction carrying fresh operator inbox messages so the
+// agent reacts to them instead of silently polling on.
 function waitAndMonitor(state, seconds) {
-  waitSeconds(seconds);
+  const messages = waitSeconds(seconds, state);
   state.currentStep = 'monitor';
+  if (messages.length > 0) {
+    return {
+      type: 'follow_up_instruction',
+      action: 'blocked',
+      reason: `Operator message received while waiting on PR #${state.prNumber || '?'}:\n${messages.join('\n')}\n\nHandle the message, then re-run follow-up-next.js to resume monitoring.`,
+      payload: { reason: 'operator-message', messages },
+    };
+  }
   return null;
 }
 
@@ -106,8 +125,19 @@ function routeTriage(state, signals) {
   // directly would skip infra-retry entirely when the flag is on.
   if (signals.hasCiFailure) return routeTo(state, 'infra-retry', 'ci_failure');
 
-  // Blocking reviews take priority over waiting for CI.
-  if (signals.reviewsActionable) return routeTo(state, 'fix-reviews', 'reviews');
+  // GH-268: blocking reviews take priority over waiting for CI — actionable
+  // review comments are surfaced immediately instead of holding them until
+  // the CI pipeline finishes. The reviewer-done signal is reliable by
+  // construction: `reviewsActionable` requires blocking comments to exist AND
+  // the bot to have SUBMITTED its review (not listed in pendingBots / not
+  // still running). An in-progress review falls through to the wait branches
+  // below, preserving the old wait-for-CI behavior (no partial reviews).
+  // GH-670: the category is the canonical 'review_failure' spelling — the
+  // legacy 'reviews' spelling was not recognised everywhere and could leave
+  // the report step surfacing forever. 'reviews' is still accepted on READ
+  // (report.js KNOWN_RESOLVABLE_CATEGORIES, follow-up-next.js alias map) so
+  // state files written by older versions recover.
+  if (signals.reviewsActionable) return routeTo(state, 'fix-reviews', 'review_failure');
 
   // Bot check still running with blocking reviews — wait for it to finish.
   if (signals.reviewsWaiting) {

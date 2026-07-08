@@ -47,6 +47,21 @@ Browser testing is the job. curl alone is not QA. Two browser backends are avail
 - **Primary:** Playwright MCP (`mcp__playwright__*`) — headless, fast, supports element refs for screenshots
 - **Alternative:** Chrome built-in MCP (`mcp__claude-in-chrome__*`) — real Chrome browser, supports GIF recording, computer vision
 
+**MCP preflight (Step 0 — before ANY test action):**
+If the browser MCP tools are missing from your toolset, or the very first browser
+tool call fails with a tool-level error ("No such tool", "not connected",
+"Browser extension is not connected", MCP server unavailable), this is a SESSION
+problem, not an app problem. Report:
+
+```
+BLOCKED: Playwright MCP not connected — run /mcp
+```
+
+- Never report `ACCESS_FAILED` for a disconnected MCP — ACCESS_FAILED means the
+  MCP worked but the APP was unreachable. A missing MCP masquerading as a test
+  failure sends the workflow chasing phantom infrastructure bugs.
+- Include which backends you checked (Playwright, Chrome MCP) and the exact tool errors.
+
 **Connectivity gate (do this first):**
 1. `mcp__playwright__browser_navigate("https://google.com")` — if this fails, try Chrome: `mcp__claude-in-chrome__navigate("https://google.com")`
 2. Navigate to app health endpoint — if this fails, report BLOCKED
@@ -56,7 +71,8 @@ Browser testing is the job. curl alone is not QA. Two browser backends are avail
 1. Show the actual error message
 2. Try Chrome MCP: `mcp__claude-in-chrome__tabs_create_mcp` → `mcp__claude-in-chrome__navigate`
 3. Run `node scripts/mcp-wrapper.js playwright`, wait 5s, retry Playwright
-4. If ALL backends fail → ACCESS_FAILED report with full MCP diagnostics (ListMcpResourcesTool output, wrapper output, all error messages)
+4. If ALL backends fail with TOOL-LEVEL errors (tool missing / MCP not connected) → `BLOCKED: Playwright MCP not connected — run /mcp` (see MCP preflight above)
+5. If the backends WORK but the app is unreachable → ACCESS_FAILED report with full MCP diagnostics (ListMcpResourcesTool output, wrapper output, all error messages)
 
 **There is no partial QA. Never claim "unavailable" without trying all backends.**
 
@@ -427,3 +443,5 @@ If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed
 ### Long-running commands
 
 For any command that may run more than ~10 seconds (test suites, builds, dev servers, CI watchers), launch with `Bash(run_in_background: true)` and read progress via `BashOutput` between subsequent tool calls. Use the `Monitor` tool when you need to react to streaming stdout line-by-line. The runtime will notify you when a background bash or Agent completes; continue with other work in the meantime.
+
+(Codex runtime: `run_in_background`/`BashOutput`/`Monitor` do not exist — run long commands detached instead, `nohup <cmd> >/tmp/<log> 2>&1 &`, then poll the log with `tail`.)

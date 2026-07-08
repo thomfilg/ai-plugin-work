@@ -159,7 +159,7 @@ function writeTaskArtifacts(ticket) {
   fs.writeFileSync(path.join(dir, 'gherkin.feature'), '<!-- gherkin-skip: test artifact -->\n');
   // tasks.md → tasks verify + tasks_gate (Gate C) verify pass.
   // Gate C requires every `## Task N` block to declare `### Files in scope`
-  // (or the legacy `### Suggested Scope` as fallback).
+
   fs.writeFileSync(
     path.join(dir, 'tasks.md'),
     [
@@ -168,7 +168,7 @@ function writeTaskArtifacts(ticket) {
       '## Task 1 — TDD enforcement fixture',
       '',
       '### Type',
-      'backend',
+      'tdd-code',
       '',
       '### Files in scope',
       '- src/**',
@@ -944,8 +944,16 @@ describe('TDD enforcement', () => {
       assert.match(TDD_PROTOCOL, /transition <TICKET_ID> red --task <N>/);
     });
 
-    it('exception command includes --task <N>', () => {
-      assert.match(TDD_PROTOCOL, /exception <TICKET_ID> --task <N>/);
+    // Message sweep (bugs review): TDD_PROTOCOL is agent-facing prompt text,
+    // and `exception` is OPERATOR-ONLY (WORK_OPERATOR_TOKEN) — the protocol
+    // must never present it as an agent-runnable subcommand. Exemptions come
+    // from the planner's `### Type` line; genuine dead-ends report
+    // BLOCKED (planner-defect) instead.
+    it('never presents the operator-only exception subcommand as runnable', () => {
+      assert.doesNotMatch(TDD_PROTOCOL, /exception <TICKET_ID>/);
+      assert.match(TDD_PROTOCOL, /OPERATOR-ONLY/);
+      assert.match(TDD_PROTOCOL, /### Type/);
+      assert.match(TDD_PROTOCOL, /BLOCKED \(planner-defect\)/);
     });
   });
 
@@ -1022,6 +1030,98 @@ describe('TDD enforcement', () => {
         result.reason.includes('Exception reason is required'),
         `Expected reason message, got: ${result.reason}`
       );
+    });
+  });
+
+  describe('validateTddEvidenceForType — the ONE contract-aware validator', () => {
+    const { validateTddEvidence, validateTddEvidenceForType } = require('../lib/tdd-enforcement');
+
+    const RED_ONLY_STUB = {
+      currentPhase: 'green',
+      currentCycle: 1,
+      cycles: [
+        {
+          cycle: 1,
+          red: {
+            testCommand: 'node verify.js',
+            testExitCode: 0,
+            timestamp: '2026-07-05T00:00:00.000Z',
+            capturedByGate: true,
+            note: 'RED skipped: task type "docs" does not require TDD.',
+          },
+        },
+      ],
+    };
+    const GREEN_ONLY = {
+      currentPhase: 'refactor',
+      currentCycle: 1,
+      cycles: [{ cycle: 1, green: { testCommand: 'node verify.js', testExitCode: 0 } }],
+    };
+    const EXEMPT_TYPES = [
+      'tests-only',
+      'docs',
+      'config',
+      'ci',
+      'mechanical-refactor',
+      'file-move',
+      'checkpoint',
+    ];
+
+    it('accepts red-only stub evidence for every TDD-exempt Type', () => {
+      for (const t of EXEMPT_TYPES) {
+        const result = validateTddEvidenceForType(RED_ONLY_STUB, t);
+        assert.equal(result.valid, true, `${t} must accept the red-only stub`);
+      }
+    });
+
+    it('accepts green-only evidence for TDD-exempt Types', () => {
+      assert.equal(validateTddEvidenceForType(GREEN_ONLY, 'docs').valid, true);
+    });
+
+    it('rejects red-only evidence for tdd-code and unknown/missing Types (fail closed)', () => {
+      for (const t of ['tdd-code', 'backend', null, undefined, '']) {
+        const result = validateTddEvidenceForType(RED_ONLY_STUB, t);
+        assert.equal(result.valid, false, `${String(t)} must stay strict`);
+        assert.match(result.reason, /RED and GREEN/);
+      }
+    });
+
+    it('exempt Type with NO phase evidence is invalid with a named reason', () => {
+      const result = validateTddEvidenceForType({ currentPhase: 'red', cycles: [] }, 'config');
+      assert.equal(result.valid, false);
+      assert.match(result.reason, /no recorded phase evidence/);
+    });
+
+    it('exception evidence still passes for exempt Types (strict fallback)', () => {
+      const ev = { exception: { category: 'config', reason: 'lockfile bump' }, cycles: [] };
+      assert.equal(validateTddEvidenceForType(ev, 'config').valid, true);
+    });
+
+    it('null evidence is invalid for both exempt and strict Types', () => {
+      assert.equal(validateTddEvidenceForType(null, 'docs').valid, false);
+      assert.equal(validateTddEvidenceForType(null, 'tdd-code').valid, false);
+    });
+
+    it('strict path is IDENTICAL to validateTddEvidence (no second implementation)', () => {
+      for (const ev of [
+        RED_ONLY_STUB,
+        GREEN_ONLY,
+        { cycles: [{ cycle: 1, red: { testExitCode: 1 }, green: { testExitCode: 0 } }] },
+        {
+          cycles: [{ cycle: 1, green: { kind: 'verified-by', peer: 2, peerSha: 'abc123' } }],
+        },
+        { exception: 'legacy', cycles: [] },
+      ]) {
+        assert.deepEqual(validateTddEvidenceForType(ev, 'tdd-code'), validateTddEvidence(ev));
+      }
+    });
+
+    it('citation-kind GREEN with peerSha passes for TDD-required Types', () => {
+      const ev = {
+        currentPhase: 'green',
+        cycles: [{ cycle: 1, green: { kind: 'wiring-citation', peer: 1, peerSha: 'ff00' } }],
+      };
+      assert.equal(validateTddEvidenceForType(ev, 'tdd-code').valid, true);
     });
   });
 

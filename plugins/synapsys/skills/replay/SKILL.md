@@ -5,7 +5,7 @@ description: Replay historical Claude Code transcripts against the current synap
 
 # /synapsys replay
 
-`synapsys-replay.js` walks recent transcript files under `~/.claude/projects/<hash>/*.jsonl`, replays every `UserPromptSubmit` and `PreToolUse` event against the current store's memories, optionally asks a Haiku LLM judge whether each fired match was relevant, and emits a per-memory report ranked by false-positive rate.
+`synapsys-replay.js` walks recent transcript files under `~/.claude/projects/<hash>/*.jsonl`, replays every `UserPromptSubmit` and `PreToolUse` event against the current store's memories, optionally dispatches a `Task(synapsys-replay-judge)` subagent to judge whether each fired match was relevant, and emits a per-memory report ranked by false-positive rate.
 
 It is the measurement counterpart to `synapsys-explain`: explain answers "why did this memory fire on this event?", replay answers "how often does this memory fire on irrelevant events across my real history?"
 
@@ -22,7 +22,7 @@ It is the measurement counterpart to `synapsys-explain`: explain answers "why di
    - `type=user` entries → `{event:'UserPromptSubmit', prompt}`
    - `type=assistant` `tool_use` blocks → `{event:'PreToolUse', tool, tool_input}`
 3. **Replay** each synthesized event against every memory in the store using the runtime matcher from `plugins/synapsys/lib/matcher.js` (`matchPrompt`, `matchPreTool`). No matching logic is re-implemented — the same `MatchResult` shape produced at runtime is consumed here.
-4. **Judge** each fired UPS match with a lightweight Haiku call (skipped under `--no-judge`). Batched up to 10 items per request; failures recorded as `judge-failed` and excluded from the FP-rate denominator.
+4. **Judge** each fired UPS match by dispatching the `synapsys-replay-judge` subagent (skipped under `--no-judge`). The runner batches up to 10 items, writes a numbered/clipped `batch-N.in.json`, dispatches `Task(synapsys-replay-judge)` via the file-mailbox phase-next loop, and reads verdicts back from `batch-N.out.json`. Length-mismatched or malformed output is recorded as `judge-failed` and excluded from the FP-rate denominator.
 5. **Aggregate** per-memory counts (`fires`, `relevant`, `irrelevant`, `judge_failed`, `fp_rate = 1 - relevant/(relevant+irrelevant)`), top-3 sample matched substrings, and emit a table + `Suggestions:` section.
 
 ## Usage
@@ -31,7 +31,7 @@ It is the measurement counterpart to `synapsys-explain`: explain answers "why di
 # Cheapest path — no LLM calls, nulls for relevance, ranks memories by fire counts only.
 node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge
 
-# Full pipeline with judge (requires ANTHROPIC_API_KEY).
+# Full pipeline with the judge subagent (no API key required).
 node plugins/synapsys/scripts/synapsys-replay.js --since=14d
 
 # Narrow to one memory.
@@ -55,15 +55,15 @@ node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge --json
 
 ## Cost model
 
-The judge uses `claude-haiku-4-5`. Per fired UPS match the request carries roughly **~500 input tokens + ~5 output tokens**. With the default cap of 200 judges, expected cost is well under **$0.05** per run. The report footer (`est. cost ≈ $X`) is rendered only when the judge actually ran — `--no-judge` runs emit no cost line because they make zero API calls.
+The judge runs as the `synapsys-replay-judge` subagent against the already-authenticated in-session model — there is no separate API credential and no per-call dollar cost to budget for. The work is bounded instead by `--max-judges`: each judge invocation carries roughly **~500 input + ~5 output tokens** and the cap defaults to 200, so a default run stays small. `--no-judge` runs dispatch no subagent at all.
 
 When fired matches exceed `--max-judges`, replay samples evenly across them (`Math.floor(i * fires / cap)`) and annotates the report with `extrapolated`. The cap is a hard upper bound — replay will never exceed it in a single run.
 
-## `--no-judge` zero-cost mode
+## `--no-judge` and the non-interactive path
 
-`--no-judge` makes zero outbound HTTP calls and requires no `ANTHROPIC_API_KEY`. Per-memory `relevant` and `fp_rate` are `null`, but `fires` and `sample_matches` are still populated, which is usually enough to spot the noisiest memories. Use this as the default when iterating on trigger patterns and only graduate to the judged run when you want a relevance number.
+`--no-judge` skips the subagent dispatch entirely. Per-memory `relevant` and `fp_rate` are `null`, but `fires` and `sample_matches` are still populated, which is usually enough to spot the noisiest memories. Use this as the default when iterating on trigger patterns and only graduate to the judged run when you want a relevance number.
 
-If `ANTHROPIC_API_KEY` is missing and `--no-judge` is **not** set, replay emits a single stderr warning and degrades to no-judge behavior (exit 0).
+`--no-judge` is also the documented non-interactive / CI path: when the judged path runs without an available subagent dispatcher (CI, non-interactive), replay **auto-downgrades** to no-judge behavior — no `dispatch_agent` envelope is emitted, the report carries `relevant=null`/`fp_rate=null`, and the run never hard-fails (exit 0).
 
 ## PTU not judged in v1
 
@@ -71,9 +71,9 @@ The LLM judge runs only against `UserPromptSubmit` fires. `PreToolUse` matches a
 
 ## Security
 
-Replay sends the user prompt and the matched substring to Anthropic's `/v1/messages` endpoint as part of judging. Do not run the judged path against transcripts that contain secrets you would not paste into the API console. `--no-judge` keeps everything local.
+When judging, replay hands the user prompt and the matched substring (both clipped) to the `synapsys-replay-judge` subagent, which reasons over them using the already-authenticated in-session model. No separate API credential is involved and data leaves the local box only via that in-session model — never a standalone API console. Do not run the judged path against transcripts that contain secrets you would not want the in-session model to see; `--no-judge` keeps everything local and dispatches no subagent.
 
-`ANTHROPIC_API_KEY` is never serialized into report output, JSON output, or error messages.
+No separate API credential is read or serialized into report output, JSON output, or error messages.
 
 ## Current state — transcript format & matcher API
 

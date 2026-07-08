@@ -12,8 +12,12 @@ const path = require('path');
 function resolveTaskType(tasksDir, taskNum) {
   try {
     const content = fs.readFileSync(path.join(tasksDir, 'tasks.md'), 'utf8');
+    // [\w-]+ (not \w+): the closed Type enum contains hyphenated values
+    // (tests-only, mechanical-refactor, file-move, tdd-code) — \w+ truncated
+    // them ("tests-only" → "tests"), silently demoting exempt types to the
+    // unknown/TDD-required fallback at the gate.
     const match = content.match(
-      new RegExp(`## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n(\\w+)`, 'm')
+      new RegExp(`## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n([\\w-]+)`, 'm')
     );
     return match ? match[1].trim().toLowerCase() : null;
   } catch {

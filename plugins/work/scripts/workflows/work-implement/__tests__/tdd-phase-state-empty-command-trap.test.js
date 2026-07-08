@@ -28,7 +28,7 @@ function mkTempHome() {
   return dir;
 }
 
-function runCli(args, homeDir) {
+function runCli(args, homeDir, envOverrides) {
   try {
     const stdout = execSync(`node ${CLI_PATH} ${args}`, {
       encoding: 'utf8',
@@ -38,6 +38,7 @@ function runCli(args, homeDir) {
         TASKS_BASE: path.join(homeDir, 'worktrees', 'tasks'),
         WORK_TDD_TOKEN_SKIP: '1',
         WORK_TDD_SKIP_WORKSPACE_CHECK: '1',
+        ...(envOverrides || {}),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -79,8 +80,12 @@ function seedPhase(homeDir, ticket, phase) {
 
 describe('RC-D — empty-command trap', () => {
   let homeDir;
-  beforeEach(() => { homeDir = mkTempHome(); });
-  afterEach(() => { fs.rmSync(homeDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    homeDir = mkTempHome();
+  });
+  afterEach(() => {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
 
   it('GREEN: refuses to record when eval-of-empty-string exits 0', () => {
     seedPhase(homeDir, 'TEST-1', 'green');
@@ -118,5 +123,44 @@ describe('RC-D — empty-command trap', () => {
     const r = runCli('record-refactor TEST-5 --cmd \'eval ""\'', homeDir);
     assert.notStrictEqual(r.exitCode, 0);
     assert.match(r.stderr, /empty-command trap|NO stdout\/stderr/i);
+  });
+
+  // W2.4 — the block message must explain the silent-verifier resolution
+  // (noisy command / planner defect) and must NOT tell the agent to edit
+  // tasks.md (planner-owned, locked during implement).
+  it('GREEN: block message names the noisy-command resolution, never a tasks.md edit', () => {
+    seedPhase(homeDir, 'TEST-6', 'green');
+    const r = runCli('record-green TEST-6 --cmd \'eval ""\'', homeDir);
+    assert.notStrictEqual(r.exitCode, 0);
+    assert.match(r.stderr, /noisy command/i);
+    assert.match(r.stderr, /planner defect|planner-defect/i);
+    assert.match(r.stderr, /Do NOT edit tasks\.md/i);
+    assert.doesNotMatch(r.stderr, /open tasks\.md|update tasks\.md|fix tasks\.md/i);
+  });
+
+  it('REFACTOR: block message carries the same resolution guidance', () => {
+    seedPhase(homeDir, 'TEST-7', 'refactor');
+    const r = runCli('record-refactor TEST-7 --cmd \'eval ""\'', homeDir);
+    assert.notStrictEqual(r.exitCode, 0);
+    assert.match(r.stderr, /noisy command/i);
+    assert.match(r.stderr, /Do NOT edit tasks\.md/i);
+  });
+
+  // W6 §2 (GH-466) — the trap must cover the exact SYNTHESIZED envelope shape
+  // (`CHANGED_FILES="<entry>" eval "$TEST_UNIT_COMMAND"`) when the envelope
+  // var is empty in the spawn env: `eval ""` exits 0 with zero output and must
+  // never record as GREEN.
+  it('GREEN: refuses the synthesized envelope shape when the env var is empty', () => {
+    seedPhase(homeDir, 'TEST-8', 'green');
+    const r = runCli(
+      'record-green TEST-8 --cmd \'CHANGED_FILES="src/foo.test.js" eval "$TEST_UNIT_COMMAND"\'',
+      homeDir,
+      { TEST_UNIT_COMMAND: '' }
+    );
+    assert.notStrictEqual(r.exitCode, 0);
+    assert.match(r.stderr, /empty-command trap|NO stdout\/stderr/i);
+    const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-8', 'tdd-phase.json');
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    assert.strictEqual(state.cycles[0].green, undefined, 'no GREEN recorded');
   });
 });

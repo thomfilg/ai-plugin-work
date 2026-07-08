@@ -54,9 +54,10 @@ claude-plugin-work/
 │   │   ├── tdd-phase-registry.js  # Phase definitions & transitions
 │   │   └── hooks/              # TDD file gating
 │   ├── work-pr/                # PR generation workflow
-│   └── check/                  # Quality verification workflow
-│       ├── check.workflow.js   # Check dispatcher
-│       ├── hooks/              # Check-specific hooks
+│   └── check/                  # Quality verification workflow (script-driven)
+│       ├── check-next.js       # Check orchestrator (one instruction at a time)
+│       ├── lib/                # Steps, step registry, staleness assessment
+│       ├── hooks/              # Check-specific hooks (incl. auto-advance)
 │       └── scripts/            # Report writers
 ├── agents/                     # 19 specialized agent definitions (markdown)
 ├── skills/                     # 23 slash command definitions (SKILL.md)
@@ -123,7 +124,7 @@ The orchestrator dispatches agents via `Task()` tool calls. Each step maps to on
 | implement | developer-nodejs-tdd, developer-react-senior, developer-devops |
 | check | code-checker, quality-checker, qa-feature-tester, completion-checker |
 | pr | pr-generator |
-| commit | commit-writer |
+| commit | _(session agent authors; forced through commit-and-push.js by enforce-agent-usage)_ |
 
 ### Hooks → Workflows
 
