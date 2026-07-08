@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"019f3c4b-8ae6-7310-9ecb-18cdcb837cfb"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Using the work skill for GH-42. Starting the driver loop."}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/bin/bash -lc \"node plugins/work/scripts/workflows/work/work-next.js GH-42\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/bin/bash -lc \"node plugins/work/scripts/workflows/work/work-next.js GH-42\"","aggregated_output":"WORK2: step brief-gate ready\n","exit_code":0,"status":"completed"}}
+{"type":"turn.completed","usage":{"input_tokens":74763,"cached_input_tokens":53120,"output_tokens":2316,"reasoning_output_tokens":0}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Brief gate parked BLOCKED — waiting on the operator answer channel."}}
+{"type":"turn.completed","usage":{"input_tokens":81210,"cached_input_tokens":60050,"output_tokens":1890,"reasoning_output_tokens":0}}

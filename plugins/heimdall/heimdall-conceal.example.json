@@ -1,0 +1,31 @@
+{
+  "_doc": "Copy to <project>/.claude/heimdall-conceal.json and tune. Drives BOTH the PreToolUse guard (deny patterns) and setup-secrets-heimdall.sh (install).",
+
+  "runnerUser": "mcp-runner",
+  "secretsFiles": ["credentials/mcp-secrets.json"],
+  "wrapper": "scripts/mcp-wrapper.js",
+  "nodeBin": "",
+  "_brokerPath_doc": "Optional. Leave empty to default to a PER-REPO path (/usr/local/lib/mcp-broker/<repo>/mcp-pg-broker) so hardening/reverting one project never clobbers another. broker.conf is always written next to the broker binary.",
+  "brokerPath": "",
+  "allowlist": [
+    "atlassian",
+    "postgres-local-dashboard",
+    "postgres-local-status",
+    "postgres-qa-dashboard",
+    "postgres-qa-status",
+    "postgres-dev-dashboard",
+    "postgres-dev-status",
+    "postgres-prod-dashboard",
+    "postgres-prod-status"
+  ],
+  "rewriteMcpJson": true,
+  "mcpJson": ".mcp.json",
+
+  "_injectCommands_doc": "Optional, ALTERNATIVE to wrapper/MCP. CLI consumers that need a secret in their environment, run via the setuid broker with NO sudo: the agent runs `<brokerPath> <name> [args]` and the command runs as runnerUser with the secret in its env. A repo uses EITHER wrapper (MCP) OR injectCommands — the broker runs one wrapper. Each entry: name (allow-listed logical name), exec (absolute path to the command; root-controlled, the agent cannot pick it), secretsFile (KEY=value file sourced into the command's env; locked to runnerUser), groups (optional supplementary groups the runner needs, e.g. [\"docker\"]). The command receives HEIMDALL_CALLER_UID=<invoker> so it can chown outputs back.",
+  "injectCommands": [],
+
+  "_guard_overrides": "Optional. If omitted, file patterns derive from secretsFiles basenames; command patterns default to /proc environ + PGPASSWORD.",
+  "denyFilePatterns": [],
+  "denyCommandPatterns": [],
+  "denyMessage": ""
+}

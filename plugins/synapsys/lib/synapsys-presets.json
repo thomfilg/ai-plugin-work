@@ -1,0 +1,5 @@
+{
+  "git-ops": "\\b(git\\s+(merge|push|rebase|cherry-pick|reset|checkout)|gh\\s+pr\\s+(merge|view|checks|create|edit)|cascade-merge|merge\\s+conflict)\\b",
+  "ci-monitor": "\\b(follow-up-next|gh\\s+run\\s+(view|rerun|watch)|gh\\s+pr\\s+checks|--log-failed)\\b",
+  "review-comment-handling": "(--solve-comment|--skip-comment|cursor\\[bot\\]|copilot\\[bot\\]|\\breview\\s+(thread|comment)\\b)"
+}

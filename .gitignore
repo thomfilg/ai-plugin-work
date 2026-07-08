@@ -1,0 +1,21 @@
+# Override global .claude* exclusion for this plugin repo
+!.claude-plugin/
+
+# Environment config (user-specific)
+.env
+.envrc
+node_modules/
+node_modules
+
+# Runtime-generated hook artifacts
+.claude-code-check-request.json
+
+# Local-only backward-compat symlink for stale sessions (workflows -> scripts/workflows)
+/workflows
+.in_use/
+
+# Codex CLI scratch (project-level config/session dirs are machine-specific;
+# .in_use/ above is codex's per-PID plugin-cache lock)
+/.codex/
+/.agents/
+*.exec.jsonl

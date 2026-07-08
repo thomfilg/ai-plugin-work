@@ -1,0 +1,351 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * synapsys-explain — per-memory trigger debugger CLI for synapsys (GH-443).
+ *
+ *   node synapsys-explain.js --event=UserPromptSubmit --prompt="<text>"
+ *   node synapsys-explain.js --event=PreToolUse --tool=Edit --tool-input='{...}'
+ *   node synapsys-explain.js --event=PostToolUse --tool=Bash --tool-response='{...}'
+ *   node synapsys-explain.js --stdin   (reads raw hook event JSON from stdin)
+ *   node synapsys-explain.js [...] --only=name1,name2 --verbose --store=<name|path>
+ *
+ * Exit codes:
+ *   0 — Always when configuration is valid (regardless of fire count).
+ *   2 — Misconfiguration: invalid stdin JSON, invalid --tool-input JSON,
+ *       unknown --store, malformed --event.
+ *
+ * Output:
+ *   Default → compact table `Memory | Fired (✓/✗) | Reason` with footer
+ *             `N/M memories fired.`
+ *   --verbose → per-memory detail blocks (events list, trigger regex,
+ *               matched alternative/substring or gate label + first 3 body lines).
+ */
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const { makeFlag } = require(path.join(__dirname, '..', 'lib', 'cli-args'));
+const { selectStores, loadMemories } = require(
+  path.join(__dirname, '..', 'lib', 'replay-cli-shared')
+);
+const matcher = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
+const { resolveSessionId: ledgerResolveSessionId } = require(
+  path.join(__dirname, '..', 'lib', 'inject-ledger')
+);
+// Payload / flag-resolution helpers live in a sibling lib module so this CLI
+// stays under the quality gate's max-lines budget.
+const { resolveToolInput, resolveToolResponse, buildPayload } = require(
+  path.join(__dirname, 'lib', 'explain-payload')
+);
+
+const VALID_EVENTS = new Set([
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'SessionStart',
+  'Stop',
+]);
+
+const REASON_COL_MAX = 24;
+
+function die(msg, code = 2) {
+  process.stderr.write(`synapsys-explain: ${msg}\n`);
+  process.exit(code);
+}
+
+function readStdinSync() {
+  try {
+    return fs.readFileSync(0, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function parseStdinPayload(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    die(`invalid stdin JSON: ${err.message}`, 2);
+  }
+}
+
+// Store selection (kind name → absolute path → bare .synapsys.json dir) and
+// memory loading are shared with the replay CLIs via lib/replay-cli-shared.
+function loadStore(storeFlag, cwd) {
+  const stores = selectStores(storeFlag, cwd);
+  if (!stores) die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
+  return stores;
+}
+
+// When the memory carries trigger_stop_response, matchStop needs the agent's
+// response surface to decide. synapsys-explain is a dry-run tool and has no
+// live response, so unless the operator supplies --response=… we short-circuit
+// with an informational pseudo-result rather than lying about fired:false
+// (which is what `matchStop(memory)` with no payload would otherwise return
+// via the empty-string regex path).
+function evaluateStop(memory, payload) {
+  const hasStopResponse = !!memory.triggerStopResponse;
+  const responseProvided = typeof payload.response === 'string' && payload.response !== '';
+  if (hasStopResponse && !responseProvided) {
+    return {
+      fired: null,
+      reason: 'needs-response',
+      triggerStopResponse: memory.triggerStopResponse,
+    };
+  }
+  return matcher.matchStop(memory, payload);
+}
+
+function evaluateMemory(memory, event, payload, activeDomains) {
+  // Domain gate must run BEFORE per-event trigger checks, mirroring
+  // selectForEvent in the dispatcher hook. Otherwise explain reports
+  // memories as fired that the hook would skip via isDomainMismatch.
+  if (activeDomains && matcher.isDomainMismatch(memory, activeDomains)) {
+    return { fired: false, reason: 'domain-mismatch' };
+  }
+  if (event === 'UserPromptSubmit') {
+    return matcher.matchPrompt(memory, payload.prompt || '');
+  }
+  if (event === 'PreToolUse') {
+    return matcher.matchPreTool(memory, payload);
+  }
+  if (event === 'PostToolUse') {
+    return matcher.matchPostTool(memory, payload);
+  }
+  if (event === 'SessionStart') {
+    return matcher.matchSession(memory);
+  }
+  if (event === 'Stop') return evaluateStop(memory, payload);
+  return { fired: false, reason: 'events-exclude' };
+}
+
+// Read-only activeDomains resolver — uses the same shared helper as the
+// dispatcher so explain's domain gate agrees with what selectForEvent
+// would do at injection time. Passes the inject-ledger session resolver
+// so sticky-state is read under the SAME bucket the dispatcher writes
+// to (without it, explain reads the 'default' bucket and disagrees with
+// live hysteresis). `onPersistSticky` is omitted so the CLI never
+// mutates sticky state (diagnostic-only).
+function computeActiveDomainsForExplain(event, payload) {
+  return buildActiveDomains(event, payload, { resolveSessionId: ledgerResolveSessionId });
+}
+
+function truncate(str, max) {
+  if (!str) return '';
+  if (str.length <= max) return str;
+  return str.slice(0, max - 1) + '…';
+}
+
+function renderTable(results) {
+  const nameWidth = Math.max(6, ...results.map((r) => r.memory.name.length));
+  const out = [];
+  const header = `${'Memory'.padEnd(nameWidth)} | Fired | ${'Reason'.padEnd(REASON_COL_MAX)}`;
+  out.push(header);
+  out.push('-'.repeat(header.length));
+
+  let fired = 0;
+  for (const r of results) {
+    const isNeedsResponse = r.result.fired === null && r.result.reason === 'needs-response';
+    const mark = r.result.fired ? '✓' : isNeedsResponse ? '?' : '✗';
+    if (r.result.fired) fired++;
+    let reason = '';
+    if (isNeedsResponse) {
+      reason = `would fire if response matches /${r.result.triggerStopResponse}/i`;
+    } else if (!r.result.fired) {
+      reason = r.result.reason || '';
+    }
+    out.push(
+      `${r.memory.name.padEnd(nameWidth)} | ${mark}     | ${truncate(reason, REASON_COL_MAX).padEnd(REASON_COL_MAX)}`
+    );
+  }
+  out.push('');
+  out.push(`${fired}/${results.length} memories fired.`);
+  return out.join('\n') + '\n';
+}
+
+function stopTriggerSource(memory) {
+  if (memory.triggerStopResponse) {
+    return `stop_response: /${memory.triggerStopResponse}/i`;
+  }
+  return '(unconditional on Stop)';
+}
+
+// Render the PreToolUse trigger surface (tool/path target + input content).
+// Extracted from eventTriggerSource to keep it under the complexity gate.
+function preToolTriggerSource(memory) {
+  const parts = [];
+  if (memory.triggerPretool && memory.triggerPretool.length) {
+    parts.push(`pretool: ${memory.triggerPretool.join(', ')}`);
+  }
+  if (memory.triggerPretoolContent && memory.triggerPretoolContent.length) {
+    parts.push(`content: ${memory.triggerPretoolContent.join(', ')}`);
+  }
+  return parts.join(' | ');
+}
+
+// Render the PostToolUse trigger surface (tool/path target + output content +
+// exit gate). Extracted from eventTriggerSource to keep it under the
+// complexity gate.
+function postToolTriggerSource(memory) {
+  const parts = [];
+  if (memory.triggerPretool && memory.triggerPretool.length) {
+    parts.push(`pretool: ${memory.triggerPretool.join(', ')}`);
+  }
+  if (memory.triggerPosttoolContent && memory.triggerPosttoolContent.length) {
+    parts.push(`content: ${memory.triggerPosttoolContent.join(', ')}`);
+  }
+  if (memory.triggerPosttoolExit !== null && memory.triggerPosttoolExit !== undefined) {
+    parts.push(`exit: ${memory.triggerPosttoolExit}`);
+  }
+  return parts.join(' | ');
+}
+
+function eventTriggerSource(memory, event) {
+  if (event === 'UserPromptSubmit') return memory.triggerPrompt || '';
+  if (event === 'PreToolUse') return preToolTriggerSource(memory);
+  if (event === 'PostToolUse') return postToolTriggerSource(memory);
+  if (event === 'SessionStart') return `trigger_session: ${memory.triggerSession}`;
+  if (event === 'Stop') return stopTriggerSource(memory);
+  return '';
+}
+
+const MATCHED_LABELS = [
+  ['prompt_token', 'matched.prompt_token'],
+  ['prompt_substring', 'matched.prompt_substring'],
+  ['pretool_pattern', 'matched.pretool_pattern'],
+  ['content_pattern', 'matched.content_pattern'],
+  ['content_substring', 'matched.content_substring'],
+  ['posttool_content_pattern', 'matched.posttool_content_pattern'],
+  ['posttool_content_substring', 'matched.posttool_content_substring'],
+  ['posttool_exit', 'matched.posttool_exit'],
+  ['excluded_pattern', 'matched.excluded_pattern'],
+];
+
+function renderFiredBlock(matched) {
+  const lines = ['  fired: ✓'];
+  const m = matched || {};
+  for (const [key, label] of MATCHED_LABELS) {
+    if (m[key] !== undefined) lines.push(`  ${label}: ${m[key]}`);
+  }
+  return lines;
+}
+
+function renderNeedsResponseBlock(memory, result) {
+  return [
+    `  fired: ?  (needs --response=… to evaluate trigger_stop_response)`,
+    `  would_fire_if: response matches /${result.triggerStopResponse}/i`,
+    `  re-run with: --response="<assistant turn text>"`,
+  ];
+}
+
+function renderNotFiredBlock(memory, reason, matched) {
+  const lines = [`  fired: ✗  (gate: ${reason || 'unknown'})`];
+  // Surface matched.* keys on suppressed results so reasons like
+  // `exclude-matched` (GH-510) or `negative-excludes` (GH-445) show the
+  // offending pattern alongside the gate label.
+  const m = matched || {};
+  for (const [key, label] of MATCHED_LABELS) {
+    if (m[key] !== undefined) lines.push(`  ${label}: ${m[key]}`);
+  }
+  const bodyLines = (memory.body || '').split('\n').filter(Boolean).slice(0, 3);
+  if (bodyLines.length) {
+    lines.push('  body (first 3 lines):');
+    for (const bl of bodyLines) lines.push(`    ${bl}`);
+  }
+  return lines;
+}
+
+function renderVerboseBlock(memory, result, event) {
+  const lines = [`# ${memory.name}`];
+  const eventsList = memory.events.map((e) => (e === event ? `${e} ✓` : e)).join(', ');
+  lines.push(`  events: ${eventsList}`);
+  const trig = eventTriggerSource(memory, event);
+  if (trig) lines.push(`  trigger: ${trig}`);
+  const isNeedsResponse = result.fired === null && result.reason === 'needs-response';
+  const body = isNeedsResponse
+    ? renderNeedsResponseBlock(memory, result)
+    : result.fired
+      ? renderFiredBlock(result.matched)
+      : renderNotFiredBlock(memory, result.reason, result.matched);
+  lines.push(...body);
+  return lines.join('\n');
+}
+
+function renderVerbose(results, event) {
+  const out = [];
+  let fired = 0;
+  for (const r of results) {
+    if (r.result.fired) fired++;
+    out.push(renderVerboseBlock(r.memory, r.result, event));
+    out.push('');
+  }
+  out.push(`${fired}/${results.length} memories fired.`);
+  return out.join('\n') + '\n';
+}
+
+function readStdinPayloadIfRequested(flag) {
+  if (!flag('stdin')) return {};
+  return parseStdinPayload(readStdinSync());
+}
+
+function resolveEvent(flag, stdinPayload) {
+  const event = flag('event') || stdinPayload.hook_event_name || 'UserPromptSubmit';
+  if (!VALID_EVENTS.has(event)) {
+    die(`unknown --event "${event}" (expected one of ${[...VALID_EVENTS].join(', ')})`, 2);
+  }
+  return event;
+}
+
+function parseOnlyList(flag) {
+  const raw = flag('only');
+  if (typeof raw !== 'string') return null;
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function applyOnlyFilter(memories, only) {
+  if (!only || !only.length) return memories;
+  const names = new Set(memories.map((m) => m.name));
+  for (const n of only) {
+    if (!names.has(n)) {
+      process.stderr.write(`synapsys-explain: --only name "${n}" not found in store\n`);
+    }
+  }
+  const onlySet = new Set(only);
+  return memories.filter((m) => onlySet.has(m.name));
+}
+
+function main() {
+  const flag = makeFlag(process.argv.slice(2));
+  const stdinPayload = readStdinPayloadIfRequested(flag);
+  const event = resolveEvent(flag, stdinPayload);
+
+  const cwd = flag('cwd') || stdinPayload.cwd || process.cwd();
+  const prompt = flag('prompt') !== undefined ? flag('prompt') : stdinPayload.prompt;
+  const tool = flag('tool') !== undefined ? flag('tool') : stdinPayload.tool_name;
+  const toolInput = resolveToolInput(flag, stdinPayload, die);
+  const response = flag('response') !== undefined ? flag('response') : stdinPayload.response;
+  const toolResponse = resolveToolResponse(flag, stdinPayload);
+  const verbose = !!flag('verbose');
+  const only = parseOnlyList(flag);
+
+  const stores = loadStore(flag('store'), cwd);
+  const memories = applyOnlyFilter(loadMemories(stores), only);
+  const payload = buildPayload(event, prompt, tool, toolInput, cwd, response, toolResponse);
+
+  const activeDomains = computeActiveDomainsForExplain(event, payload);
+  const results = memories.map((memory) => ({
+    memory,
+    result: evaluateMemory(memory, event, payload, activeDomains),
+  }));
+
+  const rendered = verbose ? renderVerbose(results, event) : renderTable(results);
+  process.stdout.write(rendered);
+  process.exit(0);
+}
+
+main();
