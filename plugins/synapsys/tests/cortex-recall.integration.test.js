@@ -41,9 +41,21 @@ function mkHome() {
 function cleanup(dir) {
   // Detached background recall jobs may still be writing into the store when a
   // test reaches teardown, so a plain recursive rmSync can lose the rmdir/readdir
-  // race and throw ENOTEMPTY (observed only under Node 20's timing). maxRetries
-  // makes rmSync re-walk the tree until the writer settles.
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  // race and throw ENOTEMPTY (observed under Node 20 and 22 CI timing). rmSync's
+  // own maxRetries only re-attempts the failing rmdir — if the writer creates a
+  // NEW file between re-walks it can still lose, so wrap it in an outer settle
+  // loop that re-walks the whole tree until the writer finishes (bounded, then
+  // rethrows so a truly stuck writer still fails loudly).
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      return;
+    } catch (err) {
+      if (err.code !== 'ENOTEMPTY' || Date.now() > deadline) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+  }
 }
 
 function cacheFilePath(home, sessionId) {
