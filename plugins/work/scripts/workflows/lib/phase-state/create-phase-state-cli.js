@@ -73,10 +73,21 @@ function sanitizeId(ticketId) {
   return ticketId;
 }
 
-function getStatePath(stateFileName, ticketId) {
+/**
+ * Reject empty / traversal / separator-bearing ticket ids. Called BEFORE
+ * verifyToken() in runCli so a malformed id can never reach the shared
+ * /tmp token paths — under parallel test runs a traversal id there collides
+ * with other suites' tokens and surfaces their skew errors instead of the
+ * deterministic invalid-id rejection.
+ */
+function assertTicketIdShape(ticketId) {
   if (!ticketId || /\.\.|[\\:\x00]/.test(ticketId)) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
   }
+}
+
+function getStatePath(stateFileName, ticketId) {
+  assertTicketIdShape(ticketId);
   const base = path.resolve(resolveTasksBaseWithFallback());
   const safeId = sanitizeId(ticketId);
   const resolved = path.resolve(base, safeId, stateFileName);
@@ -246,6 +257,7 @@ function runCli(opts, argv) {
       errorExit(`Usage: ${opts.scriptName} <init|current|record|transition> <TICKET> [args]`);
     const ticket = args[1];
     if (!ticket) errorExit('Missing ticket ID.');
+    assertTicketIdShape(ticket);
     if (GATED_SUBCOMMANDS.includes(sub)) verifyToken(opts.scriptName, opts.allowedAgents, ticket);
     return dispatchSubcommand(opts, sub, args);
   } catch (e) {

@@ -118,7 +118,11 @@ function writeMemory(storeDir, name, frontmatterLines, body) {
 test('real Bash tool_response carries no exit code under any read key', () => {
   for (const payload of [REAL_SUCCESS, REAL_FAILURE, REAL_FAILING_TEST]) {
     const resp = payload.tool_response;
-    assert.equal(resp.exit_code, undefined, 'tool_response.exit_code must be absent in real payload');
+    assert.equal(
+      resp.exit_code,
+      undefined,
+      'tool_response.exit_code must be absent in real payload'
+    );
     assert.equal(resp.exitCode, undefined, 'tool_response.exitCode must be absent in real payload');
     assert.equal(payload.exit_code, undefined, 'payload.exit_code must be absent in real payload');
   }
@@ -126,7 +130,10 @@ test('real Bash tool_response carries no exit code under any read key', () => {
 
 test('real tool_response is stringified into the content surface', () => {
   const text = _extractPostToolResponse(REAL_FAILING_TEST);
-  assert.ok(text.includes('FAIL src/foo.test.js'), 'stderr must be searchable in the content surface');
+  assert.ok(
+    text.includes('FAIL src/foo.test.js'),
+    'stderr must be searchable in the content surface'
+  );
   assert.ok(text.includes('1 failed'), 'stdout must be searchable in the content surface');
 });
 
@@ -137,10 +144,18 @@ test('real tool_response is stringified into the content surface', () => {
 test('trigger_posttool_exit fails closed on a real Bash payload (no exit code present)', () => {
   // nonzero spec but no resolvable code → matched:false (silent no-op for Bash).
   const onFailure = _evaluatePostToolExit({ triggerPosttoolExit: 'nonzero' }, REAL_FAILURE);
-  assert.deepEqual(onFailure, { matched: false }, 'nonzero exit gate must fail closed when no code is present');
+  assert.deepEqual(
+    onFailure,
+    { matched: false },
+    'nonzero exit gate must fail closed when no code is present'
+  );
 
   const onSuccess = _evaluatePostToolExit({ triggerPosttoolExit: 'zero' }, REAL_SUCCESS);
-  assert.deepEqual(onSuccess, { matched: false }, 'zero exit gate must fail closed when no code is present');
+  assert.deepEqual(
+    onSuccess,
+    { matched: false },
+    'zero exit gate must fail closed when no code is present'
+  );
 });
 
 test('an exit-gated memory does NOT fire end-to-end on a real failing Bash payload', (t) => {
@@ -196,7 +211,11 @@ test('a content-gated memory DOES fire on the real failing Bash payload', (t) =>
 
   // Fires on the real failing payload (stderr contains FAIL).
   const fired = matcher.selectForEvent(memories, 'PostToolUse', REAL_FAILING_TEST);
-  assert.equal(fired.length, 1, 'content-gated memory must fire on real failure output — the supported Bash path');
+  assert.equal(
+    fired.length,
+    1,
+    'content-gated memory must fire on real failure output — the supported Bash path'
+  );
 
   // Stays silent on the real success payload (no FAIL/failed text).
   const quiet = matcher.selectForEvent(memories, 'PostToolUse', REAL_SUCCESS);

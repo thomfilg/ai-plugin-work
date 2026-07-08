@@ -346,6 +346,51 @@ describe('config', () => {
     });
   });
 
+  // ─── WORK_PRICING (model-keyed pricing table) ────────────────────────────
+
+  describe('WORK_PRICING pricing table', () => {
+    it('ships a default table whose default model has numeric usdPer1MTokens > 0', () => {
+      delete process.env.WORK_PRICING;
+      const config = freshRequire({ WORK_PRICING: undefined });
+      const table = config.WORK_PRICING;
+      assert.equal(typeof table, 'object', 'WORK_PRICING should be an object');
+      assert.ok(table !== null, 'WORK_PRICING should not be null');
+      const modelKeys = Object.keys(table);
+      assert.ok(modelKeys.length >= 1, 'default table should ship at least one model entry');
+      for (const model of modelKeys) {
+        const rate = table[model].usdPer1MTokens;
+        assert.equal(typeof rate, 'number', `${model}.usdPer1MTokens should be a number`);
+        assert.ok(rate > 0, `${model}.usdPer1MTokens should be > 0, got ${rate}`);
+      }
+    });
+
+    it('is readable via config.get("WORK_PRICING") with a positive default rate', () => {
+      delete process.env.WORK_PRICING;
+      const config = freshRequire({ WORK_PRICING: undefined });
+      const table = config.get('WORK_PRICING');
+      assert.equal(typeof table, 'object');
+      const firstModel = Object.keys(table)[0];
+      assert.ok(table[firstModel].usdPer1MTokens > 0);
+    });
+
+    it('replaces the table when WORK_PRICING env override is set before require', () => {
+      const config = freshRequire({
+        WORK_PRICING: JSON.stringify({ 'custom-model': { usdPer1MTokens: 42 } }),
+      });
+      assert.deepEqual(config.WORK_PRICING, { 'custom-model': { usdPer1MTokens: 42 } });
+      assert.equal(config.WORK_PRICING['custom-model'].usdPer1MTokens, 42);
+    });
+
+    it('falls back to the default table when WORK_PRICING override is invalid JSON', () => {
+      const config = freshRequire({ WORK_PRICING: 'not-json{{{' });
+      const table = config.WORK_PRICING;
+      assert.equal(typeof table, 'object');
+      assert.ok(table !== null);
+      const firstModel = Object.keys(table)[0];
+      assert.ok(table[firstModel].usdPer1MTokens > 0);
+    });
+  });
+
   // ─── Path helpers ───────────────────────────────────────────────────────
 
   describe('path helpers', () => {

@@ -45,10 +45,7 @@ const SCHEMA = Object.freeze({
   JIRA_ASSIGNEE_EMAIL: str('Legacy Jira assignee email.'),
 
   // ── Provider-agnostic ticket config (TICKET_ prefix) ─────────────────────
-  TICKET_PROVIDER: enumOf(
-    ['jira', 'linear', 'github', 'none', ''],
-    'Ticket provider backend.',
-  ),
+  TICKET_PROVIDER: enumOf(['jira', 'linear', 'github', 'none', ''], 'Ticket provider backend.'),
   TICKET_PROJECT_KEY: str('Provider-agnostic project key.'),
 
   // ── Repository / worktree layout (non-prefixed) ──────────────────────────
@@ -59,9 +56,7 @@ const SCHEMA = Object.freeze({
 
   // ── Feature flags ────────────────────────────────────────────────────────
   ENABLE_SYMLINK: flag01("Enable symlink behavior ('0' off, '1' on)."),
-  WORK_TEST_STRATEGY_VALIDATOR: flag01(
-    "Gate the tasks-draft Test Strategy validator ('0'/'1').",
-  ),
+  WORK_TEST_STRATEGY_VALIDATOR: flag01("Gate the tasks-draft Test Strategy validator ('0'/'1')."),
 
   // ── Follow-up behavior ───────────────────────────────────────────────────
   FOLLOW_UP_PR_POLL_REVIEWS: bool('Poll PR reviews during follow-up.'),
@@ -88,9 +83,7 @@ const SCHEMA = Object.freeze({
 
   // ── Per-suite scoped test commands ───────────────────────────────────────
   TEST_UNIT_COMMAND: str('Scoped unit test command (uses $CHANGED_FILES).'),
-  TEST_INTEGRATION_COMMAND: str(
-    'Scoped integration test command (uses $CHANGED_FILES).',
-  ),
+  TEST_INTEGRATION_COMMAND: str('Scoped integration test command (uses $CHANGED_FILES).'),
   TEST_E2E_COMMAND: str('Scoped e2e test command (uses $CHANGED_FILES).'),
 
   // ── Per-suite "run affected" scripts ─────────────────────────────────────
@@ -100,6 +93,11 @@ const SCHEMA = Object.freeze({
 
   // ── Web apps list ────────────────────────────────────────────────────────
   WEB_APPS: jsonArray('JSON array of web app descriptors.'),
+
+  // ── Cost reporting (GH-311) ──────────────────────────────────────────────
+  WORK_PRICING: str(
+    'Model-keyed JSON pricing table ({ <model>: { usdPer1MTokens } }) for the reports-step cost estimate; invalid JSON falls back to the built-in default.'
+  ),
 });
 
 const KNOWN_KEYS = Object.keys(SCHEMA);

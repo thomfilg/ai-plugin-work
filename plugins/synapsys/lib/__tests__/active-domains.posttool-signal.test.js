@@ -12,10 +12,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  currentToolCallString,
-  getRecentToolCallsWithCurrent,
-} = require('../active-domains');
+const { currentToolCallString, getRecentToolCallsWithCurrent } = require('../active-domains');
 const { classifyActiveDomains } = require('../classifier');
 
 function mkRegistry() {

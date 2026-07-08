@@ -48,7 +48,10 @@ function fresh(stateDir, opts = {}) {
     id: srPath,
     filename: srPath,
     loaded: true,
-    exports: { readTicketSkill: () => 'work', get: () => ({ snapshot: () => ({ phase: 'impl' }) }) },
+    exports: {
+      readTicketSkill: () => 'work',
+      get: () => ({ snapshot: () => ({ phase: 'impl' }) }),
+    },
   };
 
   const alerts = require(LIB('alerts'));
@@ -75,7 +78,10 @@ function captureStderr(fn) {
 function logLines(stateDir) {
   const f = path.join(stateDir, 'conduct.log');
   if (!fs.existsSync(f)) return [];
-  return fs.readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('HEARTBEAT'));
+  return fs
+    .readFileSync(f, 'utf8')
+    .split('\n')
+    .filter((l) => l.includes('HEARTBEAT'));
 }
 
 test('benign heartbeat writes _heartbeat.json + logfile but never stderr; state-change beat emits immediately', () => {
@@ -110,27 +116,57 @@ test('alert wake routing: default allowlist wakes pr-broken; CONDUCT_WAKE_EVENTS
   const dir1 = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-alert-'));
   const a1 = fresh(dir1);
   assert.equal(typeof a1.alerts.wakesConductor, 'function', 'wakesConductor is exported');
-  assert.equal(a1.alerts.wakesConductor('pr-broken'), true, 'pr-broken wakes under the default allowlist');
+  assert.equal(
+    a1.alerts.wakesConductor('pr-broken'),
+    true,
+    'pr-broken wakes under the default allowlist'
+  );
   assert.equal(a1.alerts.wakesConductor('HEARTBEAT'), false, 'HEARTBEAT is non-waking by default');
 
   const stderrBroken = captureStderr(() =>
-    a1.alerts.alert({ session: 's', ticket: 't', kind: 'pr-broken', sha: 'aaa', instruction: 'fix CI' }),
+    a1.alerts.alert({
+      session: 's',
+      ticket: 't',
+      kind: 'pr-broken',
+      sha: 'aaa',
+      instruction: 'fix CI',
+    })
   );
-  assert.ok(stderrBroken.length > 0, 'a default-allowlist pr-broken alert writes to the stderr wake channel');
+  assert.ok(
+    stderrBroken.length > 0,
+    'a default-allowlist pr-broken alert writes to the stderr wake channel'
+  );
 
   // Restricted allowlist: only pr-ready wakes; pr-broken must not.
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-restrict-'));
   const a2 = fresh(dir2, { wake: 'pr-ready' });
-  assert.equal(a2.alerts.wakesConductor('pr-ready'), true, 'pr-ready wakes under a pr-ready allowlist');
-  assert.equal(a2.alerts.wakesConductor('pr-broken'), false, 'pr-broken does NOT wake when not allowlisted');
+  assert.equal(
+    a2.alerts.wakesConductor('pr-ready'),
+    true,
+    'pr-ready wakes under a pr-ready allowlist'
+  );
+  assert.equal(
+    a2.alerts.wakesConductor('pr-broken'),
+    false,
+    'pr-broken does NOT wake when not allowlisted'
+  );
 
   const stderrGated = captureStderr(() =>
-    a2.alerts.alert({ session: 's', ticket: 't', kind: 'pr-broken', sha: 'bbb', instruction: 'fix CI' }),
+    a2.alerts.alert({
+      session: 's',
+      ticket: 't',
+      kind: 'pr-broken',
+      sha: 'bbb',
+      instruction: 'fix CI',
+    })
   );
   assert.equal(stderrGated, '', 'a non-allowlisted pr-broken alert stays off the wake channel');
   // ...but is never dropped: it still lands in ALERT_FILE.
   const alertFile = path.join(dir2, 'alerts.jsonl');
-  assert.ok(fs.existsSync(alertFile), 'non-waking alert is still persisted to ALERT_FILE (not dropped)');
+  assert.ok(
+    fs.existsSync(alertFile),
+    'non-waking alert is still persisted to ALERT_FILE (not dropped)'
+  );
 
   // Escape hatch: `all` restores always-wake, even for HEARTBEAT.
   const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-all-'));
@@ -145,13 +181,19 @@ test('lost-event kinds wake by default; log-only info lines never do', () => {
 
   // The four kinds GH-680's audit found silent-but-operator-required.
   for (const kind of ['spinner-hang', 'no-progress', 'kill-during-ci', 'stop-condition-met']) {
-    assert.equal(alerts.wakesConductor(kind), true, `${kind} must wake under the default allowlist`);
+    assert.equal(
+      alerts.wakesConductor(kind),
+      true,
+      `${kind} must wake under the default allowlist`
+    );
   }
 
   // Informational chatter routed with kind:'log-only' lands in the logfile
   // but never on the wake channel.
   assert.equal(alerts.wakesConductor('log-only'), false, 'log-only is never wake-eligible');
-  const stderr = captureStderr(() => alerts.log('GH-9-work NUDGE soft: test', { kind: 'log-only' }));
+  const stderr = captureStderr(() =>
+    alerts.log('GH-9-work NUDGE soft: test', { kind: 'log-only' })
+  );
   assert.equal(stderr, '', 'a log-only line writes nothing to stderr');
   const logged = fs.readFileSync(path.join(dir, 'conduct.log'), 'utf8');
   assert.ok(logged.includes('NUDGE soft'), 'the log-only line is still appended to the logfile');
@@ -161,7 +203,13 @@ test('re-wake throttle: first emission wakes, repeats inside the backoff are sil
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-throttle-'));
   const { alerts } = fresh(dir);
   delete process.env.PENDING_REWAKE_MIN; // default 30m
-  const payload = { session: 'GH-7-work', ticket: 'GH-7', kind: 'spinner-hang', phase: 'impl', instruction: 'check the pane' };
+  const payload = {
+    session: 'GH-7-work',
+    ticket: 'GH-7',
+    kind: 'spinner-hang',
+    phase: 'impl',
+    instruction: 'check the pane',
+  };
 
   // 1st emission: wakes.
   const s1 = captureStderr(() => alerts.alert(payload));
@@ -212,7 +260,13 @@ test('re-wake throttle: first emission wakes, repeats inside the backoff are sil
 test('new-incident guarantee: a stale throttle entry never swallows the first alert of a fresh incident', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-fresh-'));
   const { alerts } = fresh(dir);
-  const payload = { session: 'GH-8-work', ticket: 'GH-8', kind: 'kill-during-ci', phase: 'ci', instruction: 'bootstrap next' };
+  const payload = {
+    session: 'GH-8-work',
+    ticket: 'GH-8',
+    kind: 'kill-during-ci',
+    phase: 'ci',
+    instruction: 'bootstrap next',
+  };
   // Simulate a leftover backoff entry from a PREVIOUS lifecycle (rotation
   // purged the counts but a stale throttle entry survived): counts file is
   // fresh, throttle says "in backoff".
@@ -224,20 +278,29 @@ test('new-incident guarantee: a stale throttle entry never swallows the first al
   );
   // count===1 (fresh incident) must clear the stale entry and wake.
   const s = captureStderr(() => alerts.alert(payload));
-  assert.ok(s.length > 0, 'first emission of a new incident wakes even with a stale throttle entry');
+  assert.ok(
+    s.length > 0,
+    'first emission of a new incident wakes even with a stale throttle entry'
+  );
 });
 
 test('logFault: first occurrence wakes, repeats back off, logfile keeps every line', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-fault-'));
   const { alerts } = fresh(dir);
-  const s1 = captureStderr(() => alerts.logFault('TICK-ERROR GH-3-work: boom', 'tick-error|GH-3-work'));
+  const s1 = captureStderr(() =>
+    alerts.logFault('TICK-ERROR GH-3-work: boom', 'tick-error|GH-3-work')
+  );
   assert.ok(s1.length > 0, 'first fault occurrence wakes');
-  const s2 = captureStderr(() => alerts.logFault('TICK-ERROR GH-3-work: boom', 'tick-error|GH-3-work'));
+  const s2 = captureStderr(() =>
+    alerts.logFault('TICK-ERROR GH-3-work: boom', 'tick-error|GH-3-work')
+  );
   assert.equal(s2, '', 'repeat inside the backoff window does not wake');
   const logged = fs.readFileSync(path.join(dir, 'conduct.log'), 'utf8');
   assert.equal(logged.split('TICK-ERROR').length - 1, 2, 'both fault lines land in the logfile');
   // Distinct fault key is independent.
-  const s3 = captureStderr(() => alerts.logFault('TICK-ERROR GH-4-work: boom', 'tick-error|GH-4-work'));
+  const s3 = captureStderr(() =>
+    alerts.logFault('TICK-ERROR GH-4-work: boom', 'tick-error|GH-4-work')
+  );
   assert.ok(s3.length > 0, 'a different fault key wakes independently');
 });
 

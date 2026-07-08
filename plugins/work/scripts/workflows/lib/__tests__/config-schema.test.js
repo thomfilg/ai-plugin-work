@@ -73,7 +73,7 @@ describe('config-schema module', () => {
       if (entry.type === 'enum') {
         assert.ok(
           Array.isArray(entry.allowed) && entry.allowed.length > 0,
-          `${key} enum entry declares a non-empty allowed list`,
+          `${key} enum entry declares a non-empty allowed list`
         );
       }
     }
@@ -81,9 +81,7 @@ describe('config-schema module', () => {
 
   it('uses every supported type at least once across the schema', () => {
     const schemaModule = loadSchemaModule();
-    const usedTypes = new Set(
-      Object.values(schemaModule.SCHEMA).map((entry) => entry.type),
-    );
+    const usedTypes = new Set(Object.values(schemaModule.SCHEMA).map((entry) => entry.type));
     for (const t of VALID_TYPES) {
       assert.ok(usedTypes.has(t), `type "${t}" appears in the schema`);
     }
@@ -122,7 +120,7 @@ describe('config-schema module', () => {
     assert.deepEqual(
       new Set(schemaModule.KNOWN_KEYS),
       new Set(keysFromSchema),
-      'KNOWN_KEYS mirrors SCHEMA keys with no separate maintenance list',
+      'KNOWN_KEYS mirrors SCHEMA keys with no separate maintenance list'
     );
   });
 });

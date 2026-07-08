@@ -451,8 +451,7 @@ describe('4b_gherkin_scope step — GH-274 coverage gating', () => {
     fs.rmSync(tasksDir3, { recursive: true, force: true });
   });
 
-  const readReport = () =>
-    fs.readFileSync(path.join(tasksDir3, 'gherkin-scope.check.md'), 'utf8');
+  const readReport = () => fs.readFileSync(path.join(tasksDir3, 'gherkin-scope.check.md'), 'utf8');
 
   it('default (warn) mode: uncovered scenario warns in the report but auto-advances', () => {
     delete process.env.CHECK_GHERKIN_COVERAGE;

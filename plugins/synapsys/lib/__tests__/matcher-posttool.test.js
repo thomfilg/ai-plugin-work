@@ -72,7 +72,9 @@ function findContentMatch(memory, contentString) {
     try {
       re = new RegExp(pat, 'im');
     } catch (err) {
-      process.stderr.write(`[synapsys] memory ${memory.name}: invalid regex "${pat}": ${err.message}\n`);
+      process.stderr.write(
+        `[synapsys] memory ${memory.name}: invalid regex "${pat}": ${err.message}\n`
+      );
       continue;
     }
     const m = re.exec(contentString);
@@ -233,7 +235,10 @@ test('exclude_pretool that does NOT match leaves the memory firing', () => {
 
 test('_extractPostToolResponse returns string responses directly', () => {
   assert.equal(typeof _extractPostToolResponse, 'function');
-  assert.equal(_extractPostToolResponse({ tool_response: 'plain string output' }), 'plain string output');
+  assert.equal(
+    _extractPostToolResponse({ tool_response: 'plain string output' }),
+    'plain string output'
+  );
 });
 
 test('_extractPostToolResponse JSON-stringifies object responses so stdout/stderr are searchable', () => {
@@ -315,10 +320,7 @@ test('invalid content regex is skipped without throwing (fail-open C-5)', () => 
 test('_evaluatePostToolExit nonzero matches exit_code 1, rejects 0', () => {
   assert.equal(typeof _evaluatePostToolExit, 'function');
   const okMemory = makeMemory({ triggerPosttoolExit: 'nonzero' });
-  assert.equal(
-    _evaluatePostToolExit(okMemory, { tool_response: { exit_code: 1 } }).matched,
-    true
-  );
+  assert.equal(_evaluatePostToolExit(okMemory, { tool_response: { exit_code: 1 } }).matched, true);
   const rej = _evaluatePostToolExit(okMemory, { tool_response: { exit_code: 0 } });
   assert.equal(rej.matched, false);
 });
@@ -349,10 +351,7 @@ test('_evaluatePostToolExit reads order tool_response.exit_code -> .exitCode -> 
   // exitCode fallback
   assert.equal(_evaluatePostToolExit(mem, { tool_response: { exitCode: 1 } }).matched, true);
   // payload.exit_code fallback
-  assert.equal(
-    _evaluatePostToolExit(mem, { tool_response: {}, exit_code: 5 }).matched,
-    true
-  );
+  assert.equal(_evaluatePostToolExit(mem, { tool_response: {}, exit_code: 5 }).matched, true);
   // precedence: tool_response.exit_code wins over payload.exit_code
   assert.equal(
     _evaluatePostToolExit(mem, { tool_response: { exit_code: 0 }, exit_code: 1 }).matched,
@@ -369,15 +368,9 @@ test('_evaluatePostToolExit coerces numeric-STRING exit codes (string "1" == num
   // string exitCode fallback
   assert.equal(_evaluatePostToolExit(mem, { tool_response: { exitCode: '2' } }).matched, true);
   // payload.exit_code string fallback
-  assert.equal(
-    _evaluatePostToolExit(mem, { tool_response: {}, exit_code: '7' }).matched,
-    true
-  );
+  assert.equal(_evaluatePostToolExit(mem, { tool_response: {}, exit_code: '7' }).matched, true);
   // non-numeric string is not a code → fail closed
-  assert.equal(
-    _evaluatePostToolExit(mem, { tool_response: { exit_code: 'boom' } }).matched,
-    false
-  );
+  assert.equal(_evaluatePostToolExit(mem, { tool_response: { exit_code: 'boom' } }).matched, false);
 });
 
 test('_evaluatePostToolExit fails closed when no exit code is present', () => {

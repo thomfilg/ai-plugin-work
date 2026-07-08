@@ -21,9 +21,7 @@ function runBootstrapInChild(extraEnv = {}) {
   const driver = `
     const path = ${JSON.stringify(BOOTSTRAP_PATH)};
     const bootstrapStep = require(path);
-    const { STEPS } = require(${JSON.stringify(
-      path.join(__dirname, '..', '..', 'step-registry'),
-    )});
+    const { STEPS } = require(${JSON.stringify(path.join(__dirname, '..', '..', 'step-registry'))});
     const add = () => {};
     bootstrapStep(add, { worktreeExists: true, pr: { number: 42 } }, {
       STEPS, ticket: 'TEST-100', t: 'TEST-100',
@@ -122,20 +120,16 @@ describe('bootstrap step', () => {
 });
 
 describe('bootstrap step — startup config validation (R11)', () => {
-  it('surfaces a config-validation warning on stderr for a typo\'d known key', () => {
+  it("surfaces a config-validation warning on stderr for a typo'd known key", () => {
     // ENABEL_SYMLINK is a distance-2 typo of the known key ENABLE_SYMLINK.
     const result = runBootstrapInChild({ ENABEL_SYMLINK: '1' });
     assert.equal(result.status, 0, 'bootstrap step must not block / exit non-zero');
     assert.match(
       result.stderr,
       /config validation/i,
-      'expected runStartupValidation to write a warning block to stderr',
+      'expected runStartupValidation to write a warning block to stderr'
     );
-    assert.match(
-      result.stderr,
-      /ENABEL_SYMLINK/,
-      'warning block should name the typo\'d key',
-    );
+    assert.match(result.stderr, /ENABEL_SYMLINK/, "warning block should name the typo'd key");
   });
 
   it('writes zero config-validation warnings for a clean environment', () => {
@@ -144,7 +138,7 @@ describe('bootstrap step — startup config validation (R11)', () => {
     assert.doesNotMatch(
       result.stderr,
       /config validation/i,
-      'a correctly-configured env must produce no config-validation warning',
+      'a correctly-configured env must produce no config-validation warning'
     );
   });
 });

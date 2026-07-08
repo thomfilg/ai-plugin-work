@@ -177,8 +177,7 @@ function globSegmentPlausiblyMarker(seg, marker) {
   const lead = (seg.match(/^[^*?[]+/) || [''])[0];
   const trail = (seg.match(/[^*?[\]]+$/) || [''])[0];
   const anchored =
-    (lead.length >= 2 && marker.startsWith(lead)) ||
-    (trail.length >= 2 && marker.endsWith(trail));
+    (lead.length >= 2 && marker.startsWith(lead)) || (trail.length >= 2 && marker.endsWith(trail));
   return anchored && segGlobToRegExp(seg).test(marker);
 }
 

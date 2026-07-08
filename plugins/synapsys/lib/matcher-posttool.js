@@ -114,9 +114,7 @@ function _matchPretoolPrefix(memory, payload, pretoolSpecMatches) {
   if (!memory.triggerPretool || !memory.triggerPretool.length) return null;
   const toolName = payload?.tool_name || '';
   const argBlob = JSON.stringify(payload?.tool_input || {});
-  return (
-    memory.triggerPretool.find((spec) => pretoolSpecMatches(spec, toolName, argBlob)) || null
-  );
+  return memory.triggerPretool.find((spec) => pretoolSpecMatches(spec, toolName, argBlob)) || null;
 }
 
 // True when the memory declares a non-empty trigger_pretool target — i.e. an

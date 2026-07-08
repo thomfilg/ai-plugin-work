@@ -45,10 +45,8 @@ const TYPE_CHECKERS = {
     expected: () => 'true or false',
   },
   enum: {
-    valid: (value, entry) =>
-      Array.isArray(entry.allowed) && entry.allowed.includes(value),
-    expected: (entry) =>
-      `one of: ${(entry.allowed || []).map((v) => `"${v}"`).join(', ')}`,
+    valid: (value, entry) => Array.isArray(entry.allowed) && entry.allowed.includes(value),
+    expected: (entry) => `one of: ${(entry.allowed || []).map((v) => `"${v}"`).join(', ')}`,
   },
   'json-array': {
     valid: (value) => isParseableJsonArray(value),
@@ -69,8 +67,7 @@ function checkValue(key, value, entry) {
   const checker = TYPE_CHECKERS[entry && entry.type];
   if (!checker) return null;
   const typeOk = checker.valid(value, entry);
-  const patternOk =
-    !(entry.pattern instanceof RegExp) || entry.pattern.test(String(value));
+  const patternOk = !(entry.pattern instanceof RegExp) || entry.pattern.test(String(value));
   if (typeOk && patternOk) return null;
   let expected = checker.expected(entry);
   if (!patternOk) {
@@ -156,10 +153,7 @@ function scanValues(env, schema, knownKeys) {
 function validateEnv(env = process.env, schema = SCHEMA) {
   const knownKeys = schema === SCHEMA ? KNOWN_KEYS : Object.keys(schema);
   const knownSet = new Set(knownKeys);
-  return [
-    ...scanUnknownKeys(env, knownKeys, knownSet),
-    ...scanValues(env, schema, knownKeys),
-  ];
+  return [...scanUnknownKeys(env, knownKeys, knownSet), ...scanValues(env, schema, knownKeys)];
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
@@ -183,11 +177,9 @@ function renderWarning(w) {
 function formatWarnings(warnings) {
   if (!Array.isArray(warnings) || warnings.length === 0) return '';
   const lines = warnings.map(renderWarning);
-  return [
-    '[/work] config validation found potential issues (non-blocking):',
-    ...lines,
-    '',
-  ].join('\n');
+  return ['[/work] config validation found potential issues (non-blocking):', ...lines, ''].join(
+    '\n'
+  );
 }
 
 // ─── Startup entry point ────────────────────────────────────────────────────

@@ -61,7 +61,10 @@ function mkFixture() {
 }
 
 function lastEnvelope(stdout) {
-  const lines = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  const lines = stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       return JSON.parse(lines[i]);

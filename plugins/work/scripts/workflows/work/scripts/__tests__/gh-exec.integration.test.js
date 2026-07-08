@@ -106,9 +106,7 @@ function withTokenEnv(vars, fn) {
   const keys = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR'];
   const saved = {};
   for (const k of keys) {
-    saved[k] = Object.prototype.hasOwnProperty.call(process.env, k)
-      ? process.env[k]
-      : undefined;
+    saved[k] = Object.prototype.hasOwnProperty.call(process.env, k) ? process.env[k] : undefined;
     delete process.env[k];
   }
   for (const [k, v] of Object.entries(vars)) process.env[k] = v;

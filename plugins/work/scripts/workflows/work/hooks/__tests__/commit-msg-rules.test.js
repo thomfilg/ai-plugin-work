@@ -170,8 +170,12 @@ describe('noAiAttributionRule', () => {
   it('passes a BARE product mention that is not attribution', () => {
     // e.g. integrating a tool by name must not be rejected (GH-539 review fix #2)
     const openai = ['open', 'ai'].join('');
-    assert.deepEqual(rules.noAiAttributionRule(`feat: add ${openai} adapter (#123)`, {}), { ok: true });
-    assert.deepEqual(rules.noAiAttributionRule('fix: handle gemini rate limit (#123)', {}), { ok: true });
+    assert.deepEqual(rules.noAiAttributionRule(`feat: add ${openai} adapter (#123)`, {}), {
+      ok: true,
+    });
+    assert.deepEqual(rules.noAiAttributionRule('fix: handle gemini rate limit (#123)', {}), {
+      ok: true,
+    });
   });
 });
 

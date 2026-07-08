@@ -29,7 +29,14 @@ function shimPath() {
   if (process.env.HEIMDALL_DISABLE_SHIM) return null;
   if (process.platform !== 'linux') return null;
   const arch = ARCH_MAP[process.arch] || process.arch;
-  const so = path.join(__dirname, '..', '..', 'scripts', 'bin', `heimdall-fsguard.linux-${arch}.so`);
+  const so = path.join(
+    __dirname,
+    '..',
+    '..',
+    'scripts',
+    'bin',
+    `heimdall-fsguard.linux-${arch}.so`
+  );
   try {
     return fs.existsSync(so) ? so : null;
   } catch {

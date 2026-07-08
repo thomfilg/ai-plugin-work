@@ -23,9 +23,7 @@ test('buildBatchInput clips prompt to 600 chars and matched to 200 chars', () =>
   const { buildBatchInput } = load();
   const longPrompt = 'p'.repeat(2000);
   const longMatched = 'm'.repeat(2000);
-  const tuples = [
-    { memory: 'mem-a', body: 'body-a', prompt: longPrompt, matched: longMatched },
-  ];
+  const tuples = [{ memory: 'mem-a', body: 'body-a', prompt: longPrompt, matched: longMatched }];
   const out = buildBatchInput(tuples);
   assert.equal(out.length, 1);
   assert.equal(out[0].memory, 'mem-a');
@@ -43,8 +41,14 @@ test('buildBatchInput preserves order and memory/body of every entry', () => {
   ];
   const out = buildBatchInput(tuples);
   assert.equal(out.length, 3);
-  assert.deepEqual(out.map((o) => o.memory), ['m1', 'm2', 'm3']);
-  assert.deepEqual(out.map((o) => o.body), ['b1', 'b2', 'b3']);
+  assert.deepEqual(
+    out.map((o) => o.memory),
+    ['m1', 'm2', 'm3']
+  );
+  assert.deepEqual(
+    out.map((o) => o.body),
+    ['b1', 'b2', 'b3']
+  );
 });
 
 test('parseBatchOutput round-trips a well-formed yes/no array', () => {
@@ -96,10 +100,7 @@ test('parseBatchOutput marks judge-failed for entry missing relevant key', () =>
     { memory: 'm1', body: 'b1', prompt: 'p1', matched: 'x1' },
     { memory: 'm2', body: 'b2', prompt: 'p2', matched: 'x2' },
   ];
-  const raw = JSON.stringify([
-    { memory: 'm1', relevant: 'yes' },
-    { memory: 'm2' },
-  ]);
+  const raw = JSON.stringify([{ memory: 'm1', relevant: 'yes' }, { memory: 'm2' }]);
   const out = parseBatchOutput(raw, input);
   assert.equal(out.length, 2);
   assert.deepEqual(out[0], { memory: 'm1', relevant: 'yes' });
@@ -113,7 +114,10 @@ test('sampleForCap returns extrapolated:false when tuples.length <= cap', () => 
   const out = sampleForCap(tuples, 10);
   assert.equal(out.extrapolated, false);
   assert.equal(out.sampled.length, 3);
-  assert.deepEqual(out.sampled.map((s) => s.memory), ['a', 'b', 'c']);
+  assert.deepEqual(
+    out.sampled.map((s) => s.memory),
+    ['a', 'b', 'c']
+  );
 });
 
 test('sampleForCap returns extrapolated:true and sampled.length === cap when tuples.length > cap', () => {

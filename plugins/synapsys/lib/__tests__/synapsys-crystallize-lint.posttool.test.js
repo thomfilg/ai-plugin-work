@@ -22,7 +22,7 @@ test('warns on untargeted PostToolUse memory (no targeting trigger)', () => {
   const rules = warningRules(result);
   assert.ok(
     rules.includes('R11-untargeted-posttool'),
-    `expected R11-untargeted-posttool warning, got: ${JSON.stringify(result.warnings)}`,
+    `expected R11-untargeted-posttool warning, got: ${JSON.stringify(result.warnings)}`
   );
 });
 
@@ -39,7 +39,7 @@ test('does NOT warn when trigger_posttool_content targets the PostToolUse memory
   const result = lint(manifest);
   assert.ok(
     !warningRules(result).includes('R11-untargeted-posttool'),
-    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`,
+    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`
   );
 });
 
@@ -56,7 +56,7 @@ test('does NOT warn when trigger_posttool_exit targets the PostToolUse memory', 
   const result = lint(manifest);
   assert.ok(
     !warningRules(result).includes('R11-untargeted-posttool'),
-    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`,
+    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`
   );
 });
 
@@ -73,7 +73,7 @@ test('does NOT warn when trigger_pretool targets the PostToolUse memory', () => 
   const result = lint(manifest);
   assert.ok(
     !warningRules(result).includes('R11-untargeted-posttool'),
-    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`,
+    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`
   );
 });
 
@@ -110,7 +110,7 @@ test('R10 does NOT warn when trigger_posttool_content_not has a positive trigger
   const result = lint(manifest);
   assert.ok(
     !warningRules(result).includes('R10-neg-without-pos'),
-    `expected no R10 warning, got: ${JSON.stringify(result.warnings)}`,
+    `expected no R10 warning, got: ${JSON.stringify(result.warnings)}`
   );
 });
 
@@ -126,6 +126,6 @@ test('does NOT warn when memory has no PostToolUse event', () => {
   const result = lint(manifest);
   assert.ok(
     !warningRules(result).includes('R11-untargeted-posttool'),
-    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`,
+    `expected no R11 warning, got: ${JSON.stringify(result.warnings)}`
   );
 });

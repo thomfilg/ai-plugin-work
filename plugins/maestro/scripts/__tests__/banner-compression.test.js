@@ -113,9 +113,7 @@ test('subsequent same-session surfaces compress to a [REPEAT n] one-liner and ke
 
   // Run 2: same session, same alert → compressed one-liner.
   const second = runHook(fx);
-  const secondLine = second.stdout
-    .split('\n')
-    .find((l) => /\[REPEAT/.test(l));
+  const secondLine = second.stdout.split('\n').find((l) => /\[REPEAT/.test(l));
   assert.ok(secondLine, 'second surface renders a [REPEAT n] line');
   assert.ok(secondLine.includes(SESSION_ID), 'compressed line includes the alert id');
   assert.ok(secondLine.includes(FIRST_80), 'compressed line includes the first 80 chars');
@@ -126,9 +124,7 @@ test('subsequent same-session surfaces compress to a [REPEAT n] one-liner and ke
 
   // Run 3: re-fire preserved — still emitted, and n increments.
   const third = runHook(fx);
-  const thirdLine = third.stdout
-    .split('\n')
-    .find((l) => /\[REPEAT/.test(l));
+  const thirdLine = third.stdout.split('\n').find((l) => /\[REPEAT/.test(l));
   assert.ok(thirdLine, 'alert re-appears on the third prompt (PR #603 guarantee)');
   assert.ok(thirdLine.includes(SESSION_ID), 're-fired compressed line still carries the id');
   assert.ok(

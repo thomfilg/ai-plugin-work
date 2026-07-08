@@ -476,9 +476,7 @@ describe('evaluate: script-bypass routing (GH-657)', () => {
   // rewritten to preload the interposer, which denies the write at runtime — so
   // static indirection (variable / path.join / separate line) no longer needs to
   // be detected. The actual EACCES enforcement is proven in the runtime e2e.
-  const shimAvailable = require(
-    path.resolve(__dirname, '..', 'guard', 'fsguard')
-  ).shimPath();
+  const shimAvailable = require(path.resolve(__dirname, '..', 'guard', 'fsguard')).shimPath();
 
   const cases = [
     ['direct.js', `require('fs').writeFileSync('${target}', 'x');\n`],
