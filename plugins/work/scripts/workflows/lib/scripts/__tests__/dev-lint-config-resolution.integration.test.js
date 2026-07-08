@@ -16,12 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const DEV_LINT_SH = path.join(
-  __dirname,
-  '..',
-  'dev-check',
-  'dev-lint.sh'
-);
+const DEV_LINT_SH = path.join(__dirname, '..', 'dev-check', 'dev-lint.sh');
 const QUALITY_LINT_RULES = path.join(
   __dirname,
   '..',
@@ -41,8 +36,7 @@ function makeTempDir() {
  */
 function initRepo({ withRootEslintConfig = false } = {}) {
   const dir = makeTempDir();
-  const run = (cmd) =>
-    execSync(cmd, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+  const run = (cmd) => execSync(cmd, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
 
   run('git init -b main');
   run('git config user.email "t@t.com"');
@@ -54,10 +48,7 @@ function initRepo({ withRootEslintConfig = false } = {}) {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
 
   if (withRootEslintConfig) {
-    fs.writeFileSync(
-      path.join(dir, 'eslint.config.js'),
-      'module.exports = [];\n'
-    );
+    fs.writeFileSync(path.join(dir, 'eslint.config.js'), 'module.exports = [];\n');
   }
 
   run('git add -A');
@@ -65,10 +56,7 @@ function initRepo({ withRootEslintConfig = false } = {}) {
   run('git checkout -b feature');
 
   // Trivially clean JS file — untracked, so get_changed_files picks it up.
-  fs.writeFileSync(
-    path.join(dir, 'changed.js'),
-    'module.exports = 1;\n'
-  );
+  fs.writeFileSync(path.join(dir, 'changed.js'), 'module.exports = 1;\n');
 
   return dir;
 }
@@ -82,10 +70,7 @@ function initRepo({ withRootEslintConfig = false } = {}) {
 function makeNpxStubBin() {
   const binDir = makeTempDir();
   const shim = path.join(binDir, 'npx');
-  fs.writeFileSync(
-    shim,
-    '#!/bin/bash\necho "NPX_ARGV: $*"\nexit 0\n'
-  );
+  fs.writeFileSync(shim, '#!/bin/bash\necho "NPX_ARGV: $*"\nexit 0\n');
   fs.chmodSync(shim, 0o755);
   return binDir;
 }
@@ -111,10 +96,7 @@ function runDevLint(repoDir, stubBinDir, scriptPath = DEV_LINT_SH) {
 function makeNpxStubBinExiting(exitCode) {
   const binDir = makeTempDir();
   const shim = path.join(binDir, 'npx');
-  fs.writeFileSync(
-    shim,
-    `#!/bin/bash\necho "NPX_ARGV: $*"\nexit ${exitCode}\n`
-  );
+  fs.writeFileSync(shim, `#!/bin/bash\necho "NPX_ARGV: $*"\nexit ${exitCode}\n`);
   fs.chmodSync(shim, 0o755);
   return binDir;
 }
@@ -140,8 +122,7 @@ function copyDevLintToIsolatedDir() {
  */
 function initRepoWithLinter(linterName) {
   const dir = makeTempDir();
-  const run = (cmd) =>
-    execSync(cmd, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
+  const run = (cmd) => execSync(cmd, { cwd: dir, encoding: 'utf8', stdio: 'pipe' });
 
   run('git init -b main');
   run('git config user.email "t@t.com"');
@@ -157,10 +138,7 @@ function initRepoWithLinter(linterName) {
   run('git commit -m "initial"');
   run('git checkout -b feature');
 
-  fs.writeFileSync(
-    path.join(dir, 'changed.js'),
-    'module.exports = 1;\n'
-  );
+  fs.writeFileSync(path.join(dir, 'changed.js'), 'module.exports = 1;\n');
 
   return dir;
 }
@@ -193,11 +171,7 @@ describe('dev-lint.sh config resolution', () => {
     const result = runDevLint(repoDir, stubBinDir);
     const combined = `${result.stdout || ''}\n${result.stderr || ''}`;
 
-    assert.equal(
-      result.status,
-      0,
-      `expected exit 0, got ${result.status}. Output:\n${combined}`
-    );
+    assert.equal(result.status, 0, `expected exit 0, got ${result.status}. Output:\n${combined}`);
     assert.ok(
       !/couldn't find an eslint\.config/i.test(combined),
       `unexpected missing-config error in output:\n${combined}`
@@ -208,10 +182,7 @@ describe('dev-lint.sh config resolution', () => {
       `expected eslint invocation with --config <quality-lint-rules.js>; got:\n${combined}`
     );
     // Sanity: the resolved fallback path must point at the real shipped file.
-    assert.ok(
-      fs.existsSync(QUALITY_LINT_RULES),
-      `expected ${QUALITY_LINT_RULES} to exist on disk`
-    );
+    assert.ok(fs.existsSync(QUALITY_LINT_RULES), `expected ${QUALITY_LINT_RULES} to exist on disk`);
   });
 
   // T-2 — Scenario: Repo has a root eslint.config.js — script uses it unchanged
@@ -222,18 +193,10 @@ describe('dev-lint.sh config resolution', () => {
     const result = runDevLint(repoDir, stubBinDir);
     const combined = `${result.stdout || ''}\n${result.stderr || ''}`;
 
-    assert.equal(
-      result.status,
-      0,
-      `expected exit 0, got ${result.status}. Output:\n${combined}`
-    );
+    assert.equal(result.status, 0, `expected exit 0, got ${result.status}. Output:\n${combined}`);
     // The invocation log must show eslint was called, but NOT with our
     // plugin-shipped quality-lint-rules.js fallback config.
-    assert.match(
-      combined,
-      /NPX_ARGV: eslint\b/,
-      `expected eslint invocation; got:\n${combined}`
-    );
+    assert.match(combined, /NPX_ARGV: eslint\b/, `expected eslint invocation; got:\n${combined}`);
     assert.ok(
       !/--config\s+\S*quality-lint-rules\.js/.test(combined),
       `expected NO --config <quality-lint-rules.js> when root flat config is present; got:\n${combined}`
@@ -300,16 +263,8 @@ describe('dev-lint.sh config resolution', () => {
     const result = runDevLint(repoDir, stubBinDir);
     const combined = `${result.stdout || ''}\n${result.stderr || ''}`;
 
-    assert.equal(
-      result.status,
-      0,
-      `expected exit 0, got ${result.status}. Output:\n${combined}`
-    );
-    assert.match(
-      combined,
-      /NPX_ARGV: oxlint\b/,
-      `expected oxlint invocation; got:\n${combined}`
-    );
+    assert.equal(result.status, 0, `expected exit 0, got ${result.status}. Output:\n${combined}`);
+    assert.match(combined, /NPX_ARGV: oxlint\b/, `expected oxlint invocation; got:\n${combined}`);
     assert.ok(
       !/--config\s+\S*quality-lint-rules\.js/.test(combined),
       `expected NO eslint fallback --config when linter is oxlint; got:\n${combined}`

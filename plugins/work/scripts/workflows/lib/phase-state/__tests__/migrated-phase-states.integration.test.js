@@ -147,11 +147,7 @@ const MIGRATIONS = [
   },
   {
     workflow: 'completion',
-    scriptPath: path.join(
-      WORKFLOWS_ROOT,
-      'work-completion-checker',
-      'completion-phase-state.js'
-    ),
+    scriptPath: path.join(WORKFLOWS_ROOT, 'work-completion-checker', 'completion-phase-state.js'),
     basename: 'completion-phase-state.js',
     allowedAgent: 'completion-checker',
     stateFile: 'completion-phase.json',
@@ -226,7 +222,10 @@ for (const m of MIGRATIONS) {
   describe(`${m.basename} (factory delegator)`, () => {
     let tmp;
     let tasksBase;
-    const ticket = `GH-99${m.workflow.replace(/[^a-z0-9]/gi, '').slice(0, 4).padEnd(4, '0')}`;
+    const ticket = `GH-99${m.workflow
+      .replace(/[^a-z0-9]/gi, '')
+      .slice(0, 4)
+      .padEnd(4, '0')}`;
 
     before(() => {
       tmp = fs.mkdtempSync(path.join(os.tmpdir(), `migrated-${m.workflow}-`));
@@ -268,10 +267,7 @@ for (const m of MIGRATIONS) {
         );
       }
       assert.ok(Array.isArray(mod.PHASES), 'PHASES must be an array');
-      assert.ok(
-        mod.PHASES.includes(m.initialPhase),
-        `PHASES must include "${m.initialPhase}"`
-      );
+      assert.ok(mod.PHASES.includes(m.initialPhase), `PHASES must include "${m.initialPhase}"`);
       assert.ok(mod.PHASES.includes('done'), 'PHASES must include "done"');
       assert.equal(typeof mod[m.transitionFnExportName], 'function');
       assert.equal(typeof mod[m.nextFnExportName], 'function');

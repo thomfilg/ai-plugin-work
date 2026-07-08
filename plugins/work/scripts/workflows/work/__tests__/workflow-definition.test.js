@@ -744,7 +744,6 @@ describe('workflow-definition: tasks.md contentGuard', () => {
   });
 });
 
-
 // ─── GH-326 Task 1.2: .check.md contentGuard ─────────────────────────────────
 describe('workflow-definition: .check.md contentGuard', () => {
   const { artifactRules } = createWorkflowDefinition(stubDeps);

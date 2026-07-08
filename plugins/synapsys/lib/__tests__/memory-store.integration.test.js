@@ -12,10 +12,7 @@ function makeTempStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-memstore-'));
   const storeDir = path.join(dir, '.claude', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(storeDir, '.synapsys.json'),
-    JSON.stringify({ projectName: 'test' })
-  );
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { cwd: dir, storeDir };
 }
 
@@ -88,8 +85,6 @@ test('existing triggerPretoolContent parsing behavior unchanged (regression)', (
 });
 
 test('parseFrontmatter exposes raw trigger_pretool_content_not value', () => {
-  const { meta } = parseFrontmatter(
-    '---\ntrigger_pretool_content_not: [x, y]\n---\nbody\n'
-  );
+  const { meta } = parseFrontmatter('---\ntrigger_pretool_content_not: [x, y]\n---\nbody\n');
   assert.deepEqual(meta.trigger_pretool_content_not, ['x', 'y']);
 });

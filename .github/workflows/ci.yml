@@ -122,5 +122,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --ignore-scripts
 
+      - name: Check formatting (biome)
+        run: pnpm format:check
+
       - name: Run static code quality gate
         run: pnpm quality

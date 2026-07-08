@@ -27,7 +27,6 @@ function appliesTo(ctx) {
   return readChangedFiles(ctx).some(isBackendFile);
 }
 
-
 function validate(ctx) {
   const brief = readBrief(ctx.tasksDir);
   const changed = readChangedFiles(ctx);

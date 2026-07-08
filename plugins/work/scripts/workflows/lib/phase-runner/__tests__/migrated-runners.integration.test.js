@@ -81,10 +81,7 @@ describe('Task 4 — migrated *-next.js runners delegate to createPhaseRunner', 
       it('is a thin wrapper (< 60 lines)', () => {
         const src = fs.readFileSync(fullPath, 'utf8');
         const lines = src.split('\n').length;
-        assert.ok(
-          lines < 60,
-          `${runner.file} should be a thin wrapper < 60 lines, got ${lines}`
-        );
+        assert.ok(lines < 60, `${runner.file} should be a thin wrapper < 60 lines, got ${lines}`);
       });
     });
   }

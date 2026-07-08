@@ -85,7 +85,9 @@ describe('shared store discovery', { skip: !HOME_DRIVEN }, () => {
   });
 });
 
-describe('shared store does not collide with the per-project namespace', { skip: !HOME_DRIVEN }, () => {
+describe('shared store does not collide with the per-project namespace', {
+  skip: !HOME_DRIVEN,
+}, () => {
   it('keeps global and shared distinct even for a project named like the shared folder', () => {
     // A project whose basename matches SHARED_FOLDER must NOT shadow the shared
     // store: global lives under `synapsys/<name>/`, shared is a sibling of
@@ -120,9 +122,10 @@ describe('shared store injection', { skip: !HOME_DRIVEN }, () => {
   }
 
   it('injects a matching memory on UserPromptSubmit from any project', () => {
-    assert.deepEqual(matchedNames(projectA, 'UserPromptSubmit', { prompt: 'should I force-push?' }), [
-      'no-force-push',
-    ]);
+    assert.deepEqual(
+      matchedNames(projectA, 'UserPromptSubmit', { prompt: 'should I force-push?' }),
+      ['no-force-push']
+    );
   });
 
   it('injects a matching memory on PreToolUse from any project', () => {

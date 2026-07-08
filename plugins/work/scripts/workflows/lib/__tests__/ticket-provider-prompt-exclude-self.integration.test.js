@@ -24,7 +24,10 @@ const MANIFEST_PATH = '/tmp/tasks/GH-415/related-tickets.json';
 const BUCKETS = ['siblings', 'blockedBy', 'dependsOn', 'relatedTo', 'parent'];
 
 function assertSchemaBlockExcludesSelf(prompt, providerLabel) {
-  assert.ok(prompt && typeof prompt === 'string', `${providerLabel}: prompt must be a non-empty string`);
+  assert.ok(
+    prompt && typeof prompt === 'string',
+    `${providerLabel}: prompt must be a non-empty string`
+  );
 
   // Must mention the current ticket id
   assert.ok(
@@ -41,10 +44,7 @@ function assertSchemaBlockExcludesSelf(prompt, providerLabel) {
 
   // All five bucket names must appear in conjunction with a prohibition on the current ticket
   for (const bucket of BUCKETS) {
-    assert.ok(
-      prompt.includes(bucket),
-      `${providerLabel}: prompt must mention bucket "${bucket}"`
-    );
+    assert.ok(prompt.includes(bucket), `${providerLabel}: prompt must mention bucket "${bucket}"`);
   }
 
   // The literal `_related/<self>.md` must appear paired with `never`

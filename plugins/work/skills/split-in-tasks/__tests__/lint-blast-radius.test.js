@@ -87,7 +87,11 @@ describe('lint-blast-radius — scan on echo-5353 fixture (static-parse fallback
     });
     const w = out.warnings[0];
     const blob = `${w.message || ''} ${w.hint || ''}`;
-    assert.match(blob, /Searched:\s*\S*eslint-output\.json/, 'expected Searched: note with path to eslint-output.json');
+    assert.match(
+      blob,
+      /Searched:\s*\S*eslint-output\.json/,
+      'expected Searched: note with path to eslint-output.json'
+    );
   });
 
   it('suppresses warning when violating file IS in scope', () => {
@@ -115,7 +119,9 @@ describe('lint-blast-radius — fail-open subprocess behavior', () => {
     }, 'scan must not throw on subprocess failure');
     assert.ok(out, 'scan must still return a result');
     assert.ok(Array.isArray(out.warnings), 'expected warnings array');
-    const skipped = out.warnings.find((w) => /lint pre-check skipped:/i.test(`${w.message || ''} ${w.hint || ''}`));
+    const skipped = out.warnings.find((w) =>
+      /lint pre-check skipped:/i.test(`${w.message || ''} ${w.hint || ''}`)
+    );
     assert.ok(skipped, 'expected a `lint pre-check skipped:` warning');
   });
 
@@ -128,7 +134,9 @@ describe('lint-blast-radius — fail-open subprocess behavior', () => {
     });
     assert.ok(out, 'scan must return a result');
     assert.ok(Array.isArray(out.warnings), 'expected warnings array');
-    const skipped = out.warnings.find((w) => /lint pre-check skipped:/i.test(`${w.message || ''} ${w.hint || ''}`));
+    const skipped = out.warnings.find((w) =>
+      /lint pre-check skipped:/i.test(`${w.message || ''} ${w.hint || ''}`)
+    );
     assert.ok(skipped, 'expected a `lint pre-check skipped:` warning for unsafe command');
   });
 });

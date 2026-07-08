@@ -22,10 +22,7 @@ function appliesTo(ctx) {
   // silence wiring on the exact ECHO-4579 case (brief forbids backend +
   // tasks declare frontend).
   if (detectKinds(ctx.tasksDir).includes('wiring')) return true;
-  return (
-    briefForbidsBackend(readBrief(ctx.tasksDir)) &&
-    readChangedFiles(ctx).some(isBackendFile)
-  );
+  return briefForbidsBackend(readBrief(ctx.tasksDir)) && readChangedFiles(ctx).some(isBackendFile);
 }
 
 function validate(ctx) {

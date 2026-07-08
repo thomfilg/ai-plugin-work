@@ -121,11 +121,7 @@ describe('cleanup-worktrees SKILL.md — fresh-data preamble (GH-90)', () => {
     });
 
     it('contains ## Philosophy section', () => {
-      assert.match(
-        content,
-        /^## Philosophy/m,
-        'SKILL.md must contain the "## Philosophy" section'
-      );
+      assert.match(content, /^## Philosophy/m, 'SKILL.md must contain the "## Philosophy" section');
     });
 
     it('contains ## Instructions section', () => {

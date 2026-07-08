@@ -32,9 +32,7 @@ function buildClosedPrBlocker(ticket) {
     hint: [
       'To re-plan:',
       '  1. Archive the current run (move brief.md / spec.md / tasks.md into `.archive/` under tasksDir).',
-      '  2. Re-run `/work ' +
-        (ticket || '<ticket>') +
-        '` — the workflow will re-enter at `brief`.',
+      '  2. Re-run `/work ' + (ticket || '<ticket>') + '` — the workflow will re-enter at `brief`.',
       '  3. The brief-writer will fetch a fresh related-tickets manifest and you can choose a different scope.',
     ].join('\n'),
   };

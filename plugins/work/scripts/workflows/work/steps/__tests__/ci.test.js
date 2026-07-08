@@ -70,10 +70,7 @@ describe('ci step', () => {
     // The prompt must be directly runnable: cd && gh pr checks --watch
     assert.match(prompt, /cd "\/tmp\/wt\/GH-395" && gh pr checks --watch --interval 60/);
     // ci-next.js call should have the ticket interpolated
-    assert.ok(
-      prompt.includes('GH-395'),
-      'ci-next.js invocation should include the ticket id'
-    );
+    assert.ok(prompt.includes('GH-395'), 'ci-next.js invocation should include the ticket id');
     assert.equal(entries[0].step, STEPS.ci);
     assert.equal(entries[0].action, 'RUN');
   });

@@ -30,9 +30,7 @@ const { spawnSync } = require('child_process');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 const { isRunningInAgent } = require(path.join(__dirname, '..', 'agent-detection'));
 const { REGISTRY } = require(path.join(__dirname, 'agent-hook-registry'));
-const {
-  resolvePluginRootHonouringEnv,
-} = require('../../work/lib/resolve-plugin-root');
+const { resolvePluginRootHonouringEnv } = require('../../work/lib/resolve-plugin-root');
 
 const VALID_HOOK_TYPES = new Set(['PreToolUse', 'PostToolUse', 'Stop']);
 
@@ -79,8 +77,7 @@ function resolvePluginRoot() {
   // install (which is exactly what happens in test fixtures and in the
   // marketplace-nesting case tracked by GH-526).
   return (
-    resolvePluginRootHonouringEnv(__dirname, 4) ||
-    path.resolve(__dirname, '..', '..', '..', '..')
+    resolvePluginRootHonouringEnv(__dirname, 4) || path.resolve(__dirname, '..', '..', '..', '..')
   );
 }
 

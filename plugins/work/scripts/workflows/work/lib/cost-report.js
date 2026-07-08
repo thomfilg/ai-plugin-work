@@ -98,42 +98,50 @@ function renderCostReport({ ticket, usageRecords, stepDurations, model, pricingT
   lines.push('');
   lines.push('## Grand total (estimated)');
   lines.push('');
-  lines.push(markdownTable(
-    ['Total tokens', 'Total tool_uses', 'Total duration', 'Estimated USD'],
-    [[
-      fmtNum(totals.tokens),
-      fmtNum(totals.toolUses),
-      fmtMs(totals.durationMs),
-      `$${fmtUsd(totalUsd)} (estimated)`,
-    ]]
-  ));
+  lines.push(
+    markdownTable(
+      ['Total tokens', 'Total tool_uses', 'Total duration', 'Estimated USD'],
+      [
+        [
+          fmtNum(totals.tokens),
+          fmtNum(totals.toolUses),
+          fmtMs(totals.durationMs),
+          `$${fmtUsd(totalUsd)} (estimated)`,
+        ],
+      ]
+    )
+  );
 
   lines.push('');
   lines.push('## Per-step breakdown');
   lines.push('');
-  lines.push(markdownTable(
-    ['Step', 'Tokens', 'Tool uses', 'Duration', 'Estimated USD'],
-    Object.keys(byStep).map((step) => [
-      step,
-      fmtNum(byStep[step].tokens),
-      fmtNum(byStep[step].toolUses),
-      durations[step] || fmtMs(byStep[step].durationMs),
-      `$${fmtUsd(estimateCostUsd(byStep[step].tokens, model, pricingTable))}`,
-    ])
-  ));
+  lines.push(
+    markdownTable(
+      ['Step', 'Tokens', 'Tool uses', 'Duration', 'Estimated USD'],
+      Object.keys(byStep).map((step) => [
+        step,
+        fmtNum(byStep[step].tokens),
+        fmtNum(byStep[step].toolUses),
+        durations[step] || fmtMs(byStep[step].durationMs),
+        `$${fmtUsd(estimateCostUsd(byStep[step].tokens, model, pricingTable))}`,
+      ])
+    )
+  );
 
   lines.push('');
   lines.push('## Per-agent breakdown');
   lines.push('');
-  lines.push(markdownTable(
-    ['Agent', 'Tokens', 'Tool uses', 'Estimated USD'],
-    Object.keys(byAgent).map((agent) => [
-      agent,
-      fmtNum(byAgent[agent].tokens),
-      fmtNum(byAgent[agent].toolUses),
-      `$${fmtUsd(estimateCostUsd(byAgent[agent].tokens, model, pricingTable))}`,
-    ])
-  ));
+  lines.push(
+    markdownTable(
+      ['Agent', 'Tokens', 'Tool uses', 'Estimated USD'],
+      Object.keys(byAgent).map((agent) => [
+        agent,
+        fmtNum(byAgent[agent].tokens),
+        fmtNum(byAgent[agent].toolUses),
+        `$${fmtUsd(estimateCostUsd(byAgent[agent].tokens, model, pricingTable))}`,
+      ])
+    )
+  );
 
   const topStep = mostExpensive(byStep);
   const topAgent = mostExpensive(byAgent);
