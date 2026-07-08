@@ -26,7 +26,9 @@ function implementDetail(state) {
   const total = meta.totalTasks || tasks.length;
   let idx = tasks.findIndex((t) => t && t.status === 'in_progress');
   if (idx === -1) {
-    idx = Number.isInteger(meta.currentTaskIndex) ? meta.currentTaskIndex - 1 : tasks.length - 1;
+    // currentTaskIndex is 0-based across the engine (see workflow-monitor.js /
+    // enforce-task-paths.js "0-indexed → 1-indexed"): it IS the array index.
+    idx = Number.isInteger(meta.currentTaskIndex) ? meta.currentTaskIndex : tasks.length - 1;
   }
   const task = tasks[idx];
   if (!task) return '';

@@ -118,18 +118,32 @@ describe('step-detail — per-step sub-bars', () => {
     assert.equal(detailFor('implement', s), 'task 3/7: wire the client');
   });
 
-  it('implement → falls back to currentTaskIndex when none is in_progress', () => {
+  it('implement → falls back to currentTaskIndex (0-based) when none is in_progress', () => {
     const s = stateAt('implement', {
       tasksMeta: {
         totalTasks: 2,
-        currentTaskIndex: 2,
+        currentTaskIndex: 1, // 0-based → the 2nd task
+        tasks: [
+          { status: 'completed', title: 'a' },
+          { status: 'pending', title: 'b' },
+        ],
+      },
+    });
+    assert.equal(detailFor('implement', s), 'task 2/2: b');
+  });
+
+  it('implement → empty once currentTaskIndex is past the last task', () => {
+    const s = stateAt('implement', {
+      tasksMeta: {
+        totalTasks: 2,
+        currentTaskIndex: 2, // 0-based, == length → all tasks done
         tasks: [
           { status: 'completed', title: 'a' },
           { status: 'completed', title: 'b' },
         ],
       },
     });
-    assert.equal(detailFor('implement', s), 'task 2/2: b');
+    assert.equal(detailFor('implement', s), '');
   });
 
   it('implement → truncates a long title with an ellipsis', () => {
