@@ -16,7 +16,7 @@ The `SESSION_PATTERN` default is therefore `^${PREFIX}-[0-9]+-(work|dev|listen)$
 
 The orchestrator (single binary; replaces the previous `maestro-conduct.sh`). Per tick (every `TICK_SEC`, default 60s), each `${PREFIX}-*-work` tmux session runs through detectors registered in `lib/maestro-conduct/phase-registry.js`:
 
-1. **Question** — pane shows `Do you want to proceed?` / menu prompt → emit `QUESTION-DETECTED`. Always wins; no nudges while the operator is being asked.
+1. **Question** — pane shows `Do you want to proceed?` / menu prompt → emit an `ACTION` alert with `kind=question-pending`. Always wins; no nudges while the operator is being asked.
 2. **Silence / auto-restart** — pane is "active" only when a live spinner glyph is present (`✻ Jitterbugging…`) OR the token count went up OR the pane hash changed. After `SILENCE_LIMIT_SEC` (default 300s) of genuine silence, kill the session and relaunch `claude --dangerously-skip-permissions '/work <TICKET>'` in the same worktree. `/work` is resumable via `.work-state.json`. Only `-work` sessions are restart-eligible.
 3. **Spinner hang** — Claude TUI thinking-spinner stuck past threshold → Esc + nudge, with cooldown so the pane doesn't get flooded.
 4. **Phase budget stall** — current `/work` step has been current longer than `phaseFor(phase).budgetMin` → soft → interrupt → alert escalation.

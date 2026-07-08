@@ -151,7 +151,8 @@ function silenceSuppressed(ctx, sHit) {
     const busyMark = state.read(ctx.session, 'busy-quiet') || {};
     if (!busyMark.loggedAt || state.minutesSince(busyMark.loggedAt) >= 15) {
       alerts.log(
-        `${ctx.session} silence deferred: live tool subprocess under the pane (agent working quietly)`
+        `${ctx.session} silence deferred: live tool subprocess under the pane (agent working quietly)`,
+        { kind: 'log-only' }
       );
       state.write(ctx.session, 'busy-quiet', { loggedAt: state.now() });
     }
@@ -212,7 +213,8 @@ function runStuckInputDetector(ctx, { restartEligible }) {
     tmux.sendKey(ctx.session, 'End');
     tmux.sendKey(ctx.session, 'C-m');
     alerts.log(
-      `${ctx.session} STUCK-INPUT auto-submitted after ${hit.elapsedMin}m: "${hit.text.slice(0, 60)}"`
+      `${ctx.session} STUCK-INPUT auto-submitted after ${hit.elapsedMin}m: "${hit.text.slice(0, 60)}"`,
+      { kind: 'log-only' } // self-heal: the daemon already submitted the input
     );
     return;
   }
@@ -303,7 +305,9 @@ function runNoProgressCheck(ctx, prog, { restartEligible }) {
 function phaseStallSuppressed(ctx, stallHit, marker, sinceLastNudge) {
   const profile = phaseFor(ctx.phase);
   if (profile.exempts(ctx)) {
-    alerts.log(`${ctx.session} phase-stall exempted by registry for phase=${ctx.phase}`);
+    alerts.log(`${ctx.session} phase-stall exempted by registry for phase=${ctx.phase}`, {
+      kind: 'log-only', // fires every tick while the phase is exempt
+    });
     return true;
   }
   // Suppress when the agent is correctly waiting for a human action (merge, etc.)
@@ -315,7 +319,8 @@ function phaseStallSuppressed(ctx, stallHit, marker, sinceLastNudge) {
   // WORKING agent (slow ≠ stuck). Nudging it interrupts real work.
   if (progress.hasFreshProgress(ctx.ticket)) {
     alerts.log(
-      `${ctx.session} phase-stall suppressed: worktree changed <${progress.PROGRESS_FRESH_MIN}m ago (phase=${ctx.phase} ${stallHit.elapsedMin}m over budget but progressing)`
+      `${ctx.session} phase-stall suppressed: worktree changed <${progress.PROGRESS_FRESH_MIN}m ago (phase=${ctx.phase} ${stallHit.elapsedMin}m over budget but progressing)`,
+      { kind: 'log-only' } // fires every tick while over-budget-but-progressing
     );
     return true;
   }

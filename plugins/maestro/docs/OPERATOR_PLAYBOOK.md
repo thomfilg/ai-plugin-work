@@ -14,13 +14,12 @@ canonical Monitor regex.
 
 | Signal | Meaning | Operator action |
 |---|---|---|
-| `QUESTION-DETECTED` | An agent has a menu or permission prompt sitting unanswered | Capture the agent pane, read every menu option, pick the one that is not a bypass |
 | `ACTION … kind=pr-ready` | All CI checks SUCCESS and `mergeStateStatus=CLEAN` | Run the bypass checker (`work-workflow:code-checker` against the diff) before merging. On APPROVED, the PR is yours to merge or hand to your operator |
 | `ACTION … kind=pr-broken` | A check is failing or merge state is DIRTY | Identify the failing checks, drive the originating agent to fix in this PR (do not defer to a follow-up) |
 | `ACTION … kind=wedged` | A session has been auto-restarted ≥3 times in 30m — daemon will not restart it for the next 60m | Inspect the pane manually. Diagnose why /work keeps dying |
 | `ACTION … kind=nudges-exhausted` | A phase exceeded its budget past `maxNudges` | Surface to operator — the agent may be genuinely stuck |
 | `ACTION … kind=pr-comments-stuck` | Unaddressed bot review comments on the agent's PR with no new HEAD | Direct the agent to address them in this PR |
-| `ACTION … kind=question-pending` | Question sat ≥`Q_WAIT_MIN` minutes | Same as QUESTION-DETECTED — pick the legitimate option |
+| `ACTION … kind=question-pending` | An agent has a menu or permission prompt sitting unanswered ≥`Q_WAIT_MIN` minutes (this IS the question signal — there is no separate `QUESTION-DETECTED` token) | Capture the agent pane, read every menu option, pick the one that is not a bypass |
 | `commit-stall NNNm (threshold=TTTm)` | Worktree had no new commits across one of the thresholds (`30/60/120/240/480` by default) | If agent is in `implement` and threshold escalated → capture pane. If agent is in `wait_merge`/`complete` → ignore, expected |
 | `NUDGE soft` / `NUDGE interrupt` | Daemon poked the agent's pane, in the AGENT'S OWN skill vocabulary, with a delivery status suffix `[submitted…]` | No operator action — unless the status is `[stuck-in-composer]`, then the pane needs a manual look |
 | `AUTO-RESTART after Ns silence` | Daemon relaunched a dead `-work` session — fresh `/skill` for work/follow-up; `--continue` resume for generic commands | Only act if a `wedged` alert follows. A `--continue` relaunch of a large session can show an interactive "Resume from summary / full session" menu — that surfaces as a question; answer it |
@@ -38,15 +37,120 @@ canonical Monitor regex.
 | `ACTION … kind=auth-broken` | Credential failure in the pane (403 / Bad credentials / Could not resolve) — the gh active account flaps across concurrent agents | Verify the expected account from `../.envrc`, fix auth in that pane's env, tell the agent to retry its last command |
 | `DAEMON-CRASH …` / `TICK-ERROR …` | An exception was caught (daemon keeps ticking / that session skipped one tick) | File the stack trace as a maestro bug; the fleet is still watched |
 | `CONDUCTOR-USURPED` | A newer conductor took the lock (`MAESTRO_FORCE=1`); the old one exited by itself | Expected during a deliberate takeover — verify exactly one conductor remains |
-| `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged \| <per-ticket>` | Periodic summary, default every 30m | **Re-read it.** This is the forced re-check that exists because operators desensitize to noisy ticks. If `X >= 1` and you have not yet surfaced those PRs, do it now |
+| `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged \| <per-ticket>` | Periodic fleet summary. Rate-limited between `HEARTBEAT_MIN` (30m) and `HEARTBEAT_MAX_MIN` (120m) while state is unchanged; a state-change beat is written immediately. Surfaces to the logfile, `_heartbeat.json` marker, and statusline ONLY — **no beat ever wakes the conductor model**, state-change beats included (state changes reach you via their own kind-specific ACTION alerts; see "Heartbeat cadence" and "The `CONDUCT_WAKE_EVENTS` wake filter" below) | None on its own — beats never cause a wake. When an ACTION wakes you, read the fleet summary from `_heartbeat.json`/the state file instead of re-polling; if it shows `X >= 1` pr-ready you have not yet surfaced, do it now |
 
 ## Anti-patterns that cause operators to fail
 
 1. **Reading the line shape, not the value.** `commit-stall 30m → 60m → 120m → 240m → 480m` looks the same; the number is the signal. Always read the number.
-2. **Treating silence as "nothing to do."** A silent agent is either (a) shipped and waiting for merge or (b) wedged. The daemon emits `pr-ready` for (a). If you see no `pr-ready`, no `nudges-exhausted`, and no `QUESTION-DETECTED`, but an agent has been silent — poll `gh pr list --state open` for the ticket's branch. Verify positively; don't assume.
+2. **Treating silence as "nothing to do."** A silent agent is either (a) shipped and waiting for merge or (b) wedged. The daemon emits `pr-ready` for (a). If you see no `pr-ready`, no `nudges-exhausted`, and no `question-pending`, but an agent has been silent — poll `gh pr list --state open` for the ticket's branch. Verify positively; don't assume.
 3. **Approving the menu option the agent labelled "Recommended"** without reading the others. The agent's recommendation does not override the no-bypass rules. Read every option; pick the legitimate one even if the agent flagged it as higher-risk.
 4. **Editing files in the agent's worktree.** Communicate via `tmux send-keys` to the `-work` pane, or via the `/tmp/claude-agent-inbox/<TICKET>.log` mailbox if your agent listens there.
 5. **Re-running CI to "see if it goes green this time."** Diagnose the failure; fix the root cause.
+6. **Re-confirming what the state already tells you.** Every wake costs a model turn. When an event already carries the answer — `pr-ready`/`pr-broken` already report CI + mergeState, the `_heartbeat.json` marker + state file under `STATE_DIR` already hold the latest fleet summary — do NOT re-run `gh pr view` / `gh pr checks` or `tmux capture-pane` just to reconfirm it. Redundant confirmation burns turns and adds no signal. Capture the pane only when the event tells you to look (`question-pending`, `spinner-hang`, `no-progress`, `stuck-input`) or when the state file is genuinely stale/absent.
+
+## Heartbeat cadence and the idle-fleet trade-off
+
+The unchanged-state HEARTBEAT is rate-limited by two env vars:
+
+| Var | Default (post-GH-680) | Old default | Effect |
+|-----|-----------------------|-------------|--------|
+| `HEARTBEAT_MIN` | `30` | `15` | Floor (minutes) between unchanged-state beats. A state-change beat still emits immediately, so raising this never delays actionable news. |
+| `HEARTBEAT_MAX_MIN` | `120` | `60` | Ceiling (minutes): a forced beat emits at least this often even when nothing changed, so the fleet summary never goes fully silent. |
+
+**The trade-off.** A low floor means the summary re-appears often — reassuring,
+but on an idle fleet every benign beat that wakes the model is a wasted turn (the
+economics this ticket targets). A high floor means fewer beats and cheaper idle
+watching, at the cost of a staler periodic re-check. The GH-680 defaults (30/120,
+doubled from the historical 15/60) bias toward cheaper idle watching because the
+wake filter (below) already suppresses the model-turn cost of benign beats, and
+because any real state change (`pr-ready`, `pr-broken`, new `wedged`, …) bypasses
+the floor and emits immediately. Lower `HEARTBEAT_MIN` only if you actually want
+more frequent unchanged-state summaries and accept the extra turns.
+
+## The `CONDUCT_WAKE_EVENTS` wake filter
+
+Not every emitted event needs to wake the conductor **model**. `CONDUCT_WAKE_EVENTS`
+is a comma-separated allowlist of event kinds that wake the model on the stderr
+wake channel; every other emitted event still updates the state file, logfile, and
+`_heartbeat.json` marker but does **not** cost a model turn.
+
+- **Default (all 15 kinds, explicit):** `question-pending`, `nudges-exhausted`,
+  `wedged`, `dead-end`, `dead-end-probe`, `pr-ready`, `pr-broken`,
+  `pr-comments-stuck`, `comment-loop`, `stuck-input`, `auth-broken`,
+  `spinner-hang`, `no-progress`, `kill-during-ci`, `stop-condition-met`.
+- **What does NOT wake:** `HEARTBEAT` (every beat, state-change beats included),
+  `log-only` info chatter (NUDGE, AUTO-RESTART announces and skip diagnostics,
+  POOL-FILL, SLOT-FREED, DEAD-END-HOLD, phase-advance, the per-tick empty-fleet
+  line, …), and the `pr-pending` / `phase-stall` / `commit-stall` intermediates —
+  their escalations (`nudges-exhausted`, `pr-comments-stuck`) DO wake.
+- **Re-wake backoff:** the FIRST emission of an alert key
+  (`session|kind|sha-or-phase`) always wakes immediately; repeats of the same key
+  re-wake only after `PENDING_REWAKE_MIN` (default 30m), doubling per re-wake up
+  to `PENDING_REWAKE_MAX_MIN` (default 240m). Nothing is lost: throttled repeats
+  still land in `maestro-alerts.jsonl` + the tmux alert pane, and every wake's
+  UserPromptSubmit banner re-surfaces ALL pending alerts. `PENDING_REWAKE_MIN=0`
+  disables the throttle.
+- **Validation:** input is comma-split + trimmed; unknown kinds never match
+  (fail-closed to "does not wake" for that kind).
+- **Custom lists REPLACE the default.** `CONDUCT_WAKE_EVENTS=pr-ready,wedged`
+  silences the other 13 kinds — the daemon never merges your list with the
+  default, and unknown/misspelled kinds fail closed. Start from the full 15-kind
+  default and add/remove.
+- **Escape hatch:** `CONDUCT_WAKE_EVENTS=all` (or `*`) restores the pre-GH-680
+  always-wake behavior — every beat, including benign HEARTBEATs, wakes the model.
+  Use it only when debugging the wake channel itself.
+
+> **Upgrade note.** If you ran `/maestro:configure` before this change, your
+> `.envrc` has the OLD 11-kind default pinned in `CONDUCT_WAKE_EVENTS`. Re-run
+> `/maestro:configure` (or update the variable manually) — otherwise
+> `spinner-hang`, `no-progress`, `kill-during-ci`, and `stop-condition-met`
+> stay silent.
+
+### The 12-hour context budget
+
+Each wake permanently grows the conductor transcript by ~2–4k tokens (pending
+banners + the response turn); a ~200k window therefore affords roughly 50–80
+wakes before compaction. Under the defaults:
+
+| Scenario | Wakes / 12h |
+|---|---|
+| Idle fleet | ≈ 0 — heartbeats and the empty-fleet line never hit the wake channel |
+| One stuck agent | 1 first-emission wake + ~5 backoff re-wakes (30m → 60m → 120m → 240m → 240m), instead of ~70 wake-per-repeat pre-throttle |
+| Real fault / first emission of any kind | Always wakes immediately — the throttle only bounds repeats you already saw |
+
+The canonical row lives in `skills/orchestrate/reference/env-vars.md`; this section
+is the operator-facing rationale.
+
+## Reproducing the 30-minute idle-fleet measurement
+
+The cadence/wake defaults above were tuned against a **30-minute idle-fleet**
+baseline: how many conductor model wakes accrue over 30 minutes when no agent
+changes state. To re-measure (e.g. before/after a further cadence change) so a new
+number is comparable to the baseline:
+
+1. Bring up a fleet and let every agent reach a quiescent state (all `pr-ready` /
+   parked / waiting) so no detector fires actionable events for the window.
+2. Note the log sink for the namespace: `/tmp/maestro-conduct[-<ns>].log`.
+3. Let the conductor run untouched for a fixed 30-minute window (wall clock).
+4. Count the beats that were written vs. the beats that actually woke the model:
+   - Beats written to the log (state/log/marker updates):
+     `grep -c 'HEARTBEAT ' /tmp/maestro-conduct.log`
+   - Model wakes are the events routed to the stderr wake channel — with the
+     default allowlist a benign unchanged-state HEARTBEAT contributes **zero**
+     wakes, so on a fully idle fleet the wake count over the window should be `0`.
+     Confirm by running the window with `CONDUCT_WAKE_EVENTS=all` (which restores
+     always-wake) and comparing: the delta is exactly the turns the wake filter
+     saved.
+5. Also record `_heartbeat.json` under `STATE_DIR` at the end of the window — it
+   should reflect the current fleet summary, proving state/statusline consumers
+   stayed current without any model wake.
+6. Compare against the baseline: with the 30/120 defaults an idle 30-minute window
+   should produce ~1 written beat (the `HEARTBEAT_MIN` floor) and **0** model
+   wakes; the historical 15/60 defaults produced ~2 written beats and — before the
+   wake filter — a model wake per beat.
+
+Log the window's (written beats, model wakes) pair alongside the env values used,
+so future cadence tuning can be diffed against this baseline.
 
 ## The pr-ready playbook (every time)
 
@@ -65,7 +169,7 @@ Every new commit on the PR head needs a fresh check. Do not approve once and ass
 
 ## The question playbook (every time)
 
-When `QUESTION-DETECTED` lands:
+When `ACTION kind=question-pending` lands:
 
 1. `tmux capture-pane -t <TICKET>-work -p | tail -40` — read the full menu, not just the alert summary.
 2. Research before answering — check repository docs, skill `SKILL.md` files, and the codebase for the symbol in question. Do not answer from memory.

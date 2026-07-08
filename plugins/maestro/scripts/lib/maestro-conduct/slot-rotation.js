@@ -72,7 +72,8 @@ function killAndBootstrapNext({
     autoBootstrapped,
   });
   alerts.log(
-    `${session} ${logPrefix}tmux killed, slot freed${autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''}`
+    `${session} ${logPrefix}tmux killed, slot freed${autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''}`,
+    { kind: 'log-only' } // the kind=alertKind alert() below owns the wake decision
   );
   alert({
     session,
