@@ -23,7 +23,7 @@ Runs `node plugins/maestro/scripts/maestro-conduct.js --daemon` in the backgroun
 
 Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs through this detector pipeline (per-phase via `phase-registry.js`):
 
-- **Question** — pane shows `Do you want to proceed?` / menu prompt / a `❯ 1.` option cursor → emit `QUESTION-DETECTED`. Always wins; no nudges while the agent is waiting on the operator. Re-alerts on a `Q_RE_NUDGE_MIN` cooldown; rotation only after `Q_DEAD_END_MIN` AND only when queued work exists.
+- **Question** — pane shows `Do you want to proceed?` / menu prompt / a `❯ 1.` option cursor → emit an `ACTION` alert with `kind=question-pending`. Always wins; no nudges while the agent is waiting on the operator. Re-alerts on a `Q_RE_NUDGE_MIN` cooldown; rotation only after `Q_DEAD_END_MIN` AND only when queued work exists.
 - **Silence / auto-restart** — pane content is static for `SILENCE_LIMIT_SEC` (default 300s) AND the worktree isn't changing AND no live tool subprocess runs under the pane AND the agent isn't waiting on a human → kill + relaunch (fresh `/skill <TICKET>` for work/follow-up; `claude --continue` for generic commands). Only `-work` sessions are restart-eligible.
 - **Spinner hang** — spinner past threshold with NO worktree change → `spinner-hang` alert (Esc only with `SPINNER_AUTO_INTERRUPT=1`).
 - **Stuck input** — text sitting unsubmitted in an idle composer ≥5m → `stuck-input` alert (auto End+C-m with `STUCK_INPUT_AUTO_SUBMIT=1`).
@@ -53,6 +53,21 @@ template): `skills/orchestrate/SKILL.md` → "Env". The core ones:
 Concurrent instances: see the "Running concurrent maestro instances" section in
 `docs/OPERATOR_PLAYBOOK.md` for the one-conductor rule and the `MAESTRO_NS`
 isolation recipe.
+
+## Anti-pattern — don't re-confirm what the state file already answers
+
+Every conductor wake burns a model turn. The daemon has already done the polling
+for you: the alert line, the `_heartbeat.json` marker, and the state file under
+`STATE_DIR` carry the current fleet answer (PR status, mergeState, phase, attempt
+counts). Do **not** re-run `gh pr view` / `gh pr checks` or `tmux capture-pane`
+just to re-confirm a fact the emitted event already stated — that is a redundant
+confirmation that costs a turn and adds no signal. Act on the state you were
+woken with; only capture the pane when the event itself tells you to look
+(`question-pending`, `spinner-hang`, `no-progress`, `stuck-input`) or when the
+state file is genuinely stale/absent. Repeats of the same pending alert are
+backoff-throttled (`PENDING_REWAKE_MIN`), so a wake for a kind you already saw
+means the backoff elapsed — re-check the state files, not the same assumption.
+See the wake-filter and anti-pattern notes in `docs/OPERATOR_PLAYBOOK.md`.
 
 ## Under Codex
 

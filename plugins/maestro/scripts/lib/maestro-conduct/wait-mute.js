@@ -17,7 +17,9 @@ function noteWaitingForUser({ session, phase, state, alerts }) {
   m.count += 1;
   state.write(session, 'wait-mute', m);
   if (m.count % LOG_EVERY === 0) {
-    alerts.log(`${session} still waiting for user (phase=${phase}) [${m.count} cycles]`);
+    alerts.log(`${session} still waiting for user (phase=${phase}) [${m.count} cycles]`, {
+      kind: 'log-only',
+    });
   }
 }
 

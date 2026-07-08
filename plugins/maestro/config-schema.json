@@ -72,6 +72,36 @@
       "description": "Window (min) a pending task may wait before alerting",
       "section": "Conductor Tuning",
       "advanced": true
+    },
+    "CONDUCT_WAKE_EVENTS": {
+      "type": "string",
+      "default": "question-pending,nudges-exhausted,wedged,dead-end,dead-end-probe,pr-ready,pr-broken,pr-comments-stuck,comment-loop,stuck-input,auth-broken,spinner-hang,no-progress,kill-during-ci,stop-condition-met",
+      "description": "Allowlist of event kinds that wake the conductor model (all/* wakes on every kind). Custom lists replace this entirely — omitting a kind silences it (fail-closed)",
+      "section": "Conductor Tuning"
+    },
+    "HEARTBEAT_MIN": {
+      "type": "number",
+      "default": "30",
+      "description": "Minimum minutes between unchanged-state heartbeat emits (state changes emit immediately)",
+      "section": "Conductor Tuning"
+    },
+    "HEARTBEAT_MAX_MIN": {
+      "type": "number",
+      "default": "120",
+      "description": "Maximum minutes before an unchanged-state heartbeat is forced",
+      "section": "Conductor Tuning"
+    },
+    "PENDING_REWAKE_MIN": {
+      "type": "number",
+      "default": "30",
+      "description": "Backoff (min) before a repeat of the SAME pending alert re-wakes the conductor; doubles per re-wake. 0 wakes on every repeat",
+      "section": "Conductor Tuning"
+    },
+    "PENDING_REWAKE_MAX_MIN": {
+      "type": "number",
+      "default": "240",
+      "description": "Cap (min) for the doubling re-wake backoff of an unhandled pending alert",
+      "section": "Conductor Tuning"
     }
   }
 }

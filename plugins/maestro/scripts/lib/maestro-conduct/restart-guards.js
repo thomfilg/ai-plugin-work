@@ -40,7 +40,8 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
   state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
   const skill = skillRegistry.readTicketSkill(ticket);
   alerts.log(
-    `${formatLogLine({ ticket, skill, silenceSec, kind: 'wedged' })} ${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
+    `${formatLogLine({ ticket, skill, silenceSec, kind: 'wedged' })} ${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`,
+    { kind: 'log-only' } // the kind=wedged alert() right below carries the wake
   );
   const paneTail = tmux.capture(session).split('\n').slice(-50).join('\n');
   const unblockCmd = `tmux capture-pane -t ${session} -p | tail -50   # diagnose, then either fix-in-pane or kill: node plugins/maestro/scripts/maestro-cleanup.js ${ticket} --tmux`;
@@ -64,14 +65,16 @@ function checkCiGateFreedGuard({ session, ticket, worktree }) {
   const currentSha = headSha(worktree);
   if (currentSha && ciFreed.sha && currentSha !== ciFreed.sha) {
     alerts.log(
-      `${session} AUTO-RESTART ci-gate-freed marker cleared: HEAD moved ${(ciFreed.sha || '').slice(0, 7)} -> ${currentSha.slice(0, 7)}`
+      `${session} AUTO-RESTART ci-gate-freed marker cleared: HEAD moved ${(ciFreed.sha || '').slice(0, 7)} -> ${currentSha.slice(0, 7)}`,
+      { kind: 'log-only' }
     );
     state.clear(ticket, 'ci-gate-freed');
     return { skip: false };
   }
   if (!ciFreed.skipLogged) {
     alerts.log(
-      `${session} AUTO-RESTART skipped: ticket ${ticket} CI-gate-freed at sha=${(ciFreed.sha || '').slice(0, 7)}; awaiting operator merge`
+      `${session} AUTO-RESTART skipped: ticket ${ticket} CI-gate-freed at sha=${(ciFreed.sha || '').slice(0, 7)}; awaiting operator merge`,
+      { kind: 'log-only' }
     );
     state.write(ticket, 'ci-gate-freed', { ...ciFreed, skipLogged: true });
   }
@@ -84,7 +87,8 @@ function checkDeadEndGuard({ session, ticket }) {
   if (deadEnd.killed) {
     if (!deadEnd.skipLogged) {
       alerts.log(
-        `${session} AUTO-RESTART skipped: ticket ${ticket} dead-end-freed (trigger=${deadEnd.trigger || 'unknown'}); slot rotated, do not resurrect`
+        `${session} AUTO-RESTART skipped: ticket ${ticket} dead-end-freed (trigger=${deadEnd.trigger || 'unknown'}); slot rotated, do not resurrect`,
+        { kind: 'log-only' }
       );
       state.write(ticket, 'dead-end', { ...deadEnd, skipLogged: true });
     }
@@ -98,7 +102,8 @@ function checkDeadEndGuard({ session, ticket }) {
     state.now() - (deadEnd.diagnosedAt || 0) < DEAD_END_PROBE_GRACE_MIN * 60
   ) {
     alerts.log(
-      `${session} AUTO-RESTART skipped: dead-end probe pending on ${ticket} (grace ${DEAD_END_PROBE_GRACE_MIN}m)`
+      `${session} AUTO-RESTART skipped: dead-end probe pending on ${ticket} (grace ${DEAD_END_PROBE_GRACE_MIN}m)`,
+      { kind: 'log-only' }
     );
     return { skip: true };
   }
@@ -107,7 +112,11 @@ function checkDeadEndGuard({ session, ticket }) {
 
 function checkRestartGuards({ session, ticket, worktree }) {
   if (!worktree || !fs.existsSync(worktree)) {
-    alerts.log(`${session} AUTO-RESTART skipped: worktree ${worktree} not found`);
+    // log-only: fires every tick while the worktree is missing (operator
+    // deleted it) — the fleet heartbeat still lists the ticket.
+    alerts.log(`${session} AUTO-RESTART skipped: worktree ${worktree} not found`, {
+      kind: 'log-only',
+    });
     return { skip: true };
   }
   const ciGuard = checkCiGateFreedGuard({ session, ticket, worktree });
@@ -132,7 +141,8 @@ function resolveSkillForRestart(ticket, session) {
   }
   if (raw && raw !== skill) {
     alerts.log(
-      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} is malformed — falling open to /work for ${ticket}`
+      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} is malformed — falling open to /work for ${ticket}`,
+      { kind: 'log-only' }
     );
   }
   return skill;

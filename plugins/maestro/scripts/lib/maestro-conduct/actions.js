@@ -95,7 +95,7 @@ function msgFor(reason, mode, skill) {
 
 function soft(session, reason, skill, dialect) {
   const delivery = tmux.sendLine(session, msgFor(reason, 'soft', skill), dialect);
-  alerts.log(`${session} NUDGE soft [${delivery}]: ${reason}`);
+  alerts.log(`${session} NUDGE soft [${delivery}]: ${reason}`, { kind: 'log-only' });
 }
 
 function interrupt(session, reason, skill, dialect) {
@@ -104,7 +104,7 @@ function interrupt(session, reason, skill, dialect) {
   // Use spawnSync('sleep') so we block without pinning a CPU core.
   spawnSync('sleep', ['1.5']);
   const delivery = tmux.sendLine(session, msgFor(reason, 'interrupt', skill), dialect);
-  alerts.log(`${session} NUDGE interrupt [${delivery}]: ${reason}`);
+  alerts.log(`${session} NUDGE interrupt [${delivery}]: ${reason}`, { kind: 'log-only' });
 }
 
 function alert(reasonObj) {
@@ -178,7 +178,8 @@ function autoRestart({ session, ticket, worktree, silenceSec, runtime }) {
   alerts.log(
     `${formatLogLine({ ticket, skill, silenceSec, kind: 'silence' })} ${session} AUTO-RESTART after ${silenceSec}s silence — ${
       mode === 'continue' ? 'resuming conversation (--continue)' : `relaunching /${skill} ${ticket}`
-    }`
+    }`,
+    { kind: 'log-only' } // self-heal announcement — the daemon already acted
   );
   const launch = restartLaunch.buildLaunchCommand(mode, skill, ticket, rt);
   spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
@@ -202,7 +203,8 @@ function emitSlotFreedAlert({
   alerts.log(
     `${session} SLOT-FREED at CI gate — PR #${prNumber} sha=${(sha || '').slice(0, 7)} awaiting operator merge; tmux -work + -listen killed${
       autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
-    }`
+    }`,
+    { kind: 'log-only' } // the paired kind=slot-freed alert() carries the payload
   );
   alert({
     session,
@@ -351,7 +353,9 @@ function maybeFillPool() {
     if (activeSessions.includes(tmux.sessionName(cand.taskId, 'work'))) continue;
     const ok = maybeAutoBootstrap(cand.taskId);
     if (ok) {
-      alerts.log(`POOL-FILL auto-bootstrapped ${cand.taskId} from manifest "${cand.topic}"`);
+      alerts.log(`POOL-FILL auto-bootstrapped ${cand.taskId} from manifest "${cand.topic}"`, {
+        kind: 'log-only',
+      });
       return true;
     }
   }

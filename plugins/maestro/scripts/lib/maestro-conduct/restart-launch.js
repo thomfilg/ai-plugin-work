@@ -134,7 +134,8 @@ function logProgressSkip(session, ticket) {
   const m = state.read(session, 'progress-skip') || {};
   if (m.loggedAt && state.minutesSince(m.loggedAt) < 15) return;
   alerts.log(
-    `${session} AUTO-RESTART skipped: worktree changed <${progress.PROGRESS_FRESH_MIN}m ago (pane silent but agent progressing)`
+    `${session} AUTO-RESTART skipped: worktree changed <${progress.PROGRESS_FRESH_MIN}m ago (pane silent but agent progressing)`,
+    { kind: 'log-only' }
   );
   state.write(session, 'progress-skip', { loggedAt: state.now() });
 }

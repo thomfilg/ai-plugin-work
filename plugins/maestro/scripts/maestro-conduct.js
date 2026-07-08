@@ -36,6 +36,7 @@ const prStatusPayload = require('./lib/maestro-conduct/pr-status-payload');
 const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
 const questionHandler = require('./lib/maestro-conduct/question-handler');
 const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
+const fleetEmpty = require('./lib/maestro-conduct/fleet-empty');
 const progress = require('./lib/maestro-conduct/progress');
 const runners = require('./lib/maestro-conduct/detector-runners');
 const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
@@ -63,7 +64,8 @@ function maybeEscalateToDeadEnd(ctx, kind, repeatCount, sha) {
   // never auto-kill on pane evidence we cannot actually read.
   if (ctx.dialect === 'codex-tui-conservative') {
     alerts.log(
-      `${ctx.session} DEAD-END-HOLD ${kind} ×${repeatCount} — codex TUI dialect is read-only; operator must intervene (no auto-kill)`
+      `${ctx.session} DEAD-END-HOLD ${kind} ×${repeatCount} — codex TUI dialect is read-only; operator must intervene (no auto-kill)`,
+      { kind: 'log-only' } // the triggering alert (question-pending/…) already carries the throttled wake
     );
     return;
   }
@@ -128,7 +130,8 @@ function noteCodexConducting(ctx) {
   if (ctx.runtime !== 'codex' || state.read(ctx.session, 'codex-notice')) return;
   state.write(ctx.session, 'codex-notice', { loggedAt: state.now(), dialect: ctx.dialect });
   alerts.log(
-    `${ctx.ticket} (codex): question/spinner detection unavailable — using exec-json/workstate signals (dialect=${ctx.dialect})`
+    `${ctx.ticket} (codex): question/spinner detection unavailable — using exec-json/workstate signals (dialect=${ctx.dialect})`,
+    { kind: 'log-only' }
   );
 }
 
@@ -158,7 +161,8 @@ function runCommitStallDetector(ctx) {
   const cHit = DETECTORS.commitStall.detect(ctx);
   if (!cHit.hit) return;
   alerts.log(
-    `${ctx.session} commit-stall ${cHit.mins}m in phase=${ctx.phase} (threshold=${cHit.threshold}m)`
+    `${ctx.session} commit-stall ${cHit.mins}m in phase=${ctx.phase} (threshold=${cHit.threshold}m)`,
+    { kind: 'log-only' } // info per conduct SKILL — surfaces in log + heartbeat flags
   );
 }
 
@@ -186,7 +190,8 @@ function runPrStatusDetector(ctx) {
   // pr-pending is informational only — log but never escalate to alert sink.
   if (sHit.kind === 'pr-pending') {
     alerts.log(
-      `${ctx.session} pr-pending PR #${sHit.prNumber} sha=${(sHit.sha || '').slice(0, 7)} checks running`
+      `${ctx.session} pr-pending PR #${sHit.prNumber} sha=${(sHit.sha || '').slice(0, 7)} checks running`,
+      { kind: 'log-only' }
     );
     return;
   }
@@ -231,15 +236,23 @@ function tickSession(session) {
   // Question always wins — never nudge while the agent is waiting on us.
   const qHit = DETECTORS.question.detect(ctx);
   if (qHit.hit) {
+    state.clear(ctx.session, 'question-absent'); // re-arm the reset debounce
     handleQuestion(ctx, qHit);
     return;
   }
   state.clear(ctx.session, 'question');
   // Reset persisted question-pending count so a later prompt in the same
   // phase doesn't inherit [REPEAT N] and fire freeDeadEndSlot prematurely.
-  alerts.resetCount(
-    alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
-  );
+  // Debounced to 3 consecutive question-free ticks (GH-680 review): resetting
+  // on the FIRST miss let a flapping prompt (pane redraws across ticks) clear
+  // the re-wake throttle every cycle and wake per flap.
+  const absent = (state.read(ctx.session, 'question-absent') || { ticks: 0 }).ticks + 1;
+  if (absent >= 3) {
+    alerts.resetCount(
+      alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
+    );
+  }
+  state.write(ctx.session, 'question-absent', { ticks: absent });
 
   runners.runStuckInputDetector(ctx, { restartEligible });
   runners.runAuthBrokenDetector(ctx, { restartEligible });
@@ -262,17 +275,22 @@ function tick() {
   try {
     actions.syncManifest(sessions);
   } catch (e) {
-    alerts.log(`syncManifest failed: ${e.message}`);
+    alerts.logFault(`syncManifest failed: ${e.message}`, 'sync-manifest');
   }
   // Top-up the pool when sessions exit outside the slot-freed path (operator
   // kill, agent crash, manifest re-added). Gated by AUTO_BOOTSTRAP_NEXT=1.
   try {
     actions.maybeFillPool();
   } catch (e) {
-    alerts.log(`maybeFillPool failed: ${e.message}`);
+    alerts.logFault(`maybeFillPool failed: ${e.message}`, 'fill-pool');
   }
+  fleetEmpty.checkFleetEmpty(sessions, restartEligible);
   if (!sessions.length) {
-    alerts.log(`no ${tmux.sessionName(`${tmux.resolveTicketPrefix()}-*`, 'work')} sessions`);
+    // log-only: pre-680 this line woke the conductor EVERY 60s tick on an
+    // empty fleet — the single worst idle-burn source.
+    alerts.log(`no ${tmux.sessionName(`${tmux.resolveTicketPrefix()}-*`, 'work')} sessions`, {
+      kind: 'log-only',
+    });
     return;
   }
   // Per-session isolation: one throwing detector must not abort the tick for
@@ -284,7 +302,9 @@ function tick() {
     try {
       tickSession(session);
     } catch (e) {
-      alerts.log(`TICK-ERROR ${session}: ${(e && e.stack) || e}`);
+      // First occurrence wakes; a persistently-throwing detector backs off
+      // instead of billing a wake every 60s tick (GH-680 review).
+      alerts.logFault(`TICK-ERROR ${session}: ${(e && e.stack) || e}`, `tick-error|${session}`);
     }
   }
   heartbeat.maybeEmitHeartbeat(sessions);
