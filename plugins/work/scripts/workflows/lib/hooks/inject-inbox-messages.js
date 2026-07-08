@@ -26,6 +26,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { getRuntime } = require('../runtime');
+const { writeJsonAtomic } = require('../safeIO');
 
 function fail() {
   process.exit(0);
@@ -79,10 +80,7 @@ function readCursors() {
 
 function writeCursors(c) {
   try {
-    const f = cursorFile();
-    const tmp = `${f}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(c), { mode: 0o644 });
-    fs.renameSync(tmp, f);
+    writeJsonAtomic(cursorFile(), c, { mode: 0o644, compact: true });
   } catch {
     /* ignore */
   }

@@ -22,7 +22,7 @@
 const path = require('path');
 const { isRunningInAgent } = require('../agent-detection');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
-const { logHookError } = require('../hook-error-log');
+const { runHook } = require('../hookEntrypoint');
 // Vendored dual-runtime adapter: runtime detection for the per-runtime block
 // texts (codex has no Task tool — required agents run as INLINE personas).
 const { getRuntime } = require('../runtime');
@@ -275,10 +275,7 @@ function enforceScriptBypass(toolName, toolInput, transcriptPath, hookData, runt
   process.exit(2);
 }
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) input += chunk;
-  const hookData = JSON.parse(input);
+function main(hookData) {
   const runtime = getRuntime(hookData).name;
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
@@ -290,14 +287,11 @@ async function main() {
   process.exit(0);
 }
 
-// Only read stdin / run when invoked directly as the hook; stay importable for tests.
+// Only read stdin / run when invoked directly as the hook; stay importable for
+// tests. runHook is fail open — internal errors are logged (logHookError) and
+// exit 0, never blocking legitimate operations.
 if (require.main === module) {
-  main().catch((err) => {
-    try {
-      logHookError(__filename, err);
-    } catch {}
-    process.exit(0); // fail open — never block legitimate operations on internal error
-  });
+  runHook(main, { file: __filename });
 }
 
 module.exports = {

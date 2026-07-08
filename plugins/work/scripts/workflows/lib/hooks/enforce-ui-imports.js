@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', 'hookEntrypoint'));
 
 // UI documentation files that indicate a project has its own UI package
 const UI_DOC_FILES = [
@@ -261,13 +261,57 @@ function getFilePathFromToolInput(toolName, toolInput) {
   }
 }
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
+/**
+ * Emit the block message for forbidden imports and exit 2.
+ * The message text is byte-identical to the historical inline version.
+ */
+function blockForbiddenImports(forbiddenImports, allowedImports) {
+  const importsList = forbiddenImports
+    .map((f) => `  - ${f.framework}: ${f.components.join(', ')}`)
+    .join('\n');
 
-  const hookData = JSON.parse(input);
+  const allowedList = allowedImports.slice(0, 10).join(', ') + '...';
+
+  process.stderr.write(`╔══════════════════════════════════════════════════════════════════════╗
+║  ❌ FORBIDDEN UI FRAMEWORK IMPORTS DETECTED                          ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+║  This repository has a UI component library. You MUST use it.        ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+🚫 Blocked imports:
+${importsList}
+
+✅ Allowed MUI primitives: ${allowedList}
+
+📖 UI Documentation found in this repo - READ FIRST:
+   - packages/ui/components-catalog.md
+   - packages/shared-ui/README.md
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  YOUR OPTIONS:                                                       ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+║  1. USE PROJECT UI PACKAGE (Recommended)                             ║
+║     Import from your project UI package or similar                    ║
+║     Read components-catalog.md to find equivalent components         ║
+║                                                                      ║
+║  2. ASK USER FOR PERMISSION                                          ║
+║     Use AskUserQuestion tool to ask:                                 ║
+║     "The UI package doesn't have X component. May I import           ║
+║      directly from @mui/material for this specific case?"            ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+⚠️ This hook enforces UI consistency. If you're building the UI package
+   itself (packages/ui or packages/shared-ui), this restriction doesn't apply.
+`);
+  process.exit(2);
+}
+
+// The payload is read/parsed by runHook (hookEntrypoint).
+function main(hookData) {
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
 
@@ -316,7 +360,6 @@ async function main() {
   // Determine which allowed list to use based on folder
   const isSharedUI = reactFiles.some((fp) => isInSharedUIFolder(fp, gitRoot));
   const allowedImports = isSharedUI ? ALLOWED_MUI_IMPORTS_SHARED_UI : ALLOWED_MUI_IMPORTS_APPS;
-  const folderContext = isSharedUI ? 'shared-ui' : 'apps';
 
   // Check for forbidden imports
   const forbiddenImports = extractForbiddenImports(content, allowedImports);
@@ -326,53 +369,9 @@ async function main() {
     process.exit(0);
   }
 
-  // Build detailed error message
-  const importsList = forbiddenImports
-    .map((f) => `  - ${f.framework}: ${f.components.join(', ')}`)
-    .join('\n');
-
-  const allowedList = allowedImports.slice(0, 10).join(', ') + '...';
-
-  process.stderr.write(`╔══════════════════════════════════════════════════════════════════════╗
-║  ❌ FORBIDDEN UI FRAMEWORK IMPORTS DETECTED                          ║
-╠══════════════════════════════════════════════════════════════════════╣
-║                                                                      ║
-║  This repository has a UI component library. You MUST use it.        ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
-
-🚫 Blocked imports:
-${importsList}
-
-✅ Allowed MUI primitives: ${allowedList}
-
-📖 UI Documentation found in this repo - READ FIRST:
-   - packages/ui/components-catalog.md
-   - packages/shared-ui/README.md
-
-╔══════════════════════════════════════════════════════════════════════╗
-║  YOUR OPTIONS:                                                       ║
-╠══════════════════════════════════════════════════════════════════════╣
-║                                                                      ║
-║  1. USE PROJECT UI PACKAGE (Recommended)                             ║
-║     Import from your project UI package or similar                    ║
-║     Read components-catalog.md to find equivalent components         ║
-║                                                                      ║
-║  2. ASK USER FOR PERMISSION                                          ║
-║     Use AskUserQuestion tool to ask:                                 ║
-║     "The UI package doesn't have X component. May I import           ║
-║      directly from @mui/material for this specific case?"            ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
-
-⚠️ This hook enforces UI consistency. If you're building the UI package
-   itself (packages/ui or packages/shared-ui), this restriction doesn't apply.
-`);
-  process.exit(2);
+  blockForbiddenImports(forbiddenImports, allowedImports);
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  // On error, approve to avoid blocking legitimate operations
-  process.exit(0);
-});
+// Canonical entry protocol: on internal error runHook logs via logHookError
+// and exits 0 — approve, to avoid blocking legitimate operations.
+runHook(main, { file: __filename });
