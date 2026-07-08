@@ -58,6 +58,71 @@ const ICON = {
   done: '✓',
 };
 
+const ANSI_RESET = '\x1b[0m';
+
+// Session-runtime "heat": how long an agent has been running, encoded as a
+// colored elapsed badge. Below HEAT_MIN_MIN it stays the terminal default
+// (calm); past it the badge walks through SHADES OF ONE HUE, then jumps hue at
+// each band boundary — yellow deepens, then orange deepens, then red deepens.
+// Each band lerps between a light and a dark shade of that hue.
+const HEAT_MIN_MIN = 30;
+const HEAT_BANDS = [
+  { start: 30, end: 45, from: [255, 255, 180], to: [255, 214, 0] }, // yellows
+  { start: 45, end: 60, from: [255, 200, 120], to: [255, 120, 0] }, // oranges
+  { start: 60, end: 90, from: [255, 90, 90], to: [170, 0, 0] }, // reds (then pinned)
+];
+// Discrete 256-color ramp per band for terminals without 24-bit color.
+const HEAT_256 = [
+  { start: 30, end: 45, codes: [229, 226, 220] },
+  { start: 45, end: 60, codes: [214, 208, 202] },
+  { start: 60, end: 90, codes: [210, 196, 160, 124] },
+];
+
+function terminalTruecolor() {
+  return /^(truecolor|24bit)$/i.test(process.env.COLORTERM || '');
+}
+
+// Pick the band covering `min` (or the last band, saturated, once past it).
+function heatBand(bands, min) {
+  const hit = bands.find((b) => min >= b.start && min < b.end);
+  if (hit) return { band: hit, t: (min - hit.start) / (hit.end - hit.start) };
+  return { band: bands[bands.length - 1], t: 1 }; // past the last band → deepest
+}
+
+function lerp(a, b, t) {
+  return Math.round(a + (b - a) * t);
+}
+
+// ANSI SGR prefix for the runtime heat at `min` minutes, or '' below the floor.
+function heatAnsi(min, truecolor) {
+  if (typeof min !== 'number' || min < HEAT_MIN_MIN) return '';
+  if (truecolor) {
+    const { band, t } = heatBand(HEAT_BANDS, min);
+    const [r, g, b] = [0, 1, 2].map((i) => lerp(band.from[i], band.to[i], t));
+    return `\x1b[38;2;${r};${g};${b}m`;
+  }
+  const { band, t } = heatBand(HEAT_256, min);
+  const idx = Math.min(band.codes.length - 1, Math.floor(t * band.codes.length));
+  return `\x1b[38;5;${band.codes[idx]}m`;
+}
+
+// "33m" / "1h02m" — compact elapsed label.
+function formatElapsed(min) {
+  const m = Math.max(0, Math.floor(min));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem ? `${h}h${String(rem).padStart(2, '0')}m` : `${h}h`;
+}
+
+// Colored elapsed badge (label + heat SGR + reset), or the bare label below the
+// heat floor. Pure: caller injects `min` and truecolor so it is testable.
+function elapsedBadge(min, truecolor) {
+  const label = formatElapsed(min);
+  const color = heatAnsi(min, truecolor);
+  return color ? `${color}${label}${ANSI_RESET}` : label;
+}
+
 // The Claude session Claude runs this statusLine in (session_id on stdin). Read
 // lazily so `require()`ing this module (tests) never blocks on fd 0.
 function readSession() {
@@ -90,26 +155,34 @@ function myOrchestrations(session) {
 }
 
 // Live agent tickets for a prefix, from tmux `<prefix>-<ticket>-work` sessions
-// (execFileSync = no shell). One entry per ticket; helper -dev/-listen ignored.
+// (execFileSync = no shell). Returns { ids: sorted ticket ids, createdById:
+// id -> tmux session_created epoch (survives auto-restarts, which reuse the
+// session) } so the renderer can heat-color each agent by how long it has run.
+// Helper -dev/-listen sessions are ignored.
 function liveTickets(prefix) {
   let out = '';
   try {
-    out = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
+    out = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}\t#{session_created}'], {
       encoding: 'utf8',
       timeout: 1500,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
   } catch {
-    return [];
+    return { ids: [], createdById: {} };
   }
   const esc = String(prefix).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp('^(' + esc + '-.+)-work$');
   const seen = new Set();
+  const createdById = {};
   for (const line of out.split('\n')) {
-    const m = line.match(re);
-    if (m) seen.add(m[1]);
+    const [name, created] = line.split('\t');
+    const m = (name || '').match(re);
+    if (!m) continue;
+    seen.add(m[1]);
+    const c = parseInt(created, 10);
+    if (!Number.isNaN(c)) createdById[m[1]] = c;
   }
-  return [...seen].sort();
+  return { ids: [...seen].sort(), createdById };
 }
 
 // Manifest counts + per-task status for the topic whose tasks overlap the live
@@ -218,14 +291,17 @@ function resolveTicketIcon(markers, status, nowSec) {
 
 /**
  * Render one orchestration's status-line segment. `iconFor` maps a ticket id to
- * its status glyph (or '' for none). Kept pure/injected so tests exercise the
- * formatting without touching tmux or the marker store.
+ * its status glyph (or '' for none); `badgeFor` maps it to a colored runtime
+ * badge (or '' for none). Both injected so tests exercise the formatting
+ * without touching tmux or the marker store.
  */
-function formatSegment(prefix, tickets, info, iconFor) {
+function formatSegment(prefix, tickets, info, iconFor, badgeFor = () => '') {
   const labelled = tickets
     .map((id) => {
       const icon = iconFor(id);
-      return icon ? `${icon} ${id}` : id;
+      const badge = badgeFor(id);
+      const left = icon ? `${icon} ${id}` : id;
+      return badge ? `${left} ${badge}` : left;
     })
     .join(', ');
   if (info) {
@@ -236,14 +312,20 @@ function formatSegment(prefix, tickets, info, iconFor) {
 }
 
 function segment(m) {
-  const tickets = liveTickets(m.prefix);
-  if (!tickets.length) return null;
-  const info = manifestInfo(tickets);
+  const { ids, createdById } = liveTickets(m.prefix);
+  if (!ids.length) return null;
+  const info = manifestInfo(ids);
   const dir = markerDir();
   const nowSec = Math.floor(Date.now() / 1000);
   const statusById = (info && info.statusById) || {};
+  const truecolor = terminalTruecolor();
   const iconFor = (id) => resolveTicketIcon(readTicketMarkers(id, dir), statusById[id], nowSec);
-  return formatSegment(m.prefix, tickets, info, iconFor);
+  const badgeFor = (id) => {
+    const created = createdById[id];
+    if (!created) return '';
+    return elapsedBadge((nowSec - created) / 60, truecolor);
+  };
+  return formatSegment(m.prefix, ids, info, iconFor, badgeFor);
 }
 
 function render() {
@@ -261,10 +343,16 @@ module.exports = {
   OVERLAY_FRESH_SEC,
   NUDGE_WINDOW_SEC,
   SILENCE_LIMIT_SEC,
+  HEAT_MIN_MIN,
+  HEAT_BANDS,
+  ANSI_RESET,
   markerDir,
   manifestInfo,
   readTicketMarkers,
   resolveTicketIcon,
+  heatAnsi,
+  formatElapsed,
+  elapsedBadge,
   formatSegment,
   render,
 };
