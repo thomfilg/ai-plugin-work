@@ -78,13 +78,17 @@ describe('heimdall-fsguard runtime interposer (GH-657)', { skip: !linux }, () =>
   });
 
   it('allows reading a protected file', () => {
-    const r = guarded(`process.stdout.write(require('fs').readFileSync(${JSON.stringify(path.join(prot, 'secret.txt'))}, 'utf8'))`);
+    const r = guarded(
+      `process.stdout.write(require('fs').readFileSync(${JSON.stringify(path.join(prot, 'secret.txt'))}, 'utf8'))`
+    );
     assert.equal(r.status, 0);
     assert.equal(r.stdout, 'orig');
   });
 
   it('allows writing into an allowed subdir', () => {
-    const r = guarded(`require('fs').writeFileSync(${JSON.stringify(path.join(allowed, 'a.txt'))}, 'x')`);
+    const r = guarded(
+      `require('fs').writeFileSync(${JSON.stringify(path.join(allowed, 'a.txt'))}, 'x')`
+    );
     assert.equal(r.status, 0, r.stderr);
   });
 

@@ -204,9 +204,7 @@ function rewakeGate(key) {
     if (entry && now - entry.lastWakeAt < entry.backoffMin * 60 * 1000) {
       return false; // still inside the backoff window — logged, not woken
     }
-    const nextBackoff = entry
-      ? Math.min(entry.backoffMin * 2, rewakeMaxMinutes())
-      : baseMin;
+    const nextBackoff = entry ? Math.min(entry.backoffMin * 2, rewakeMaxMinutes()) : baseMin;
     map[key] = { lastWakeAt: now, backoffMin: nextBackoff };
     saveThrottle(map);
     return true;

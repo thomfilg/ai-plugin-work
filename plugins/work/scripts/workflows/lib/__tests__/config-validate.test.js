@@ -60,16 +60,8 @@ describe('validateEnv — unknown-key scan', () => {
   it('exports validateEnv, formatWarnings, and runStartupValidation', () => {
     const mod = loadValidateModule();
     assert.equal(typeof mod.validateEnv, 'function', 'validateEnv is a function');
-    assert.equal(
-      typeof mod.formatWarnings,
-      'function',
-      'formatWarnings is a function',
-    );
-    assert.equal(
-      typeof mod.runStartupValidation,
-      'function',
-      'runStartupValidation is a function',
-    );
+    assert.equal(typeof mod.formatWarnings, 'function', 'formatWarnings is a function');
+    assert.equal(typeof mod.runStartupValidation, 'function', 'runStartupValidation is a function');
   });
 
   it('a known key with a valid value produces no warning', () => {
@@ -84,25 +76,18 @@ describe('validateEnv — unknown-key scan', () => {
     const unknown = warnings.filter((w) => w.kind === 'unknown-key');
     assert.equal(unknown.length, 1, 'one unknown-key warning');
     assert.equal(unknown[0].key, 'ENABEL_DRAFT_PR', 'names the typo key');
-    assert.equal(
-      unknown[0].suggestion,
-      'ENABLE_DRAFT_PR',
-      'suggestion names the intended key',
-    );
+    assert.equal(unknown[0].suggestion, 'ENABLE_DRAFT_PR', 'suggestion names the intended key');
   });
 
   it('an unknown prefixed key beyond edit distance 2 warns without a suggestion (R4)', () => {
     const { validateEnv } = loadValidateModule();
-    const warnings = validateEnv(
-      { WORK_TOTALLY_DIFFERENT_KEY: 'x' },
-      testSchema(),
-    );
+    const warnings = validateEnv({ WORK_TOTALLY_DIFFERENT_KEY: 'x' }, testSchema());
     const unknown = warnings.filter((w) => w.kind === 'unknown-key');
     assert.equal(unknown.length, 1, 'one unknown-key warning');
     assert.equal(unknown[0].key, 'WORK_TOTALLY_DIFFERENT_KEY', 'names the key');
     assert.ok(
       !('suggestion' in unknown[0]) || unknown[0].suggestion === undefined,
-      'no suggestion field when nearest key is at distance > 2',
+      'no suggestion field when nearest key is at distance > 2'
     );
   });
 
@@ -119,18 +104,14 @@ describe('validateEnv — unknown-key scan', () => {
     const unknown = warnings.filter((w) => w.kind === 'unknown-key');
     assert.equal(unknown.length, 1, 'one unknown-key warning');
     assert.equal(unknown[0].key, 'FOX', 'names the typo key');
-    assert.equal(
-      unknown[0].suggestion,
-      'FOO',
-      'tie resolves to the first known key by index',
-    );
+    assert.equal(unknown[0].suggestion, 'FOO', 'tie resolves to the first known key by index');
   });
 
   it('non-prefixed unknown keys are ignored by the unknown-key scan (R5)', () => {
     const { validateEnv } = loadValidateModule();
     const warnings = validateEnv({ SOME_RANDOM_PATH: '/tmp/x' }, testSchema());
     const unknown = warnings.filter(
-      (w) => w.kind === 'unknown-key' && w.key === 'SOME_RANDOM_PATH',
+      (w) => w.kind === 'unknown-key' && w.key === 'SOME_RANDOM_PATH'
     );
     assert.equal(unknown.length, 0, 'no unknown-key warning for non-prefixed key');
   });
@@ -144,11 +125,7 @@ describe('validateEnv — value-format validation', () => {
     assert.equal(invalid.length, 1, 'one invalid-value warning');
     assert.equal(invalid[0].key, 'ENABLE_DRAFT_PR', 'names the key');
     assert.equal(invalid[0].value, 'yes', 'names the offending value');
-    assert.match(
-      String(invalid[0].expected),
-      /0 or 1/,
-      'expected format describes "0 or 1"',
-    );
+    assert.match(String(invalid[0].expected), /0 or 1/, 'expected format describes "0 or 1"');
   });
 
   it('validates enum, bool, and json-array types', () => {
@@ -156,27 +133,20 @@ describe('validateEnv — value-format validation', () => {
 
     const badEnum = validateEnv({ TICKET_PROVIDER: 'gitlab' }, testSchema());
     assert.ok(
-      badEnum.some(
-        (w) => w.kind === 'invalid-value' && w.key === 'TICKET_PROVIDER',
-      ),
-      'invalid enum value warns',
+      badEnum.some((w) => w.kind === 'invalid-value' && w.key === 'TICKET_PROVIDER'),
+      'invalid enum value warns'
     );
 
-    const badBool = validateEnv(
-      { FOLLOW_UP_PR_POLL_REVIEWS: 'maybe' },
-      testSchema(),
-    );
+    const badBool = validateEnv({ FOLLOW_UP_PR_POLL_REVIEWS: 'maybe' }, testSchema());
     assert.ok(
-      badBool.some(
-        (w) => w.kind === 'invalid-value' && w.key === 'FOLLOW_UP_PR_POLL_REVIEWS',
-      ),
-      'invalid bool value warns',
+      badBool.some((w) => w.kind === 'invalid-value' && w.key === 'FOLLOW_UP_PR_POLL_REVIEWS'),
+      'invalid bool value warns'
     );
 
     const badJson = validateEnv({ WEB_APPS: '{not json}' }, testSchema());
     assert.ok(
       badJson.some((w) => w.kind === 'invalid-value' && w.key === 'WEB_APPS'),
-      'unparseable json-array warns',
+      'unparseable json-array warns'
     );
   });
 
@@ -192,7 +162,7 @@ describe('validateEnv — value-format validation', () => {
         WEB_APPS: '',
         ENABLE_DRAFT_PR: '',
       },
-      testSchema(),
+      testSchema()
     );
     const invalid = warnings.filter((w) => w.kind === 'invalid-value');
     assert.deepEqual(invalid, [], 'empty-string values produce no invalid-value warnings');
@@ -200,16 +170,10 @@ describe('validateEnv — value-format validation', () => {
 
   it('still flags a genuinely-invalid non-empty value (guards against over-skipping)', () => {
     const { validateEnv } = loadValidateModule();
-    const warnings = validateEnv(
-      { FOLLOW_UP_PR_POLL_REVIEWS: 'maybe' },
-      testSchema(),
-    );
+    const warnings = validateEnv({ FOLLOW_UP_PR_POLL_REVIEWS: 'maybe' }, testSchema());
     assert.ok(
-      warnings.some(
-        (w) =>
-          w.kind === 'invalid-value' && w.key === 'FOLLOW_UP_PR_POLL_REVIEWS',
-      ),
-      'a non-empty invalid value is still flagged',
+      warnings.some((w) => w.kind === 'invalid-value' && w.key === 'FOLLOW_UP_PR_POLL_REVIEWS'),
+      'a non-empty invalid value is still flagged'
     );
   });
 
@@ -220,21 +184,15 @@ describe('validateEnv — value-format validation', () => {
     };
 
     const bad = validateEnv({ SOMEKEY: '../../evil' }, schema);
-    const invalid = bad.filter(
-      (w) => w.kind === 'invalid-value' && w.key === 'SOMEKEY',
-    );
+    const invalid = bad.filter((w) => w.kind === 'invalid-value' && w.key === 'SOMEKEY');
     assert.equal(invalid.length, 1, 'a pattern mismatch on a string key warns');
-    assert.match(
-      String(invalid[0].expected),
-      /matching/,
-      'expected text mentions the pattern',
-    );
+    assert.match(String(invalid[0].expected), /matching/, 'expected text mentions the pattern');
 
     const good = validateEnv({ SOMEKEY: 'feature/x' }, schema);
     assert.deepEqual(
       good.filter((w) => w.kind === 'invalid-value'),
       [],
-      'a pattern-matching value produces no invalid-value warning',
+      'a pattern-matching value produces no invalid-value warning'
     );
   });
 
@@ -248,7 +206,7 @@ describe('validateEnv — value-format validation', () => {
         WEB_APPS: '[{"name":"app"}]',
         BASE_BRANCH: 'main',
       },
-      testSchema(),
+      testSchema()
     );
     assert.deepEqual(warnings, [], 'all valid values produce no warnings');
   });
@@ -263,10 +221,8 @@ describe('validateEnv — one-entry extension (R10)', () => {
 
     const invalid = validateEnv({ ENABLE_NEWLY_ADDED: 'nope' }, schema);
     assert.ok(
-      invalid.some(
-        (w) => w.kind === 'invalid-value' && w.key === 'ENABLE_NEWLY_ADDED',
-      ),
-      'invalid value of the new key is caught by value-format scan',
+      invalid.some((w) => w.kind === 'invalid-value' && w.key === 'ENABLE_NEWLY_ADDED'),
+      'invalid value of the new key is caught by value-format scan'
     );
 
     const typo = validateEnv({ ENABLE_NEWLY_ADDE: '1' }, schema);
@@ -275,7 +231,7 @@ describe('validateEnv — one-entry extension (R10)', () => {
     assert.equal(
       unknown[0].suggestion,
       'ENABLE_NEWLY_ADDED',
-      'near-typo suggests the newly-added key',
+      'near-typo suggests the newly-added key'
     );
   });
 });
@@ -288,10 +244,7 @@ describe('formatWarnings (R7)', () => {
 
   it('renders multiple warnings into a single grouped block', () => {
     const { validateEnv, formatWarnings } = loadValidateModule();
-    const warnings = validateEnv(
-      { ENABEL_DRAFT_PR: '1', ENABLE_SYMLINK: 'yes' },
-      testSchema(),
-    );
+    const warnings = validateEnv({ ENABEL_DRAFT_PR: '1', ENABLE_SYMLINK: 'yes' }, testSchema());
     const block = formatWarnings(warnings);
     assert.equal(typeof block, 'string', 'returns a string');
     assert.ok(block.length > 0, 'block is non-empty');
@@ -301,30 +254,26 @@ describe('formatWarnings (R7)', () => {
 
   it('renders a "did you mean" line for a prefixed near-miss typo', () => {
     const { validateEnv, formatWarnings } = loadValidateModule();
-    const block = formatWarnings(
-      validateEnv({ ENABEL_DRAFT_PR: '1' }, testSchema()),
-    );
+    const block = formatWarnings(validateEnv({ ENABEL_DRAFT_PR: '1' }, testSchema()));
     assert.match(
       block,
       /did you mean "ENABLE_DRAFT_PR"\?/,
-      'a near-miss keeps the typo-suggestion message',
+      'a near-miss keeps the typo-suggestion message'
     );
   });
 
   it('renders an "another tool" note for a prefixed unknown key with no near-miss', () => {
     const { validateEnv, formatWarnings } = loadValidateModule();
-    const block = formatWarnings(
-      validateEnv({ ENABLE_TELEMETRY: '1' }, testSchema()),
-    );
+    const block = formatWarnings(validateEnv({ ENABLE_TELEMETRY: '1' }, testSchema()));
     assert.match(
       block,
       /may belong to another tool/,
-      'a prefixed key with no near-miss notes it may belong to another tool',
+      'a prefixed key with no near-miss notes it may belong to another tool'
     );
     assert.doesNotMatch(
       block,
       /no close known key/,
-      'the old "no close known key" phrasing is gone',
+      'the old "no close known key" phrasing is gone'
     );
   });
 });
@@ -380,13 +329,10 @@ describe('runStartupValidation — non-blocking + once-per-invocation', () => {
 
     const out = captured.join('');
     assert.ok(out.length > 0, 'a warning block was written to stderr');
-    assert.ok(
-      out.endsWith('\n'),
-      'block ends with a single trailing newline',
-    );
+    assert.ok(out.endsWith('\n'), 'block ends with a single trailing newline');
     assert.ok(
       !out.endsWith('\n\n'),
-      'block does not end with a double newline (no trailing blank line)',
+      'block does not end with a double newline (no trailing blank line)'
     );
   });
 
@@ -400,20 +346,13 @@ describe('runStartupValidation — non-blocking + once-per-invocation', () => {
 
     runStartupValidation(env, testSchema());
     const afterSecond = captured.join('');
-    assert.equal(
-      afterSecond,
-      afterFirst,
-      'second call writes nothing more (once-guard honored)',
-    );
+    assert.equal(afterSecond, afterFirst, 'second call writes nothing more (once-guard honored)');
   });
 
   it('sets the cross-process marker so re-entrant loads do not re-run (R9)', () => {
     const { runStartupValidation } = freshValidateModule();
     runStartupValidation({ ENABEL_DRAFT_PR: '1' }, testSchema());
-    assert.ok(
-      process.env.__WORK_CONFIG_VALIDATED,
-      'cross-process marker is set after first run',
-    );
+    assert.ok(process.env.__WORK_CONFIG_VALIDATED, 'cross-process marker is set after first run');
 
     // A re-entrant module load sees the marker and self-disables.
     captured.length = 0;
@@ -422,7 +361,7 @@ describe('runStartupValidation — non-blocking + once-per-invocation', () => {
     assert.equal(
       captured.join(''),
       '',
-      'fresh module load honors the cross-process marker and does not re-run',
+      'fresh module load honors the cross-process marker and does not re-run'
     );
   });
 
@@ -441,7 +380,7 @@ describe('runStartupValidation — non-blocking + once-per-invocation', () => {
         getOwnPropertyDescriptor() {
           throw new Error('boom');
         },
-      },
+      }
     );
     assert.doesNotThrow(() => {
       runStartupValidation({ ENABEL_DRAFT_PR: '1' }, hostileSchema);

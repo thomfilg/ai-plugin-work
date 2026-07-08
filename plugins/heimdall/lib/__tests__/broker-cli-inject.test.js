@@ -24,7 +24,9 @@ before(() => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'broker-cli-'));
   bin = path.join(dir, 'broker');
   // Test build skips the root-owned-config check so we can use a tmp broker.conf.
-  const b = spawnSync('gcc', ['-DBROKER_TEST_SKIP_OWNER_CHECK', '-O2', '-o', bin, SRC], { encoding: 'utf8' });
+  const b = spawnSync('gcc', ['-DBROKER_TEST_SKIP_OWNER_CHECK', '-O2', '-o', bin, SRC], {
+    encoding: 'utf8',
+  });
   assert.equal(b.status, 0, b.stderr);
   // broker.conf must sit NEXT TO the binary (resolve_conf_path uses /proc/self/exe).
   fs.writeFileSync(
@@ -34,7 +36,7 @@ before(() => {
       `WRAPPER=${path.join(dir, 'wrap.js')}`,
       `RUN_USER=${os.userInfo().username}`,
       'ALLOWED_CSV=alpha,beta',
-    ].join('\n') + '\n',
+    ].join('\n') + '\n'
   );
 });
 

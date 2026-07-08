@@ -88,11 +88,7 @@ test('PostToolUse verbose: failing-test memory fires and shows matched posttool_
   const result = runExplain(['--stdin', '--verbose', `--cwd=${cwd}`], { input: payload });
 
   assert.equal(result.status, 0, `exit non-zero. stderr=${result.stderr}`);
-  assert.match(
-    result.stdout,
-    /fired: ✓/,
-    `expected memory to fire. stdout=${result.stdout}`
-  );
+  assert.match(result.stdout, /fired: ✓/, `expected memory to fire. stdout=${result.stdout}`);
   assert.match(
     result.stdout,
     /matched\.posttool_exit:\s*nonzero/,
@@ -130,11 +126,7 @@ test('PostToolUse verbose: network-error memory shows matched posttool_content_s
   const result = runExplain(['--stdin', '--verbose', `--cwd=${cwd}`], { input: payload });
 
   assert.equal(result.status, 0, `exit non-zero. stderr=${result.stderr}`);
-  assert.match(
-    result.stdout,
-    /fired: ✓/,
-    `expected memory to fire. stdout=${result.stdout}`
-  );
+  assert.match(result.stdout, /fired: ✓/, `expected memory to fire. stdout=${result.stdout}`);
   assert.match(
     result.stdout,
     /matched\.posttool_content_substring:.*ENOTFOUND/,
@@ -253,10 +245,6 @@ test('PostToolUse is an accepted --event (not rejected as unknown)', (t) => {
 
   const result = runExplain(['--event=PostToolUse', '--tool=Bash', `--cwd=${cwd}`]);
 
-  assert.equal(
-    result.status,
-    0,
-    `expected exit 0, got ${result.status}. stderr=${result.stderr}`
-  );
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}. stderr=${result.stderr}`);
   assert.doesNotMatch(result.stderr, /unknown --event/i);
 });

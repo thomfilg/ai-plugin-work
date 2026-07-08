@@ -68,6 +68,7 @@ The plugin uses environment variables for configuration, resolved through `scrip
 | `READ_DOCS_ON_SPEC` | | Paths to docs the spec-writer should read |
 | `WORK_SKIP_E2E` | | Set to `1` to make implement-gate skip executing E2E test commands. Detected E2E patterns (`pnpm e2e`, `playwright`, `$TEST_E2E_COMMAND`) get skip-stub evidence so the workflow advances without spending minutes on browser tests. Each stub is written via the shared gate-writer and audited to `.work-actions.json` as `tdd-e2e-skip-stub` so the fabricated cycle stays visible. Alias: `WORK_SKIP_E2E_TESTS=1`. |
 | `WORK_OPERATOR_TOKEN` | | Set to `1` to enable the operator-only `tdd-phase-state.js exception` subcommand. Agent environments never carry it. |
+| `WORK_PRICING` | `{"claude-opus-4":{"usdPer1MTokens":15}}` | Model-keyed pricing table for the `reports`-step cost report. JSON object of shape `{ <model>: { usdPer1MTokens: <number> } }` where the rate is USD per 1,000,000 tokens. Ships a non-zero default so `cost-report.md` shows a figure without operator config; invalid JSON falls back to the default table. The reported USD is labelled **estimated** — it is a token-rate approximation, never billed accuracy. |
 
 ### Debug Variables
 

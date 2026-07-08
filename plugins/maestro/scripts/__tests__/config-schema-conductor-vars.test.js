@@ -43,7 +43,11 @@ test('config-schema declares the conductor tuning vars with full metadata', () =
     assert.ok(def.type.length > 0, `${name} type must be non-empty`);
     assert.equal(typeof def.description, 'string', `${name} needs a description`);
     assert.ok(def.description.length > 0, `${name} description must be non-empty`);
-    assert.equal(def.section, 'Conductor Tuning', `${name} belongs in the Conductor Tuning section`);
+    assert.equal(
+      def.section,
+      'Conductor Tuning',
+      `${name} belongs in the Conductor Tuning section`
+    );
     assert.ok('default' in def, `${name} needs a declared default`);
   }
 });

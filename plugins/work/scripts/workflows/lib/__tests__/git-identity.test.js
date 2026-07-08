@@ -31,7 +31,9 @@ describe('resolveGitUser', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh539-gi-'));
     execFileSync('git', ['-C', dir, 'init', '-q'], { timeout: 5000 });
     execFileSync('git', ['-C', dir, 'config', 'user.name', 'Claude'], { timeout: 5000 });
-    execFileSync('git', ['-C', dir, 'config', 'user.email', 'noreply@anthropic.com'], { timeout: 5000 });
+    execFileSync('git', ['-C', dir, 'config', 'user.email', 'noreply@anthropic.com'], {
+      timeout: 5000,
+    });
   });
   after(() => {
     fs.rmSync(dir, { recursive: true, force: true });

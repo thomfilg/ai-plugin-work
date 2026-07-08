@@ -42,6 +42,28 @@ const getConfig = require('../../lib/get-config');
  */
 const ENFORCEMENT_KIND = 'enforcement';
 
+/**
+ * Discriminator value for usage-capture rows (GH-311).
+ * Carries per-step / per-agent token, tool-use, and duration figures parsed
+ * from a Task() result's `<usage>` block. Like enforcement rows, usage rows
+ * are excluded from `analyzeActions()` step accounting.
+ * @type {'usage'}
+ */
+const USAGE_KIND = 'usage';
+
+/**
+ * True for any row that is NOT a legacy step-transition row — i.e. it carries
+ * a non-legacy `kind` discriminator (`enforcement` or `usage`). Such rows lack
+ * the `step`/`what` shape `analyzeActions()` accounts on and are excluded from
+ * per-step duration/command accounting and the totalDuration boundary, while
+ * still counting in `actionCount`.
+ * @param {object} row
+ * @returns {boolean}
+ */
+function isNonLegacyRow(row) {
+  return !!row && (row.kind === ENFORCEMENT_KIND || row.kind === USAGE_KIND);
+}
+
 let _tasksBase;
 function getTasksBase() {
   if (!_tasksBase) _tasksBase = getConfig.require('TASKS_BASE');
@@ -201,6 +223,73 @@ function buildEnforcementRow(entry) {
   };
 }
 
+// Pure `<usage>`-block parsing lives in usage-capture.js; re-exported below so
+// callers keep a single import surface (GH-311).
+const { coerceUsageNumber, parseUsageBlock } = require('./usage-capture');
+
+/**
+ * Append a usage-capture record to `.work-actions.json`.
+ *
+ * GH-311 — Task 1, R2 (kind:'usage' row keyed by step + agent for later
+ * per-step / per-agent rollups), C2 (written only through the guarded
+ * `appendRow()` helper — never a direct `fs.writeFileSync`).
+ *
+ * Usage records share the same file as legacy step rows and enforcement rows,
+ * discriminated by `kind: USAGE_KIND`. `loadActions()` returns them verbatim;
+ * `analyzeActions()` excludes them from per-step accounting (see
+ * `isNonLegacyRow`) while still counting them in `actionCount`.
+ *
+ * @param {string} ticketId
+ * @param {{
+ *   step: string,
+ *   agentType: string,
+ *   totalTokens: number,
+ *   toolUses: number,
+ *   durationMs: number
+ * }} record
+ */
+function appendUsage(ticketId, record) {
+  appendRow(ticketId, {
+    kind: USAGE_KIND,
+    timestamp: new Date().toISOString(),
+    step: record.step,
+    agentType: record.agentType,
+    totalTokens: coerceUsageNumber(record.totalTokens),
+    toolUses: coerceUsageNumber(record.toolUses),
+    durationMs: coerceUsageNumber(record.durationMs),
+  });
+}
+
+/**
+ * Fold one legacy step-transition row into its step's accumulator bucket
+ * (start/end timestamps, command/block/retry counts).
+ */
+function accumulateStepEntry(stepMap, action) {
+  if (!stepMap.has(action.step)) {
+    stepMap.set(action.step, {
+      startTime: null,
+      endTime: null,
+      commands: 0,
+      blocks: 0,
+      retries: 0,
+    });
+  }
+  const entry = stepMap.get(action.step);
+  const ts = new Date(action.timestamp).getTime();
+
+  if (action.what === 'step started') {
+    entry.startTime = ts;
+  } else if (action.what === 'step completed') {
+    entry.endTime = ts;
+  } else if (action.what.startsWith('BLOCKED:')) {
+    entry.blocks++;
+  } else if (action.what === 'step reset') {
+    entry.retries++;
+  } else if (!['workflow started', 'step deferred', 'step skipped'].includes(action.what)) {
+    entry.commands++;
+  }
+}
+
 /**
  * Compute per-step durations, bottleneck, block/retry counts from an actions array.
  * @param {Array<{step: string, timestamp: string, what: string, meta?: object}>} actions
@@ -220,35 +309,13 @@ function analyzeActions(actions) {
   const stepMap = new Map();
 
   for (const action of actions) {
-    // IDEA2 / GH-219: skip enforcement audit rows — they do not carry `step` /
-    // `what` fields and would corrupt step-duration accounting. Their record
-    // count still feeds `actionCount` below. Enforcement rows are also
-    // excluded from totalDuration boundary computation (see legacyActions filter ~line 236).
-    if (action && action.kind === ENFORCEMENT_KIND) continue;
-
-    if (!stepMap.has(action.step)) {
-      stepMap.set(action.step, {
-        startTime: null,
-        endTime: null,
-        commands: 0,
-        blocks: 0,
-        retries: 0,
-      });
-    }
-    const entry = stepMap.get(action.step);
-    const ts = new Date(action.timestamp).getTime();
-
-    if (action.what === 'step started') {
-      entry.startTime = ts;
-    } else if (action.what === 'step completed') {
-      entry.endTime = ts;
-    } else if (action.what.startsWith('BLOCKED:')) {
-      entry.blocks++;
-    } else if (action.what === 'step reset') {
-      entry.retries++;
-    } else if (!['workflow started', 'step deferred', 'step skipped'].includes(action.what)) {
-      entry.commands++;
-    }
+    // IDEA2 / GH-219 + GH-311: skip non-legacy rows (enforcement AND usage) —
+    // they do not carry the `step` / `what` shape and would corrupt
+    // step-duration accounting. Their record count still feeds `actionCount`
+    // below. Non-legacy rows are also excluded from the totalDuration boundary
+    // computation (see legacyActions filter below).
+    if (isNonLegacyRow(action)) continue;
+    accumulateStepEntry(stepMap, action);
   }
 
   const steps = [];
@@ -274,8 +341,9 @@ function analyzeActions(actions) {
   }
 
   // Total duration: first legacy action to last legacy action.
-  // Enforcement rows are excluded so they do not skew boundary timestamps.
-  const legacyActions = actions.filter((a) => !(a && a.kind === ENFORCEMENT_KIND));
+  // Non-legacy rows (enforcement + usage) are excluded so they do not skew
+  // boundary timestamps.
+  const legacyActions = actions.filter((a) => !isNonLegacyRow(a));
   let totalDuration = 0;
   if (legacyActions.length > 0) {
     const firstTs = new Date(legacyActions[0].timestamp).getTime();
@@ -296,9 +364,12 @@ module.exports = {
   appendAction,
   appendEnforcementAudit,
   appendEnforcementAuditAt,
+  appendUsage,
+  parseUsageBlock,
   loadActions,
   analyzeActions,
   ENFORCEMENT_KIND,
+  USAGE_KIND,
   get TASKS_BASE() {
     return getTasksBase();
   },

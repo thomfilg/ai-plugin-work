@@ -76,7 +76,12 @@ test('selectForEvent("PostToolUse", ...) does NOT fire on a successful (exit 0) 
 
 test('selectForEvent("PostToolUse", ...) picks only PostToolUse-event memories', () => {
   const memories = [
-    makeMemory({ name: 'post-mem', events: ['PostToolUse'], triggerPretool: ['Bash:pnpm test'], triggerPosttoolExit: 'nonzero' }),
+    makeMemory({
+      name: 'post-mem',
+      events: ['PostToolUse'],
+      triggerPretool: ['Bash:pnpm test'],
+      triggerPosttoolExit: 'nonzero',
+    }),
     makeMemory({ name: 'pre-mem', events: ['PreToolUse'] }),
   ];
   const picked = selectForEvent(memories, 'PostToolUse', failingTestPayload).map((m) => m.name);

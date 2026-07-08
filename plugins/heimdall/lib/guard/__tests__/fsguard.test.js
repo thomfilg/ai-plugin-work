@@ -43,14 +43,20 @@ describe('buildShimRewrite', () => {
 
   it('prepends LD_PRELOAD + HEIMDALL_PROTECTED, preserving an existing preload', () => {
     const out = buildShimRewrite('node build.js', entries, '/x/heimdall-fsguard.so');
-    assert.match(out, /export LD_PRELOAD='\/x\/heimdall-fsguard\.so'\$\{LD_PRELOAD:\+:\$LD_PRELOAD\};/);
+    assert.match(
+      out,
+      /export LD_PRELOAD='\/x\/heimdall-fsguard\.so'\$\{LD_PRELOAD:\+:\$LD_PRELOAD\};/
+    );
     assert.match(out, /export HEIMDALL_PROTECTED='\/repo\/\.claude:\/repo\/\.github';/);
     assert.ok(out.endsWith('node build.js'));
   });
 
   it('emits allowed subdirs as absolute paths', () => {
     const out = buildShimRewrite('node build.js', entries, '/x/so');
-    assert.match(out, /export HEIMDALL_ALLOWED='\/repo\/\.claude\/plans:\/repo\/\.claude\/projects';/);
+    assert.match(
+      out,
+      /export HEIMDALL_ALLOWED='\/repo\/\.claude\/plans:\/repo\/\.claude\/projects';/
+    );
   });
 
   it('allowedAbsPaths joins entry.dir with each allowed subdir', () => {

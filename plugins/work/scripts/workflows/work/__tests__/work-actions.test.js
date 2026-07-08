@@ -15,6 +15,7 @@ const TEST_TASKS_BASE = path.join(os.tmpdir(), 'work-actions-test-' + process.pi
 const FAKE_HOME = path.join(TEST_TASKS_BASE, 'fakehome');
 
 let appendAction, loadActions, analyzeActions, appendEnforcementAudit;
+let appendUsage, parseUsageBlock, USAGE_KIND;
 
 describe('work-actions', () => {
   const TEST_TICKET = 'TEST-ACTIONS-001';
@@ -35,6 +36,9 @@ describe('work-actions', () => {
     loadActions = mod.loadActions;
     analyzeActions = mod.analyzeActions;
     appendEnforcementAudit = mod.appendEnforcementAudit;
+    appendUsage = mod.appendUsage;
+    parseUsageBlock = mod.parseUsageBlock;
+    USAGE_KIND = mod.USAGE_KIND;
   });
 
   after(() => {
@@ -380,6 +384,157 @@ describe('work-actions', () => {
         '60s',
         'ticket step duration unchanged by enforcement row'
       );
+    });
+  });
+
+  // ─── GH-311: Usage capture (token/tool_use/duration) ────────────────────────
+  // Task 1 — R1 (parse total_tokens/tool_uses/duration_ms), R2 (kind:'usage'
+  // row keyed by step+agent), R5 (analyzeActions per-step duration uncorrupted),
+  // R7 (missing block → null), C2 (writes via guarded appendRow only),
+  // C5 (broaden kind-guard preserving legacy contract), C6 (numeric coercion,
+  // no throw).
+  describe('parseUsageBlock', () => {
+    it('should export parseUsageBlock as a function', () => {
+      assert.strictEqual(
+        typeof parseUsageBlock,
+        'function',
+        'work-actions must export parseUsageBlock'
+      );
+    });
+
+    it('extracts numeric totalTokens/toolUses/durationMs from a well-formed <usage> block', () => {
+      const text = [
+        'Some agent output preamble.',
+        '<usage>',
+        'total_tokens: 12345',
+        'tool_uses: 7',
+        'duration_ms: 89000',
+        '</usage>',
+        'trailing text',
+      ].join('\n');
+
+      const rec = parseUsageBlock(text);
+      assert.ok(rec, 'a well-formed block must yield a record');
+      assert.strictEqual(rec.totalTokens, 12345);
+      assert.strictEqual(rec.toolUses, 7);
+      assert.strictEqual(rec.durationMs, 89000);
+    });
+
+    it('returns null when no <usage> block is present', () => {
+      assert.strictEqual(parseUsageBlock('no usage here at all'), null);
+      assert.strictEqual(parseUsageBlock(''), null);
+    });
+
+    it('coerces non-numeric fields to 0 (NaN → 0), never throwing', () => {
+      const text = [
+        '<usage>',
+        'total_tokens: not-a-number',
+        'tool_uses: 3',
+        'duration_ms: ',
+        '</usage>',
+      ].join('\n');
+
+      let rec;
+      assert.doesNotThrow(() => {
+        rec = parseUsageBlock(text);
+      });
+      assert.ok(rec, 'malformed numeric fields still yield a record, not null');
+      assert.strictEqual(rec.totalTokens, 0, 'non-numeric total_tokens coerces to 0');
+      assert.strictEqual(rec.toolUses, 3);
+      assert.strictEqual(rec.durationMs, 0, 'empty duration_ms coerces to 0');
+    });
+  });
+
+  describe('appendUsage', () => {
+    it('should export USAGE_KIND and appendUsage', () => {
+      assert.strictEqual(USAGE_KIND, 'usage', 'discriminator must be the string "usage"');
+      assert.strictEqual(typeof appendUsage, 'function', 'work-actions must export appendUsage');
+    });
+
+    it('appends a kind:"usage" row carrying step/agentType and numeric figures', () => {
+      appendUsage(TEST_TICKET, {
+        step: 'implement',
+        agentType: 'developer-nodejs-tdd',
+        totalTokens: 4200,
+        toolUses: 9,
+        durationMs: 55000,
+      });
+
+      const rows = loadActions(TEST_TICKET);
+      assert.strictEqual(rows.length, 1, 'one usage row appended');
+      const row = rows[0];
+      assert.strictEqual(row.kind, 'usage', 'discriminator must be kind: "usage"');
+      assert.ok(row.timestamp, 'must include timestamp');
+      assert.match(row.timestamp, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, 'timestamp ISO 8601');
+      assert.strictEqual(row.step, 'implement');
+      assert.strictEqual(row.agentType, 'developer-nodejs-tdd');
+      assert.strictEqual(row.totalTokens, 4200);
+      assert.strictEqual(row.toolUses, 9);
+      assert.strictEqual(row.durationMs, 55000);
+    });
+
+    it('coexists with legacy and enforcement rows; loadActions returns it verbatim', () => {
+      appendAction(TEST_TICKET, { step: 'implement', what: 'step started' });
+      appendUsage(TEST_TICKET, {
+        step: 'implement',
+        agentType: 'reviewer',
+        totalTokens: 100,
+        toolUses: 1,
+        durationMs: 10,
+      });
+
+      const rows = loadActions(TEST_TICKET);
+      assert.strictEqual(rows.length, 2);
+      const usageRows = rows.filter((r) => r.kind === 'usage');
+      assert.strictEqual(usageRows.length, 1, 'usage rows are discriminated by kind');
+      assert.strictEqual(usageRows[0].agentType, 'reviewer');
+    });
+  });
+
+  describe('analyzeActions excludes usage rows from step accounting (C5)', () => {
+    const legacyOnly = [
+      { step: 'ticket', timestamp: '2026-02-26T20:00:00.000Z', what: 'step started' },
+      { step: 'ticket', timestamp: '2026-02-26T20:01:00.000Z', what: 'step completed' },
+      { step: 'bootstrap', timestamp: '2026-02-26T20:01:00.000Z', what: 'step started' },
+      { step: 'bootstrap', timestamp: '2026-02-26T20:03:00.000Z', what: 'step completed' },
+    ];
+
+    it('does not create phantom steps from usage rows and preserves legacy durations', () => {
+      const baseline = analyzeActions(legacyOnly);
+
+      const mixed = [
+        legacyOnly[0],
+        legacyOnly[1],
+        {
+          kind: 'usage',
+          timestamp: '2026-02-26T20:00:30.000Z',
+          step: 'ticket',
+          agentType: 'developer-nodejs-tdd',
+          totalTokens: 9999,
+          toolUses: 5,
+          durationMs: 30000,
+        },
+        legacyOnly[2],
+        legacyOnly[3],
+      ];
+
+      const result = analyzeActions(mixed);
+
+      // No phantom step keyed off a usage agent / mis-parsed field.
+      assert.strictEqual(result.steps.length, baseline.steps.length, 'no phantom steps appear');
+      const ticketStep = result.steps.find((s) => s.step === 'ticket');
+      assert.strictEqual(ticketStep.duration, '60s', 'usage row must not corrupt ticket duration');
+      assert.strictEqual(
+        ticketStep.commandCount,
+        0,
+        'usage row must not be counted as a step command'
+      );
+
+      // Usage rows still feed actionCount, exactly like enforcement rows.
+      assert.strictEqual(result.actionCount, mixed.length);
+
+      // Total duration boundary unchanged by the interleaved usage row.
+      assert.strictEqual(result.totalDuration, baseline.totalDuration);
     });
   });
 });

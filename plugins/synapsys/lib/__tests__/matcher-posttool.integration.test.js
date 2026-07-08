@@ -105,9 +105,15 @@ test('golden content gate: fires only on the intended tool_response payload', (t
   const firedOnMatch = matcher.selectForEvent(
     memories,
     'PostToolUse',
-    postPayload({ tool_response: { stderr: 'getaddrinfo ENOTFOUND registry.npmjs.org', exit_code: 1 } })
+    postPayload({
+      tool_response: { stderr: 'getaddrinfo ENOTFOUND registry.npmjs.org', exit_code: 1 },
+    })
   );
-  assert.equal(firedOnMatch.length, 1, 'content-gated memory must fire on the matching tool_response');
+  assert.equal(
+    firedOnMatch.length,
+    1,
+    'content-gated memory must fire on the matching tool_response'
+  );
 
   // Unrelated payload: no ENOTFOUND anywhere → must NOT fire.
   const noFire = matcher.selectForEvent(
@@ -115,7 +121,11 @@ test('golden content gate: fires only on the intended tool_response payload', (t
     'PostToolUse',
     postPayload({ tool_response: { stdout: 'All tests passed', exit_code: 0 } })
   );
-  assert.equal(noFire.length, 0, 'content-gated memory must NOT fire on a non-matching tool_response');
+  assert.equal(
+    noFire.length,
+    0,
+    'content-gated memory must NOT fire on a non-matching tool_response'
+  );
 });
 
 test('negative content gate suppresses an otherwise-positive match', (t) => {
@@ -151,7 +161,9 @@ test('negative content gate suppresses an otherwise-positive match', (t) => {
   const suppressed = matcher.selectForEvent(
     memories,
     'PostToolUse',
-    postPayload({ tool_response: { stdout: 'FAIL src/foo.test.ts: timeout exceeded', exit_code: 1 } })
+    postPayload({
+      tool_response: { stdout: 'FAIL src/foo.test.ts: timeout exceeded', exit_code: 1 },
+    })
   );
   assert.equal(
     suppressed.length,
@@ -241,7 +253,11 @@ test('pretool target mismatch does not fire (no-pretool-match)', (t) => {
     tool_response: { stdout: 'oops', exit_code: 1 },
   });
   const fired = matcher.selectForEvent(memories, 'PostToolUse', payload);
-  assert.equal(fired.length, 0, 'memory must not fire when the trigger_pretool target tool mismatches');
+  assert.equal(
+    fired.length,
+    0,
+    'memory must not fire when the trigger_pretool target tool mismatches'
+  );
 
   const result = matcher.matchPostTool(memories[0], payload);
   assert.equal(result.fired, false);

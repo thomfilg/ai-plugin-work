@@ -58,6 +58,12 @@ loadEnvFile();
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
+// Default model-keyed pricing table (USD per 1,000,000 tokens). Shipped so cost
+// reports produce a non-zero "estimated" figure out of the box (GH-311 R11).
+const DEFAULT_PRICING = {
+  'claude-opus-4': { usdPer1MTokens: 15 },
+};
+
 const config = {
   // Legacy Jira vars (backward compatible)
   JIRA_PROJECT_KEY: process.env.JIRA_PROJECT_KEY || 'PROJ',
@@ -139,6 +145,26 @@ const config = {
   SCRIPT_RUN_AFFECTED_UNIT: process.env.SCRIPT_RUN_AFFECTED_UNIT || '',
   SCRIPT_RUN_AFFECTED_INTEGRATION: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION || '',
   SCRIPT_RUN_AFFECTED_E2E: process.env.SCRIPT_RUN_AFFECTED_E2E || '',
+
+  // Model-keyed pricing table for cost estimation (GH-311).
+  // Shape: { <model>: { usdPer1MTokens: <number> } } — rate is USD per 1,000,000 tokens.
+  // Ships a non-zero default so cost reports show an estimate without operator config.
+  // Override via WORK_PRICING env var (JSON); invalid JSON falls back to the default table.
+  // Example .env: WORK_PRICING='{"opus":{"usdPer1MTokens":15}}'
+  WORK_PRICING: (() => {
+    const raw = process.env.WORK_PRICING;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch {
+        // fall through to default table
+      }
+    }
+    return DEFAULT_PRICING;
+  })(),
 
   // Web apps list — each repo defines its own via WEB_APPS env var (JSON)
   // Example .env: WEB_APPS='[{"name":"my-app","defaultPort":3000,"type":"vite"}]'
