@@ -1,6 +1,6 @@
 {
   "name": "heimdall",
-  "version": "3.67.1",
+  "version": "3.68.0",
   "description": "Config-driven file/directory guard. Lock blocks declare protected paths + an unlock phrase; a PreToolUse hook blocks Edit/Write/Bash/Task mutations unless the user speaks the phrase. Also conceals paths (hard read+write deny, no unlock) and can harden MCP secrets behind a setuid OS boundary. Stores are local, worktree, or global like synapsys.",
   "author": {
     "name": "Custom",
