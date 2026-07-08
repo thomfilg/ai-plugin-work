@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    name: Test (Node ${{ matrix.node-version }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so `git diff BASE...HEAD` in "Determine touched plugins" can resolve the merge base.
+          fetch-depth: 0
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          # Note: npm cache disabled — no package-lock.json in repo
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts # npm install (not ci) — no lockfile in repo
+
+      - name: Lint hooks.json (all plugins)
+        run: node scripts/lint-hooks-json.js
+
+      - name: Lint SKILL.md frontmatter (strict YAML — codex silently drops offenders)
+        run: node scripts/lint-skill-frontmatter.js
+
+      - name: Lint instruction vocabulary (no un-rendered Claude tool literals)
+        run: node scripts/lint-vocab.js
+
+      - name: Lint symlink paths (static + stripped-tree hook entrypoints)
+        run: node scripts/lint-symlink-paths.js
+
+      - name: PLUGIN_ROOT preamble drift (codemod --check)
+        run: node scripts/codemod-plugin-root-preamble.js --check
+
+      - name: Vendored runtime parity
+        run: node scripts/sync-vendored.js --check
+
+      - name: Determine touched plugins
+        id: scope
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=50 origin "${{ github.base_ref || 'main' }}" || true
+          BASE="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE" ]; then BASE="origin/${{ github.base_ref || 'main' }}"; fi
+          # Plugins touched (top-level dir under plugins/)
+          PLUGINS=$(git diff --name-only "$BASE"...HEAD -- plugins/ | awk -F/ 'NF>1 {print $2}' | sort -u | tr '\n' ' ')
+          # Any change outside plugins/ → run the full suite (root configs, CI, shared scripts can affect every plugin)
+          NON_PLUGIN=$(git diff --name-only "$BASE"...HEAD -- . ':!plugins/' | head -1 || true)
+          echo "plugins=${PLUGINS}" >> "$GITHUB_OUTPUT"
+          echo "non_plugin=${NON_PLUGIN}" >> "$GITHUB_OUTPUT"
+          echo "Touched plugins: ${PLUGINS:-<none>}"
+          echo "Non-plugin changes: ${NON_PLUGIN:-<none>}"
+
+      - name: Run tests (scoped to touched plugins)
+        if: steps.scope.outputs.non_plugin == '' && steps.scope.outputs.plugins != ''
+        env:
+          # Pass via env so a malicious plugin dir name can't inject shell commands at template-substitution time.
+          PLUGINS: ${{ steps.scope.outputs.plugins }}
+        run: |
+          set -euo pipefail
+          FILES=()
+          for p in $PLUGINS; do
+            # Defence-in-depth: refuse anything that isn't a simple alnum/_/- name.
+            if [[ ! "$p" =~ ^[A-Za-z0-9_-]+$ ]]; then
+              echo "Refusing suspicious plugin name: $p" >&2
+              exit 1
+            fi
+            while IFS= read -r f; do FILES+=("$f"); done < <(find "plugins/$p" -type d -name node_modules -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print | sort)
+          done
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No test files under touched plugins — nothing to run."
+            exit 0
+          fi
+          echo "Running ${#FILES[@]} test files from touched plugins."
+          node --test "${FILES[@]}"
+
+      - name: Run tests (full suite)
+        if: steps.scope.outputs.non_plugin != '' || steps.scope.outputs.plugins == ''
+        run: npm test
+
+  # NOTE: maintainers must add this job to the branch protection "Required checks"
+  # list so failing quality gates block merges (R9 / AC9 / AC10).
+  quality:
+    runs-on: ubuntu-latest
+    name: Quality (static code gate)
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --ignore-scripts
+
+      - name: Run static code quality gate
+        run: pnpm quality

@@ -1,0 +1,10 @@
+{
+  "session_id": "c0ffee00-1111-4222-8333-444455556666",
+  "transcript_path": "/home/user/.claude/projects/-tmp-claude-fixture-repo/subagents/c0ffee00-1111-4222-8333-444455556666-agent.jsonl",
+  "cwd": "/tmp/claude-fixture-repo",
+  "permission_mode": "default",
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_id": "agent-0001",
+  "agent_type": "developer-nodejs-tdd"
+}

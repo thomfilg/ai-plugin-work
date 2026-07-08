@@ -1,0 +1,185 @@
+#!/usr/bin/env node
+
+/**
+ * Enforces that /work-pr is called before /work can complete.
+ *
+ * Flow:
+ * - PreToolUse on /work: Creates .work-session file
+ * - PreToolUse on /work-pr: Creates .work-pr-executed file
+ * - PostToolUse on /work: Verifies .work-pr-executed exists, blocks if not
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { installProcessGuards, loadConfigOrNull } = require(
+  path.join(__dirname, '..', '..', 'lib', 'hook-guards')
+);
+
+let didBlock = false;
+installProcessGuards(__filename, () => (didBlock ? 2 : 0));
+
+const config = loadConfigOrNull();
+if (!config) process.exit(0);
+
+// Hook payload from stdin: the TOOL_INPUT env channel is legacy (kept first
+// for byte-identity when present) — current runtimes deliver tool_input in
+// the stdin JSON payload. Codex never sets TOOL_INPUT (ground truth §2.7.2).
+let payload = {};
+try {
+  payload = JSON.parse(fs.readFileSync(0, 'utf8'));
+} catch {
+  /* empty/invalid stdin — payload stays {} */
+}
+
+// No-op on codex: the Skill tool doesn't exist there (skills are $mentions,
+// not tool calls — design C5/C13), so /work-pr sequencing can't be observed
+// via this hook. The Skill matcher lane is already dead on codex; this guard
+// makes the no-op explicit if the lane ever widens.
+const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
+if (getRuntime(payload).name === 'codex') process.exit(0);
+
+let toolInput;
+try {
+  toolInput = JSON.parse(process.env.TOOL_INPUT || 'null') || undefined;
+} catch {
+  toolInput = undefined;
+}
+if (!toolInput) {
+  toolInput =
+    payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
+}
+const hookType = process.env.CLAUDE_HOOK_TYPE || payload.hook_event_name || 'PostToolUse'; // PreToolUse or PostToolUse
+
+// Only handle work and work-pr skills
+if (!['work', 'work-pr'].includes(toolInput.skill)) {
+  process.exit(0);
+}
+
+// Extract ticket ID
+const args = toolInput.args || '';
+const ticketMatch = args.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+|\\d+'));
+if (!ticketMatch) {
+  process.exit(0);
+}
+
+let ticketId = ticketMatch[0];
+if (!ticketId.startsWith(config.TICKET_PROJECT_KEY + '-')) {
+  ticketId = config.prefixTicketId(ticketId);
+}
+
+const TASKS_DIR = config.tasksDir(ticketId);
+const SESSION_FILE = path.join(TASKS_DIR, '.work-session');
+const WORK_PR_EXECUTED_FILE = path.join(TASKS_DIR, '.work-pr-executed');
+
+// Ensure tasks directory exists
+if (!fs.existsSync(TASKS_DIR)) {
+  fs.mkdirSync(TASKS_DIR, { recursive: true });
+}
+
+if (hookType === 'PreToolUse') {
+  // ========== PRE TOOL USE ==========
+
+  if (toolInput.skill === 'work') {
+    // /work starting - create session file, clear any previous work-pr-executed
+    const sessionData = {
+      startedAt: new Date().toISOString(),
+      ticketId,
+      workPrExecuted: false,
+    };
+    fs.writeFileSync(SESSION_FILE, JSON.stringify(sessionData, null, 2));
+
+    // Clear previous work-pr-executed flag (fresh session)
+    if (fs.existsSync(WORK_PR_EXECUTED_FILE)) {
+      fs.unlinkSync(WORK_PR_EXECUTED_FILE);
+    }
+
+    console.log(`📋 /work session started for ${ticketId}`);
+  }
+
+  if (toolInput.skill === 'work-pr') {
+    // /work-pr being called - mark it as executed
+    const executedData = {
+      executedAt: new Date().toISOString(),
+      ticketId,
+    };
+    fs.writeFileSync(WORK_PR_EXECUTED_FILE, JSON.stringify(executedData, null, 2));
+    console.log(`✅ /work-pr marked as executed for ${ticketId}`);
+  }
+
+  process.exit(0);
+} else {
+  // ========== POST TOOL USE ==========
+
+  if (toolInput.skill === 'work') {
+    // /work completing - verify /work-pr was called
+
+    const workPrExecuted = fs.existsSync(WORK_PR_EXECUTED_FILE);
+    const prShaExists = fs.existsSync(path.join(TASKS_DIR, '.pr-update-sha'));
+    const postPrShaExists = fs.existsSync(path.join(TASKS_DIR, '.post-pr-update-sha'));
+
+    console.log('');
+    console.log('╔══════════════════════════════════════════════════════════════════════╗');
+    console.log('║  /work STEP VERIFICATION                                             ║');
+    console.log('╠══════════════════════════════════════════════════════════════════════╣');
+    console.log(`║  Ticket: ${ticketId.padEnd(58)}║`);
+    console.log('╚══════════════════════════════════════════════════════════════════════╝');
+    console.log('');
+
+    const checks = [];
+
+    if (workPrExecuted) {
+      console.log('✅ /work-pr was executed during this session');
+      checks.push(true);
+    } else {
+      console.log('❌ /work-pr was NOT executed during this session');
+      checks.push(false);
+    }
+
+    if (prShaExists) {
+      console.log('✅ .pr-update-sha exists');
+      checks.push(true);
+    } else {
+      console.log('❌ .pr-update-sha is MISSING');
+      checks.push(false);
+    }
+
+    if (postPrShaExists) {
+      console.log('✅ .post-pr-update-sha exists');
+      checks.push(true);
+    } else {
+      console.log('❌ .post-pr-update-sha is MISSING');
+      checks.push(false);
+    }
+
+    console.log('');
+
+    // Clean up session file
+    if (fs.existsSync(SESSION_FILE)) {
+      fs.unlinkSync(SESSION_FILE);
+    }
+
+    // Block if any check failed
+    if (checks.includes(false)) {
+      console.log('╔══════════════════════════════════════════════════════════════════════╗');
+      console.log('║  🛑 BLOCKED: /work cannot complete without /work-pr                  ║');
+      console.log('╠══════════════════════════════════════════════════════════════════════╣');
+      console.log('║                                                                      ║');
+      console.log('║  You MUST run:  /work-pr ' + ticketId.padEnd(40) + '║');
+      console.log('║                                                                      ║');
+      console.log('║  This command updates the PR and creates required SHA tracking.     ║');
+      console.log('║                                                                      ║');
+      console.log('╚══════════════════════════════════════════════════════════════════════╝');
+      didBlock = true;
+      process.exit(2);
+    }
+
+    // All good - clean up work-pr-executed file
+    if (fs.existsSync(WORK_PR_EXECUTED_FILE)) {
+      fs.unlinkSync(WORK_PR_EXECUTED_FILE);
+    }
+
+    console.log('✅ All /work steps verified. Proceeding...');
+  }
+
+  process.exit(0);
+}

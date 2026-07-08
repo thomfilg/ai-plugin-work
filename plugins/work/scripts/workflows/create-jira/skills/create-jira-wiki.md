@@ -1,0 +1,1 @@
+../../../skills/create-jira-wiki/SKILL.md

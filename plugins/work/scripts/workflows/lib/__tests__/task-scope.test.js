@@ -1,0 +1,479 @@
+/**
+ * Tests for lib/task-scope.js (Gate C validators).
+ *
+ * Run: node --test scripts/workflows/lib/__tests__/task-scope.test.js
+ */
+
+'use strict';
+
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
+
+const ts = require('../task-scope');
+
+describe('validateTask', () => {
+  it('passes when both sections are populated', () => {
+    const errors = ts.validateTask({
+      num: 1,
+      type: 'tdd-code',
+      filesInScope: ['lib/x.ts'],
+      filesOutOfScope: ['lib/y.ts'],
+    });
+    assert.deepEqual(errors, []);
+  });
+
+  it('passes with empty filesOutOfScope (no siblings)', () => {
+    const errors = ts.validateTask({
+      num: 1,
+      type: 'tdd-code',
+      filesInScope: ['lib/x.ts'],
+      filesOutOfScope: [],
+    });
+    assert.deepEqual(errors, []);
+  });
+
+  it('fails when both filesInScope and suggestedScope are missing', () => {
+    const errors = ts.validateTask({ num: 2, type: 'tdd-code', filesOutOfScope: [] });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Task 2/);
+    assert.match(errors[0], /Files in scope/);
+  });
+
+  it('fails when both filesInScope and suggestedScope are empty', () => {
+    const errors = ts.validateTask({
+      num: 3,
+      type: 'tdd-code',
+      filesInScope: [],
+      suggestedScope: '',
+      filesOutOfScope: [],
+    });
+    assert.equal(errors.length, 1);
+  });
+
+  it('rejects legacy suggestedScope-only tasks (canonical Files in scope required)', () => {
+    const errors = ts.validateTask({
+      num: 5,
+      type: 'tdd-code',
+      filesInScope: [],
+      suggestedScope: '- lib/x.ts',
+      filesOutOfScope: [],
+    });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /missing `### Files in scope`/);
+  });
+
+  it('fails when filesOutOfScope is non-array (malformed)', () => {
+    const errors = ts.validateTask({ num: 4, filesInScope: ['x.ts'], filesOutOfScope: 'oops' });
+    assert.match(errors.join('|'), /out of scope/);
+  });
+
+  it('tolerates missing filesOutOfScope (legacy task)', () => {
+    const errors = ts.validateTask({ num: 6, type: 'tdd-code', filesInScope: ['x.ts'] });
+    assert.deepEqual(errors, []);
+  });
+
+  it('handles non-object input gracefully', () => {
+    assert.deepEqual(ts.validateTask(null), ['task must be an object']);
+    assert.deepEqual(ts.validateTask(undefined), ['task must be an object']);
+  });
+
+  it('exempts checkpoint tasks from the Files-in-scope requirement', () => {
+    // Checkpoint tasks don't ship code, so they don't need a scope envelope.
+    assert.deepEqual(ts.validateTask({ num: 9, type: 'checkpoint' }), []);
+    assert.deepEqual(ts.validateTask({ num: 10, type: 'checkpoint', isCheckpoint: true }), []);
+  });
+
+  // GH-392 follow-up: cross-task deps must be repo-relative.
+  it('rejects absolute POSIX path in crossTaskDeps', () => {
+    const errors = ts.validateTask({
+      num: 11,
+      filesInScope: ['src/a.ts'],
+      crossTaskDeps: ['/etc/passwd'],
+    });
+    assert.match(errors.join('|'), /Cross-Task Dependencies.*absolute path/);
+    assert.match(errors.join('|'), /\/etc\/passwd/);
+  });
+
+  it('rejects absolute Windows path in crossTaskDeps', () => {
+    const errors = ts.validateTask({
+      num: 12,
+      filesInScope: ['src/a.ts'],
+      crossTaskDeps: ['C:\\Windows\\System32\\evil.dll'],
+    });
+    assert.match(errors.join('|'), /Cross-Task Dependencies.*absolute path/);
+  });
+
+  it('accepts repo-relative crossTaskDeps', () => {
+    const errors = ts.validateTask({
+      num: 13,
+      type: 'tdd-code',
+      filesInScope: ['src/a.ts'],
+      crossTaskDeps: ['src/shared/schema.ts', 'lib/**/*.ts'],
+    });
+    assert.deepEqual(errors, []);
+  });
+
+  // GH-498-shape defense: unknown/missing `### Type` falls back to the
+  // strictest tdd-code contract at implement and wedges non-code tasks at
+  // RED. Catch it at tasks_gate where tasks.md is still editable.
+  it('rejects a task with a missing Type', () => {
+    const errors = ts.validateTask({ num: 20, filesInScope: ['src/a.ts'] });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Task 20 is missing `### Type`/);
+    assert.match(errors[0], /tdd-code/);
+  });
+
+  it('rejects a task with a legacy domain-kind Type (devops)', () => {
+    const errors = ts.validateTask({
+      num: 21,
+      type: 'devops',
+      filesInScope: ['scripts/deploy.yml'],
+    });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /"devops" is not in the closed enum/);
+    assert.match(errors[0], /strictest tdd-code gate contract/);
+  });
+
+  it('accepts every member of the closed Type enum', () => {
+    for (const type of [
+      'tdd-code',
+      'tests-only',
+      'docs',
+      'config',
+      'ci',
+      'mechanical-refactor',
+      'file-move',
+      'checkpoint',
+    ]) {
+      const errors = ts.validateTask({ num: 22, type, filesInScope: ['src/a.ts'] });
+      assert.ok(
+        !errors.some((e) => /### Type/.test(e)),
+        `Type "${type}" should be accepted; got: ${errors.join(' | ')}`
+      );
+    }
+  });
+
+  it('rejects absolute path in filesInScope and filesOutOfScope', () => {
+    const errors = ts.validateTask({
+      num: 14,
+      filesInScope: ['/abs/in.ts'],
+      filesOutOfScope: ['/abs/out.ts'],
+    });
+    assert.match(errors.join('|'), /Files in scope.*absolute path/);
+    assert.match(errors.join('|'), /Files explicitly out of scope.*absolute path/);
+  });
+});
+
+// GH-392 follow-up: cross-task deps must reference paths owned by another task.
+describe('validateCrossTaskDepsOwnership', () => {
+  it('errors when a crossTaskDep is owned by no other task', () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/orphan.ts'] },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ];
+    const errors = ts.validateCrossTaskDepsOwnership(tasks);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Task 1 declares Cross-Task Dependency `src\/orphan\.ts`/);
+    assert.match(errors[0], /no other task lists it in/);
+  });
+
+  it("accepts a crossTaskDep that literally appears in another task's scope", () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
+      { num: 2, filesInScope: ['src/shared/schema.ts', 'src/b.ts'] },
+    ];
+    assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
+  });
+
+  it("accepts a crossTaskDep covered by another task's glob scope", () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
+      { num: 2, filesInScope: ['src/shared/**'] },
+    ];
+    assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
+  });
+
+  it('rejects a crossTaskDep that only the SAME task lists in scope', () => {
+    const tasks = [
+      {
+        num: 1,
+        filesInScope: ['src/a.ts', 'src/self.ts'],
+        crossTaskDeps: ['src/self.ts'],
+      },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ];
+    const errors = ts.validateCrossTaskDepsOwnership(tasks);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /no other task lists it in/);
+  });
+
+  it('validateAll surfaces the cross-task ownership error at tasks-gate', () => {
+    const result = ts.validateAll([
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/orphan.ts'] },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ]);
+    assert.equal(result.valid, false);
+    assert.ok(
+      result.errors.some((e) => /Cross-Task Dependency.*orphan/.test(e)),
+      `validateAll should surface ownership error; got: ${result.errors.join(' | ')}`
+    );
+  });
+
+  it('skips absolute entries (already errored by validateTask)', () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['/etc/passwd'] },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ];
+    // validateCrossTaskDepsOwnership skips absolute entries; validateTask covers them.
+    assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
+  });
+});
+
+describe('validateAll', () => {
+  it('returns valid:true when all tasks pass', () => {
+    const result = ts.validateAll([
+      { num: 1, type: 'tdd-code', filesInScope: ['a.ts'], filesOutOfScope: [] },
+      { num: 2, type: 'tdd-code', filesInScope: ['b.ts'], filesOutOfScope: ['c.ts'] },
+    ]);
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.errors, []);
+  });
+
+  it('aggregates errors across all tasks', () => {
+    const result = ts.validateAll([
+      { num: 1, filesInScope: [], filesOutOfScope: [] },
+      { num: 2, filesOutOfScope: 'bad' },
+    ]);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.length >= 2);
+    assert.match(result.errors.join('|'), /Task 1/);
+    assert.match(result.errors.join('|'), /Task 2/);
+  });
+
+  it('fails on empty or non-array input', () => {
+    assert.equal(ts.validateAll([]).valid, false);
+    assert.equal(ts.validateAll(null).valid, false);
+    assert.equal(ts.validateAll(undefined).valid, false);
+  });
+});
+
+describe('unionFilesInScope', () => {
+  it('returns deduped union across tasks', () => {
+    const out = ts.unionFilesInScope([
+      { num: 1, filesInScope: ['a.ts', 'b.ts'] },
+      { num: 2, filesInScope: ['b.ts', 'c.ts'] },
+    ]);
+    assert.deepEqual(out.sort(), ['a.ts', 'b.ts', 'c.ts']);
+  });
+
+  it('tolerates missing filesInScope', () => {
+    const out = ts.unionFilesInScope([{ num: 1 }, { num: 2, filesInScope: ['x.ts'] }]);
+    assert.deepEqual(out, ['x.ts']);
+  });
+
+  it('returns [] for non-array', () => {
+    assert.deepEqual(ts.unionFilesInScope(null), []);
+  });
+});
+
+describe('test-file naming convention (integration / e2e)', () => {
+  describe('isIntegrationTestPath', () => {
+    const cases = [
+      ['lib/foo/__tests__/bar.integration.test.ts', true],
+      ['lib/foo/bar.integration.spec.tsx', true],
+      ['tests/integration/handler.test.ts', true],
+      ['app/integration/foo.spec.js', true],
+      ['lib/foo/bar.test.ts', false], // plain unit
+      ['lib/foo/bar.spec.ts', false], // plain unit
+      ['tests/e2e/bar.test.ts', false], // e2e, not integration
+      ['lib/foo/bar.integration.ts', false], // not a test file
+      ['lib/integrationhelpers/foo.test.ts', false], // word boundary
+    ];
+    for (const [p, expected] of cases) {
+      it(`${JSON.stringify(p)} → ${expected}`, () => {
+        assert.equal(ts.isIntegrationTestPath(p), expected);
+      });
+    }
+  });
+
+  describe('isE2eTestPath', () => {
+    const cases = [
+      ['tests/e2e/specs/login.e2e.spec.ts', true],
+      ['app/e2e/foo.spec.ts', true],
+      ['lib/foo/bar.e2e.test.ts', true],
+      ['lib/foo/bar.test.ts', false],
+      ['lib/foo/bar.integration.test.ts', false],
+      ['lib/e2ehelper/foo.test.ts', false], // word boundary
+    ];
+    for (const [p, expected] of cases) {
+      it(`${JSON.stringify(p)} → ${expected}`, () => {
+        assert.equal(ts.isE2eTestPath(p), expected);
+      });
+    }
+  });
+});
+
+describe('fileMatchesScope', () => {
+  it('exact match', () => {
+    assert.equal(ts.fileMatchesScope('lib/foo.ts', ['lib/foo.ts']), true);
+  });
+  it('glob with **', () => {
+    assert.equal(ts.fileMatchesScope('lib/foo/bar/baz.ts', ['lib/foo/**']), true);
+  });
+  it('no match across siblings', () => {
+    assert.equal(ts.fileMatchesScope('lib/bar.ts', ['lib/foo.ts']), false);
+  });
+  it('handles ./ prefix on both sides', () => {
+    assert.equal(ts.fileMatchesScope('./lib/foo.ts', ['./lib/foo.ts']), true);
+  });
+  it('mid-glob ** requires tail to match (no prefix-only false-positive)', () => {
+    // The previous prefix-match heuristic returned true for ANY file under
+    // `lib/` when the scope was `lib/**/foo.ts`. The fixed matcher only
+    // accepts paths whose tail also matches.
+    assert.equal(ts.fileMatchesScope('lib/unrelated.ts', ['lib/**/foo.ts']), false);
+    assert.equal(ts.fileMatchesScope('lib/bar/foo.ts', ['lib/**/foo.ts']), true);
+    assert.equal(ts.fileMatchesScope('lib/foo.ts', ['lib/**/foo.ts']), false);
+  });
+  it('single * does not cross path segments', () => {
+    assert.equal(ts.fileMatchesScope('lib/a/b.ts', ['lib/*.ts']), false);
+    assert.equal(ts.fileMatchesScope('lib/a.ts', ['lib/*.ts']), true);
+  });
+  it('trailing slash desugars to directory wildcard', () => {
+    assert.equal(ts.fileMatchesScope('lib/foo/bar.ts', ['lib/foo/']), true);
+    assert.equal(ts.fileMatchesScope('lib/other.ts', ['lib/foo/']), false);
+  });
+});
+
+describe('validateTddCycle (ECHO-4453 wedge detection)', () => {
+  it('returns no errors on a clean single-cycle task', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'Backend: derive dashboardCount (full TDD cycle)',
+        type: 'backend',
+        requirementsCovered: 'R9, spec §IO #1',
+      },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('flags RED-only Task N followed by GREEN-only Task N+1 sharing R-ids', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'RED: extend get.integration.test.ts with failing assertion',
+        type: 'backend',
+        requirementsCovered: 'R9, spec §IO #2',
+      },
+      {
+        num: 2,
+        title: 'GREEN: derive real dashboardCount in get.ts',
+        type: 'backend',
+        requirementsCovered: 'R9, spec §IO #1',
+      },
+    ];
+    const errs = ts.validateTddCycle(tasks);
+    assert.equal(errs.length, 1);
+    assert.match(errs[0], /Task 1 \(RED\) and Task 2 \(GREEN\)/);
+    assert.match(errs[0], /R9/);
+    assert.match(errs[0], /ECHO-4453 wedge/);
+  });
+
+  it('flags GREEN → REFACTOR split too', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'GREEN: implement derivation',
+        type: 'backend',
+        requirementsCovered: 'R9',
+      },
+      {
+        num: 2,
+        title: 'REFACTOR: tidy reducer',
+        type: 'backend',
+        requirementsCovered: 'R9',
+      },
+    ];
+    const errs = ts.validateTddCycle(tasks);
+    assert.equal(errs.length, 1);
+    assert.match(errs[0], /Task 1 \(GREEN\) and Task 2 \(REFACTOR\)/);
+  });
+
+  it('does not flag when phase-prefixed tasks cover DIFFERENT requirements', () => {
+    const tasks = [
+      { num: 1, title: 'RED: scenario A', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'GREEN: scenario B', type: 'backend', requirementsCovered: 'R2' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('does not flag checkpoint tasks', () => {
+    const tasks = [
+      { num: 1, title: 'RED: write failing test', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'GREEN: implement', type: 'checkpoint', requirementsCovered: 'R1' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('does not flag non-consecutive phase transitions (RED then REFACTOR)', () => {
+    const tasks = [
+      { num: 1, title: 'RED: foo', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'REFACTOR: bar', type: 'backend', requirementsCovered: 'R1' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('does not flag tasks without phase prefix', () => {
+    const tasks = [
+      { num: 1, title: 'Add failing test', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'Implement feature', type: 'backend', requirementsCovered: 'R1' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('handles empty input gracefully', () => {
+    assert.deepEqual(ts.validateTddCycle([]), []);
+    assert.deepEqual(ts.validateTddCycle(null), []);
+  });
+
+  it('validateAll includes TDD-cycle errors in aggregated output', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'RED: failing test',
+        type: 'backend',
+        filesInScope: ['a.test.ts'],
+        requirementsCovered: 'R9',
+      },
+      {
+        num: 2,
+        title: 'GREEN: implementation',
+        type: 'backend',
+        filesInScope: ['a.ts'],
+        requirementsCovered: 'R9',
+      },
+    ];
+    const result = ts.validateAll(tasks);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => /ECHO-4453 wedge/.test(e)));
+  });
+});
+
+describe('findTask', () => {
+  it('finds by task num', () => {
+    const tasks = [
+      { num: 1, filesInScope: ['a'] },
+      { num: 2, filesInScope: ['b'] },
+    ];
+    assert.equal(ts.findTask(tasks, 2).filesInScope[0], 'b');
+  });
+
+  it('returns null when not found', () => {
+    assert.equal(ts.findTask([{ num: 1 }], 9), null);
+  });
+
+  it('returns null for bad input', () => {
+    assert.equal(ts.findTask(null, 1), null);
+    assert.equal(ts.findTask([{ num: 1 }], 'nope'), null);
+  });
+});

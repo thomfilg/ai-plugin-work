@@ -1,0 +1,76 @@
+name: Bump Version
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    # Skip bump commits to avoid infinite loop
+    if: "!contains(github.event.head_commit.message, 'chore(release):')"
+    steps:
+      - name: Generate App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          # Need history so `git diff --name-only <before>..<sha>` can resolve
+          # both endpoints when bump-version.js computes touched plugins.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Determine bump type from commit message
+        id: bump-type
+        # Conventional Commits → semver:
+        #   - "<type>!:" or body contains "BREAKING CHANGE" → major
+        #   - "feat:" / "feat(scope):"                      → minor
+        #   - anything else (fix/chore/refactor/docs/test/perf/ci/build/style/revert)
+        #                                                   → patch
+        # The signal lives in `github.event.head_commit.message`, which for
+        # squash-merged PRs is the PR title + body, and for merge commits is
+        # the PR's merge-commit subject.
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if printf '%s\n' "$MSG" | grep -qE '^[a-zA-Z]+(\([^)]+\))?!:' \
+             || printf '%s\n' "$MSG" | grep -qE '(^|[[:space:]])BREAKING[ -]CHANGE([[:space:]]|:)'; then
+            TYPE=major
+          elif printf '%s\n' "$MSG" | grep -qE '^feat(\([^)]+\))?:'; then
+            TYPE=minor
+          else
+            TYPE=patch
+          fi
+          echo "Detected bump type: $TYPE (from first line: $(printf '%s' "$MSG" | head -1))"
+          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version (${{ steps.bump-type.outputs.type }})
+        env:
+          # Scope plugin bumps to plugins whose files actually changed in the
+          # push range. Workspace + marketplace manifests bump unconditionally.
+          BUMP_RANGE: ${{ github.event.before }}..${{ github.sha }}
+        run: node plugins/work/scripts/workflows/lib/scripts/bump-version.js ${{ steps.bump-type.outputs.type }}
+
+      - name: Commit and push
+        run: |
+          git config user.name "claude-plugin-work-botApp[bot]"
+          git config user.email "claude-plugin-work-botApp[bot]@users.noreply.github.com"
+          VERSION=$(node -p "require('./package.json').version")
+          # Stage every plugin manifest dynamically — bump-version.js may have
+          # touched any subset of plugins/*/.claude-plugin/plugin.json.
+          git add package.json .claude-plugin/marketplace.json plugins/*/.claude-plugin/plugin.json
+          # Nothing to commit if the bump was a no-op (already at target version).
+          if git diff --cached --quiet; then
+            echo "No version changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(release): bump version to ${VERSION}"
+          git push

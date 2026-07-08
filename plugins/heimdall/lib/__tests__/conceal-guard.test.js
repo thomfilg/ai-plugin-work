@@ -1,0 +1,541 @@
+// Behavioral tests for the Heimdall conceal guard (read+write hard-deny, no
+// unlock) and its config-builder script.
+//
+// Discovered by plugins/work/scripts/run-tests.sh (searches plugins/heimdall/).
+// Manual: node --test plugins/heimdall/lib/__tests__/conceal-guard.test.js
+
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const HOOK = path.resolve(__dirname, '..', '..', 'hooks', 'heimdall-conceal.js');
+const SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'heimdall-conceal.js');
+
+let repo;
+
+/** Run the conceal-builder script: `heimdall-conceal.js <path> <repo>`. */
+function conceal(target) {
+  return spawnSync('node', [SCRIPT, target, repo], { encoding: 'utf8' });
+}
+
+/** Run the guard hook with a PreToolUse payload; returns its exit status. */
+function guard(payload) {
+  const res = spawnSync('node', [HOOK], {
+    input: JSON.stringify(payload),
+    env: { ...process.env, CLAUDE_PROJECT_DIR: repo },
+    encoding: 'utf8',
+  });
+  return res.status;
+}
+
+const readPayload = (p) => ({ tool_name: 'Read', tool_input: { file_path: p } });
+const bashPayload = (cmd) => ({ tool_name: 'Bash', tool_input: { command: cmd } });
+
+function readCfg() {
+  return JSON.parse(fs.readFileSync(path.join(repo, '.claude', 'heimdall-conceal.json'), 'utf8'));
+}
+
+before(() => {
+  repo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-conceal-'));
+  fs.mkdirSync(path.join(repo, 'secret-folder'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'credentials'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'credentials', 'token.txt'), 'hi\n');
+});
+
+after(() => {
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+describe('heimdall conceal guard', () => {
+  it('is a no-op when the project has no conceal config', () => {
+    assert.equal(guard(readPayload(path.join(repo, 'credentials', 'token.txt'))), 0);
+  });
+
+  it('conceals a file and creates the config', () => {
+    const r = conceal('credentials/token.txt');
+    assert.equal(r.status, 0);
+    const cfg = readCfg();
+    assert.ok(cfg.denyFilePatterns.some((p) => p.includes('credentials/token')));
+    assert.ok(cfg.denyCommandPatterns.some((p) => p.includes('credentials/token')));
+  });
+
+  it('denies Read of a concealed file', () => {
+    assert.equal(guard(readPayload(path.join(repo, 'credentials', 'token.txt'))), 2);
+  });
+
+  it('denies reads anywhere under a concealed folder', () => {
+    assert.equal(conceal('secret-folder').status, 0);
+    assert.equal(guard(readPayload(path.join(repo, 'secret-folder', 'nested', 'x.env'))), 2);
+  });
+
+  it('denies a Glob whose pattern targets a concealed folder', () => {
+    assert.equal(guard({ tool_name: 'Glob', tool_input: { pattern: 'secret-folder/**' } }), 2);
+  });
+
+  it('denies a Glob whose path is a concealed folder (separate pattern)', () => {
+    assert.equal(
+      guard({
+        tool_name: 'Glob',
+        tool_input: { path: path.join(repo, 'secret-folder'), pattern: '*.env' },
+      }),
+      2
+    );
+  });
+
+  it('allows a Glob over unrelated paths', () => {
+    assert.equal(guard({ tool_name: 'Glob', tool_input: { pattern: 'src/**/*.ts' } }), 0);
+  });
+
+  it('allows a Grep whose content pattern matches a concealed name but targets an unrelated dir', () => {
+    // 'secret-folder' here is a CONTENT regex, not a path — Grep over src/ must
+    // not be blocked just because a folder named secret-folder is concealed.
+    assert.equal(
+      guard({
+        tool_name: 'Grep',
+        tool_input: { pattern: 'secret-folder', path: path.join(repo, 'src') },
+      }),
+      0
+    );
+  });
+
+  it('still denies a Grep whose path is a concealed folder', () => {
+    assert.equal(
+      guard({
+        tool_name: 'Grep',
+        tool_input: { pattern: 'TODO', path: path.join(repo, 'secret-folder') },
+      }),
+      2
+    );
+  });
+
+  it('denies NotebookEdit on a concealed path', () => {
+    assert.equal(
+      guard({
+        tool_name: 'NotebookEdit',
+        tool_input: { notebook_path: path.join(repo, 'secret-folder', 'analysis.ipynb') },
+      }),
+      2
+    );
+  });
+
+  it('denies a payload using the camelCase filePath field', () => {
+    assert.equal(
+      guard({
+        tool_name: 'Read',
+        tool_input: { filePath: path.join(repo, 'credentials', 'token.txt') },
+      }),
+      2
+    );
+  });
+
+  it('denies a Read via a symlink that resolves into a concealed folder', () => {
+    fs.writeFileSync(path.join(repo, 'secret-folder', 'real.txt'), 'sek\n');
+    const link = path.join(repo, 'innocent.txt');
+    fs.symlinkSync(path.join(repo, 'secret-folder', 'real.txt'), link);
+    // The symlink path itself does not match the deny pattern; resolving it must.
+    assert.equal(guard(readPayload(link)), 2);
+  });
+
+  it('denies a Bash read of a concealed path mid-pipe', () => {
+    assert.equal(guard(bashPayload(`cat ${repo}/credentials/token.txt | jq .`)), 2);
+  });
+
+  it('denies a Bash read referencing the path as a bare repo-relative token', () => {
+    assert.equal(guard(bashPayload('cat credentials/token.txt')), 2);
+  });
+
+  it('allows reads of unrelated paths', () => {
+    assert.equal(guard(readPayload(path.join(repo, 'README.md'))), 0);
+  });
+
+  it('honors the payload cwd when CLAUDE_PROJECT_DIR is unset', () => {
+    // No env var and a process cwd that differs from the project root: the guard
+    // must resolve config from the payload's cwd (parity with the lock hook).
+    const env = { ...process.env };
+    delete env.CLAUDE_PROJECT_DIR;
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify({
+        cwd: repo,
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(repo, 'credentials', 'token.txt') },
+      }),
+      env,
+      cwd: os.tmpdir(),
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 2);
+  });
+
+  it('is idempotent — re-concealing the same path makes no new entry', () => {
+    const before = readCfg().denyFilePatterns.length;
+    assert.equal(conceal('secret-folder').status, 0);
+    assert.equal(readCfg().denyFilePatterns.length, before);
+  });
+});
+
+describe('conceal config is found from a subdirectory', () => {
+  it('walks up to a repo-root config when the session cwd is a subdir', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-subdir-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, 'sub', 'deep'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({ denyFilePatterns: ['(^|/)secret-folder(/|$)'], denyCommandPatterns: [] })
+    );
+    const env = { ...process.env };
+    delete env.CLAUDE_PROJECT_DIR; // force root resolution from the payload cwd
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify({
+        cwd: path.join(r, 'sub', 'deep'),
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(r, 'secret-folder', 'x') },
+      }),
+      env,
+      cwd: os.tmpdir(),
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe('config discovery is bounded at $HOME', () => {
+  it('does not discover a config above $HOME, but does find one AT $HOME', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-home-'));
+    const home = path.join(root, 'home');
+    const sub = path.join(home, 'proj', 'deep');
+    fs.mkdirSync(sub, { recursive: true });
+    const policy = JSON.stringify({
+      denyFilePatterns: ['(^|/)secret-folder(/|$)'],
+      denyCommandPatterns: [],
+    });
+    // A conceal config ABOVE $HOME (at root) — must NOT govern sessions under $HOME.
+    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.claude', 'heimdall-conceal.json'), policy);
+
+    const env = { ...process.env, HOME: home }; // os.homedir() honors $HOME on POSIX
+    delete env.CLAUDE_PROJECT_DIR;
+    const status = (file) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify({ cwd: sub, ...readPayload(file) }),
+        env,
+        cwd: os.tmpdir(),
+        encoding: 'utf8',
+      }).status;
+
+    // Boundary holds: the above-$HOME config is not discovered → allowed.
+    assert.equal(status(path.join(home, 'secret-folder', 'x')), 0);
+
+    // But a config AT $HOME itself IS discovered (boundary is inclusive).
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', 'heimdall-conceal.json'), policy);
+    assert.equal(status(path.join(home, 'secret-folder', 'x')), 2);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('conceal builder does not append above $HOME', () => {
+  it('creates a new config under the repo instead of appending above $HOME', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-cli-home-'));
+    const home = path.join(root, 'home');
+    const repo = path.join(home, 'proj');
+    fs.mkdirSync(repo, { recursive: true });
+    // An existing config ABOVE $HOME that the hook would never load.
+    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+    const aboveCfg = path.join(root, '.claude', 'heimdall-conceal.json');
+    fs.writeFileSync(aboveCfg, JSON.stringify({ denyFilePatterns: [], denyCommandPatterns: [] }));
+    const before = fs.readFileSync(aboveCfg, 'utf8');
+
+    const env = { ...process.env, HOME: home };
+    delete env.CLAUDE_PROJECT_DIR;
+    const r = spawnSync('node', [SCRIPT, 'secret-folder', repo], { env, encoding: 'utf8' });
+    assert.equal(r.status, 0);
+    // The above-$HOME config is untouched…
+    assert.equal(fs.readFileSync(aboveCfg, 'utf8'), before);
+    // …and a fresh config was written under the repo (the hook can load it).
+    assert.ok(fs.existsSync(path.join(repo, '.claude', 'heimdall-conceal.json')));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('nested config does not shadow an ancestor policy', () => {
+  it('merges ancestor secretsFiles even when a subdir has a guard-only config', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-nested-'));
+    // Root policy protects a credential; nested subdir has only a folder rule.
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({ secretsFiles: ['creds/root-secret.json'], denyCommandPatterns: [] })
+    );
+    fs.mkdirSync(path.join(r, 'sub', '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, 'sub', '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({ denyFilePatterns: ['(^|/)logs(/|$)'], denyCommandPatterns: [] })
+    );
+    const env = { ...process.env };
+    delete env.CLAUDE_PROJECT_DIR;
+    const status = (file) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify({ cwd: path.join(r, 'sub'), ...readPayload(file) }),
+        env,
+        cwd: os.tmpdir(),
+        encoding: 'utf8',
+      }).status;
+    // From the subdir, the root's secrets file MUST still be denied (not shadowed)…
+    assert.equal(status(path.join(r, 'creds', 'root-secret.json')), 2);
+    // …and the subdir's own rule also applies.
+    assert.equal(status(path.join(r, 'sub', 'logs', 'x')), 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe('malformed deny pattern does not fail open', () => {
+  let badRepo;
+  before(() => {
+    badRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-badrx-'));
+    fs.mkdirSync(path.join(badRepo, '.claude'), { recursive: true });
+    // A malformed regex ("[") alongside a valid one: the bad pattern must be
+    // skipped (not crash the hook), and the valid pattern must still enforce.
+    fs.writeFileSync(
+      path.join(badRepo, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        denyFilePatterns: ['[', '(^|/)secret-folder(/|$)'],
+        denyCommandPatterns: [],
+      })
+    );
+  });
+  after(() => fs.rmSync(badRepo, { recursive: true, force: true }));
+
+  const guardIn = (payload) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify(payload),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: badRepo },
+      encoding: 'utf8',
+    }).status;
+
+  it('still denies the path covered by the valid pattern', () => {
+    assert.equal(guardIn(readPayload(path.join(badRepo, 'secret-folder', 'x'))), 2);
+  });
+
+  it('does not crash (allows unrelated) despite the malformed pattern', () => {
+    assert.equal(guardIn(readPayload(path.join(badRepo, 'other.txt'))), 0);
+  });
+});
+
+describe('secretsFiles stay protected alongside an explicit deny list', () => {
+  it('denies a secrets file not present in denyFilePatterns', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-sync-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    // secretsFiles names a credential the hook must protect even though only an
+    // unrelated folder is in denyFilePatterns (simulates a later-added secret).
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        secretsFiles: ['creds/new-secret.json'],
+        denyFilePatterns: ['(^|/)somefolder(/|$)'],
+        denyCommandPatterns: [],
+      })
+    );
+    const status = (p) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify(readPayload(p)),
+        env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+        encoding: 'utf8',
+      }).status;
+    assert.equal(status(path.join(r, 'creds', 'new-secret.json')), 2);
+    assert.equal(status(path.join(r, 'somefolder', 'x')), 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe('secrets command defaults persist after conceal', () => {
+  it('still blocks /proc environ when denyCommandPatterns is already populated', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-cmddef-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    // A secrets config where conceal has already populated denyCommandPatterns
+    // with a non-default entry: the /proc-environ + PGPASSWORD baseline must
+    // still apply (they would otherwise be dropped).
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        secretsFiles: ['creds/secret.json'],
+        denyFilePatterns: ['(^|/)logs(/|$)'],
+        denyCommandPatterns: ['(^|[^\\w.-])logs\\b'],
+      })
+    );
+    const status = (cmd) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify(bashPayload(cmd)),
+        env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+        encoding: 'utf8',
+      }).status;
+    assert.equal(status('cat /proc/123/environ'), 2);
+    assert.equal(status('echo $PGPASSWORD'), 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe('all-invalid deny list fails closed', () => {
+  it('blocks (exit 2) when every denyFilePattern is invalid regex', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-allbad-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({ denyFilePatterns: ['[', '(', '*'], denyCommandPatterns: [] })
+    );
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify(readPayload(path.join(r, 'anything.txt'))),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe('guard fails closed on a present-but-invalid config', () => {
+  it('blocks (exit 2) instead of no-opping when the config is invalid JSON', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-badcfg-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(r, '.claude', 'heimdall-conceal.json'), '{ broken json');
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify(readPayload(path.join(r, 'anything.txt'))),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe('a broken config can still be repaired from inside Claude Code', () => {
+  let r;
+  before(() => {
+    r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-recover-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(r, '.claude', 'heimdall-conceal.json'), '{ broken json');
+  });
+  after(() => fs.rmSync(r, { recursive: true, force: true }));
+  const g = (payload) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify(payload),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+      encoding: 'utf8',
+    }).status;
+
+  it('fails closed on an unrelated Read', () => {
+    assert.equal(g(readPayload(path.join(r, 'anything.txt'))), 2);
+  });
+
+  it('allows an Edit that targets the broken config file (recovery)', () => {
+    const cfgPath = path.join(r, '.claude', 'heimdall-conceal.json');
+    assert.equal(g({ tool_name: 'Edit', tool_input: { file_path: cfgPath } }), 0);
+  });
+});
+
+describe('conceal refuses to overwrite a corrupt config', () => {
+  it('exits non-zero and leaves the invalid file untouched', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-corrupt-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    const cfgPath = path.join(r, '.claude', 'heimdall-conceal.json');
+    const original = '{ "secretsFiles": ["x"], not valid json';
+    fs.writeFileSync(cfgPath, original);
+    const res = spawnSync('node', [SCRIPT, 'foo.txt', r], { encoding: 'utf8' });
+    assert.notEqual(res.status, 0);
+    assert.equal(fs.readFileSync(cfgPath, 'utf8'), original); // not overwritten
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe('conceal seeding preserves existing secrets coverage', () => {
+  let secretsRepo;
+  const guardIn = (dir, payload) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify(payload),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      encoding: 'utf8',
+    }).status;
+
+  before(() => {
+    secretsRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-secrets-'));
+    fs.mkdirSync(path.join(secretsRepo, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(secretsRepo, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        secretsFiles: ['credentials/mcp-secrets.json'],
+        denyFilePatterns: [],
+        denyCommandPatterns: [],
+      })
+    );
+  });
+
+  after(() => fs.rmSync(secretsRepo, { recursive: true, force: true }));
+
+  it('keeps secretsFiles + /proc-environ + PGPASSWORD coverage after concealing an unrelated path', () => {
+    const r = spawnSync('node', [SCRIPT, 'logs', secretsRepo], { encoding: 'utf8' });
+    assert.equal(r.status, 0);
+
+    // secrets file still denied (derived pattern was seeded before appending)
+    assert.equal(
+      guardIn(secretsRepo, readPayload(path.join(secretsRepo, 'credentials', 'mcp-secrets.json'))),
+      2
+    );
+    // newly concealed folder denied
+    assert.equal(guardIn(secretsRepo, readPayload(path.join(secretsRepo, 'logs', 'a.txt'))), 2);
+    // default command guards preserved
+    assert.equal(guardIn(secretsRepo, bashPayload('cat /proc/123/environ')), 2);
+  });
+});
+
+describe('conceal guard resists shell obfuscation (GH-655)', () => {
+  let oRepo;
+  const guardIn = (dir, payload) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify(payload),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      encoding: 'utf8',
+    }).status;
+
+  before(() => {
+    oRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-obf-'));
+    fs.mkdirSync(path.join(oRepo, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(oRepo, 'secret-folder'), { recursive: true });
+    // Folder conceal only (no secretsFiles) so the folder name is the sole marker.
+    fs.writeFileSync(
+      path.join(oRepo, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        denyFilePatterns: ['secret-folder(/|$)'],
+        denyCommandPatterns: ['(^|[^\\w.-])secret-folder\\b'],
+        secretsFiles: [],
+      })
+    );
+  });
+
+  after(() => fs.rmSync(oRepo, { recursive: true, force: true }));
+
+  const cases = {
+    plain: `cat ${'{r}'}/secret-folder/creds.txt`,
+    'glob-bracket': `cat ${'{r}'}/secret-fold[e]r/creds.txt`,
+    'glob-star': `cat ${'{r}'}/secret-fol*/creds.txt`,
+    'quote-split': `cat ${'{r}'}/secret-fol""der/creds.txt`,
+    backslash: `cat ${'{r}'}/secret-fol\\der/creds.txt`,
+    brace: `cat ${'{r}'}/{secret,x}-folder/creds.txt`,
+  };
+
+  for (const [name, tmpl] of Object.entries(cases)) {
+    it(`blocks obfuscated Bash read: ${name}`, () => {
+      const cmd = tmpl.replace('{r}', oRepo);
+      assert.equal(guardIn(oRepo, bashPayload(cmd)), 2, cmd);
+    });
+  }
+
+  it('still allows unrelated Bash commands', () => {
+    for (const cmd of ['pnpm build', 'ls *.log', `cat ${oRepo}/other/x.txt`]) {
+      assert.equal(guardIn(oRepo, bashPayload(cmd)), 0, cmd);
+    }
+  });
+});

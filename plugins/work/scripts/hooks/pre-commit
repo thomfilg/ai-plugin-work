@@ -1,0 +1,35 @@
+#!/bin/sh
+# Pre-commit hook: format staged JS/JSON files with biome
+# Install: git config core.hooksPath scripts/hooks
+
+# Collect staged JS/JSON files (NUL-delimited for safe filename handling)
+STAGED_FILE=$(mktemp)
+trap 'rm -f "$STAGED_FILE"' EXIT
+git diff --cached --name-only -z --diff-filter=ACM -- '*.js' '*.json' >"$STAGED_FILE"
+[ ! -s "$STAGED_FILE" ] && exit 0
+
+# Block if any staged file is partially staged (has unstaged changes too)
+# This prevents the hook from accidentally staging unintended hunks
+PARTIAL=""
+while IFS= read -r -d '' f; do
+  if [ -f "$f" ] && ! git diff --quiet -- "$f" 2>/dev/null; then
+    PARTIAL="$PARTIAL $f"
+  fi
+done <"$STAGED_FILE"
+
+if [ -n "$PARTIAL" ]; then
+  echo "pre-commit: partially staged files detected; commit blocked:$PARTIAL"
+  echo "Stage all changes in these files or stash unstaged changes first."
+  exit 1
+fi
+
+# Format staged files in place (NUL-delimited)
+if ! xargs -0 npx biome format --write <"$STAGED_FILE"; then
+  echo "pre-commit: biome format failed — commit blocked"
+  exit 1
+fi
+
+# Re-stage formatted files (NUL-delimited)
+xargs -0 git add <"$STAGED_FILE"
+
+exit 0

@@ -1,0 +1,662 @@
+'use strict';
+
+// monitor.test.js — tests for plugins/work/scripts/workflows/follow-up/lib/steps/monitor.js
+//
+// Organization (helper-by-helper):
+//   - Task 1: load-bearing comment presence (RED gate for GH-459 Task 1)
+//   - Task 2 pure helpers: extractConflictFiles, computeExitCode, buildInitialFailedJobs
+//   - Task 2 shell-out helpers: detectLocalConflict, refreshPrUntilKnown, resolveMissingRunIds
+//
+// The Task 1 tests read monitor.js as source text and assert that each
+// of the four load-bearing rationale phrases appears within ±10 lines of the
+// helper it documents.
+//
+// The Task 2 tests exercise the six named helpers via `require('../monitor').__test__`.
+// Shell-out helpers stub `child_process` via `require.cache` substitution; each test
+// restores the original module after running.
+
+const { describe, it, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const MONITOR_PATH = path.resolve(__dirname, '..', 'monitor.js');
+// Sibling modules extracted from monitor.js for the file-size budget. Several
+// structural assertions below now target whichever module a helper lives in.
+const CI_CONTEXT_PATH = path.resolve(__dirname, '..', 'monitor-ci-context.js');
+const INFRA_CACHE_PATH = path.resolve(__dirname, '..', 'monitor-infra-cache.js');
+const SOURCE = fs.readFileSync(MONITOR_PATH, 'utf8');
+const LINES = SOURCE.split('\n');
+
+// ---------------------------------------------------------------------------
+// Source-text helpers (Task 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the 1-based line number of the line declaring `function <name>(`.
+ */
+function findHelperLine(name) {
+  const re = new RegExp(`function\\s+${name}\\s*\\(`);
+  for (let i = 0; i < LINES.length; i++) {
+    if (re.test(LINES[i])) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * Returns true if `pattern` (RegExp) matches a *comment line* within ±10 lines
+ * of the named helper's declaration.
+ */
+function phraseNearHelper(helperName, pattern) {
+  const lineNo = findHelperLine(helperName);
+  assert.notEqual(lineNo, -1, `helper ${helperName} not found in monitor.js`);
+  const start = Math.max(0, lineNo - 1 - 10);
+  const end = Math.min(LINES.length, lineNo - 1 + 11);
+  for (let i = start; i < end; i++) {
+    const line = LINES[i];
+    const trimmed = line.trim();
+    const isComment =
+      trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*');
+    if (isComment && pattern.test(line)) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Module loader (Task 2)
+// ---------------------------------------------------------------------------
+
+const CHILD_PROCESS_ID = require.resolve('child_process');
+const MONITOR_ID = require.resolve('../monitor.js');
+// monitor.js re-exports helpers from these siblings (which destructure
+// child_process at load). To make a child_process stub reach them, their cache
+// must be busted alongside monitor.js so they re-bind to the stubbed module.
+const MONITOR_SIBLING_IDS = [
+  require.resolve('../monitor-ci-context.js'),
+  require.resolve('../monitor-status-line.js'),
+  require.resolve('../monitor-infra-cache.js'),
+];
+
+function freshLoadMonitor() {
+  delete require.cache[MONITOR_ID];
+  return require('../monitor.js');
+}
+
+function withStubbedChildProcess(stub, fn) {
+  const originalCp = require.cache[CHILD_PROCESS_ID];
+  const stubModule = { exports: stub };
+  require.cache[CHILD_PROCESS_ID] = stubModule;
+  delete require.cache[MONITOR_ID];
+  for (const id of MONITOR_SIBLING_IDS) delete require.cache[id];
+  try {
+    const monitor = require('../monitor.js');
+    return fn(monitor);
+  } finally {
+    if (originalCp) require.cache[CHILD_PROCESS_ID] = originalCp;
+    else delete require.cache[CHILD_PROCESS_ID];
+    delete require.cache[MONITOR_ID];
+    for (const id of MONITOR_SIBLING_IDS) delete require.cache[id];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Task 1 tests
+// ---------------------------------------------------------------------------
+
+describe('monitor.js retains the four load-bearing comments', () => {
+  it('UNKNOWN-mergeable retry rationale lives near refreshPrUntilKnown', () => {
+    assert.ok(
+      phraseNearHelper('refreshPrUntilKnown', /UNKNOWN/),
+      'expected /UNKNOWN/ comment within ±10 lines of refreshPrUntilKnown'
+    );
+  });
+
+  it('merge-tree local authority rationale lives near detectLocalConflict', () => {
+    assert.ok(
+      phraseNearHelper('detectLocalConflict', /merge-tree/),
+      'expected /merge-tree/ comment within ±10 lines of detectLocalConflict'
+    );
+  });
+
+  it('j.url || j.link ordering rationale lives near buildInitialFailedJobs', () => {
+    // buildInitialFailedJobs + its rationale moved together to monitor-ci-context.js.
+    const src = fs.readFileSync(CI_CONTEXT_PATH, 'utf8');
+    assert.ok(
+      /function\s+buildInitialFailedJobs\s*\(/.test(src),
+      'expected buildInitialFailedJobs to live in monitor-ci-context.js'
+    );
+    assert.ok(
+      /\/\/.*j\.url \|\| j\.link/.test(src),
+      'expected /j.url || j.link/ rationale comment in monitor-ci-context.js'
+    );
+  });
+
+  it('matrix parent vs shard pending-vs-failed rationale lives near hasFailedJobs', () => {
+    assert.ok(
+      phraseNearHelper('hasFailedJobs', /matrix/),
+      'expected /matrix/ comment within ±10 lines of hasFailedJobs'
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 2.1 — __test__ export shape
+// ---------------------------------------------------------------------------
+
+describe('monitor.js exposes helpers via __test__ export', () => {
+  it('exposes all six named helpers as functions', () => {
+    const monitor = freshLoadMonitor();
+    assert.ok(monitor.__test__, 'expected monitor.__test__ to exist');
+    const expected = [
+      'detectLocalConflict',
+      'extractConflictFiles',
+      'refreshPrUntilKnown',
+      'computeExitCode',
+      'resolveMissingRunIds',
+      'buildInitialFailedJobs',
+    ];
+    for (const name of expected) {
+      assert.equal(
+        typeof monitor.__test__[name],
+        'function',
+        `expected monitor.__test__.${name} to be a function`
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 2.2 — pure helpers
+// ---------------------------------------------------------------------------
+
+describe('extractConflictFiles parses both line forms and dedupes', () => {
+  it('parses CONFLICT and Auto-merging lines, dedupes, caps at max', () => {
+    const monitor = freshLoadMonitor();
+    const { extractConflictFiles } = monitor.__test__;
+    const tree = [
+      'CONFLICT (content): Merge conflict in a.js',
+      'Auto-merging b.js',
+      'Auto-merging b.js',
+    ].join('\n');
+    assert.deepEqual(extractConflictFiles(tree, 3), ['a.js', 'b.js']);
+  });
+});
+
+describe('computeExitCode truth table', () => {
+  it('returns 0 only when ciOk && reviewsOk && mergeOk; 1 otherwise', () => {
+    const monitor = freshLoadMonitor();
+    const { computeExitCode } = monitor.__test__;
+
+    const ciOkVariants = [
+      { status: 'passing' }, // ciOk true
+      { status: 'failing' }, // ciOk false
+    ];
+    const reviewsOkVariants = [
+      { hasBlocking: false, pendingBots: [] }, // reviewsOk true
+      { hasBlocking: true, blocking: [{}], pendingBots: [] }, // reviewsOk false
+    ];
+    const mergeOkVariants = [
+      { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' }, // mergeOk true
+      { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }, // mergeOk false
+    ];
+
+    for (const ci of ciOkVariants) {
+      for (const reviews of reviewsOkVariants) {
+        for (const prInfo of mergeOkVariants) {
+          const ciOk = ci.status === 'passing';
+          const reviewsOk = !reviews.hasBlocking;
+          const mergeOk = prInfo.mergeable !== 'CONFLICTING';
+          const expected = ciOk && reviewsOk && mergeOk ? 0 : 1;
+          assert.equal(
+            computeExitCode(prInfo, ci, reviews),
+            expected,
+            `ci=${ci.status} reviewsOk=${reviewsOk} mergeOk=${mergeOk}`
+          );
+        }
+      }
+    }
+  });
+
+  it('treats no-checks as ciOk', () => {
+    const monitor = freshLoadMonitor();
+    const { computeExitCode } = monitor.__test__;
+    assert.equal(
+      computeExitCode(
+        { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' },
+        { status: 'no-checks' },
+        { hasBlocking: false, pendingBots: [] }
+      ),
+      0
+    );
+  });
+
+  it('returns 1 when there are pendingBots', () => {
+    const monitor = freshLoadMonitor();
+    const { computeExitCode } = monitor.__test__;
+    assert.equal(
+      computeExitCode(
+        { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' },
+        { status: 'passing' },
+        { hasBlocking: false, pendingBots: ['copilot'] }
+      ),
+      1
+    );
+  });
+});
+
+describe('buildInitialFailedJobs', () => {
+  it('prefers j.url over j.link', () => {
+    const monitor = freshLoadMonitor();
+    const { buildInitialFailedJobs } = monitor.__test__;
+    const out = buildInitialFailedJobs({
+      failed: [{ name: 'a', url: 'https://x/runs/111', link: 'https://x/runs/222' }],
+    });
+    assert.deepEqual(out, [{ name: 'a', runId: '111' }]);
+  });
+
+  it('falls back to j.link when url missing', () => {
+    const monitor = freshLoadMonitor();
+    const { buildInitialFailedJobs } = monitor.__test__;
+    const out = buildInitialFailedJobs({
+      failed: [{ name: 'a', link: 'https://x/runs/222' }],
+    });
+    assert.deepEqual(out, [{ name: 'a', runId: '222' }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 2.3 — shell-out helpers (stubbed child_process)
+// ---------------------------------------------------------------------------
+
+describe('detectLocalConflict', () => {
+  afterEach(() => {
+    delete require.cache[MONITOR_ID];
+  });
+
+  it('trusts API when fetch fails — returns conflicting:false', () => {
+    const stub = {
+      execFileSync: (cmd, args) => {
+        if (args && args[0] === 'fetch') throw new Error('network down');
+        return '';
+      },
+      spawnSync: () => ({ status: 0, stdout: '', stderr: '' }),
+    };
+    withStubbedChildProcess(stub, (monitor) => {
+      const out = monitor.__test__.detectLocalConflict('main', '/tmp/wt');
+      assert.deepEqual(out, { conflicting: false, files: [] });
+    });
+  });
+
+  it('signals conflict via exit code alone (no marker)', () => {
+    const stub = {
+      execFileSync: (cmd, args) => {
+        if (args && args[0] === 'fetch') return '';
+        if (args && args[0] === 'merge-base') return 'abc123\n';
+        return '';
+      },
+      spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
+    };
+    withStubbedChildProcess(stub, (monitor) => {
+      const out = monitor.__test__.detectLocalConflict('main', '/tmp/wt');
+      assert.equal(out.conflicting, true);
+      assert.deepEqual(out.files, []);
+    });
+  });
+
+  it('signals conflict via marker alone (exit 0 with CONFLICT line)', () => {
+    const stub = {
+      execFileSync: (cmd, args) => {
+        if (args && args[0] === 'fetch') return '';
+        if (args && args[0] === 'merge-base') return 'abc123\n';
+        return '';
+      },
+      spawnSync: () => ({
+        status: 0,
+        stdout: 'CONFLICT (content): Merge conflict in path/to/file.js\n',
+        stderr: '',
+      }),
+    };
+    withStubbedChildProcess(stub, (monitor) => {
+      const out = monitor.__test__.detectLocalConflict('main', '/tmp/wt');
+      assert.equal(out.conflicting, true);
+      assert.deepEqual(out.files, ['path/to/file.js']);
+    });
+  });
+
+  it('caps conflict file list at 3', () => {
+    const stub = {
+      execFileSync: (cmd, args) => {
+        if (args && args[0] === 'fetch') return '';
+        if (args && args[0] === 'merge-base') return 'abc123\n';
+        return '';
+      },
+      spawnSync: () => ({
+        status: 0,
+        stdout: [
+          'CONFLICT (content): Merge conflict in a.js',
+          'CONFLICT (content): Merge conflict in b.js',
+          'Auto-merging c.js',
+          'CONFLICT (content): Merge conflict in d.js',
+          'Auto-merging e.js',
+        ].join('\n'),
+        stderr: '',
+      }),
+    };
+    withStubbedChildProcess(stub, (monitor) => {
+      const out = monitor.__test__.detectLocalConflict('main', '/tmp/wt');
+      assert.equal(out.conflicting, true);
+      assert.equal(out.files.length, 3);
+    });
+  });
+});
+
+describe('refreshPrUntilKnown', () => {
+  it('is bounded at 3 retries when getPRInfo always returns UNKNOWN', () => {
+    const monitor = freshLoadMonitor();
+    const { refreshPrUntilKnown } = monitor.__test__;
+    let calls = 0;
+    const getPRInfo = () => {
+      calls++;
+      return { mergeable: 'UNKNOWN' };
+    };
+    const result = refreshPrUntilKnown(getPRInfo, 42, { mergeable: 'UNKNOWN' });
+    assert.equal(result.retries, 3);
+    assert.equal(calls, 3);
+    assert.equal(result.prInfo.mergeable, 'UNKNOWN');
+  });
+
+  it('exits early on throw and returns the last prInfo seen', () => {
+    const monitor = freshLoadMonitor();
+    const { refreshPrUntilKnown } = monitor.__test__;
+    const initial = { mergeable: 'UNKNOWN', id: 'initial' };
+    let calls = 0;
+    const getPRInfo = () => {
+      calls++;
+      throw new Error('boom');
+    };
+    const result = refreshPrUntilKnown(getPRInfo, 42, initial);
+    assert.equal(result.retries, 1);
+    assert.equal(calls, 1);
+    assert.equal(result.prInfo, initial);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 2 (GH-536) — writeMonitorResult helper + --init hint routing
+// ---------------------------------------------------------------------------
+
+describe('writeMonitorResult (GH-536 Task 2)', () => {
+  it('is exposed via __test__ as a function', () => {
+    const monitor = freshLoadMonitor();
+    assert.equal(
+      typeof monitor.__test__.writeMonitorResult,
+      'function',
+      'expected monitor.__test__.writeMonitorResult to be a function'
+    );
+  });
+
+  it('writes both lastMonitorResult and ISO-8601 lastMonitorAt', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 0, output: 'ok' });
+    assert.ok(state.lastMonitorResult, 'lastMonitorResult must be set');
+    assert.equal(typeof state.lastMonitorAt, 'string', 'lastMonitorAt must be a string');
+    assert.ok(
+      !Number.isNaN(Date.parse(state.lastMonitorAt)),
+      `lastMonitorAt must be Date.parse-able, got ${state.lastMonitorAt}`
+    );
+    // ISO-8601 shape check
+    assert.match(state.lastMonitorAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+
+  it('appends --init hint when result is an infra failure', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 2, output: 'ENOTFOUND api.github.com' });
+    assert.ok(
+      state.lastMonitorResult.output.includes('re-run with `--init` to drop the cache'),
+      `expected infra-failure output to contain --init hint, got: ${state.lastMonitorResult.output}`
+    );
+  });
+
+  it('does NOT append --init hint for non-infra failures (R16)', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 1, output: 'Reviews: 2 BLOCKING' });
+    assert.ok(
+      !state.lastMonitorResult.output.includes('--init'),
+      `non-infra failure must not include --init hint, got: ${state.lastMonitorResult.output}`
+    );
+  });
+
+  it('does NOT append --init hint for successful results (exitCode 0)', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 0, output: 'CI: passing\nReviews: CLEAR' });
+    assert.ok(
+      !state.lastMonitorResult.output.includes('--init'),
+      `success must not include --init hint, got: ${state.lastMonitorResult.output}`
+    );
+  });
+});
+
+describe('writeMonitorResult routing in monitor.js (GH-536 Task 2)', () => {
+  it('has zero direct `state.lastMonitorResult =` assignments — all writes routed through helper', () => {
+    // Re-read source after possible edits
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    const matches = src.match(/state\.lastMonitorResult\s*=/g) || [];
+    assert.equal(
+      matches.length,
+      0,
+      `expected zero direct \`state.lastMonitorResult =\` assignments, found ${matches.length}`
+    );
+  });
+
+  it('defines writeMonitorResult and calls it at least 4 times', () => {
+    // The chokepoint is defined in monitor-infra-cache.js and called by monitor.js.
+    const cacheSrc = fs.readFileSync(INFRA_CACHE_PATH, 'utf8');
+    assert.ok(
+      /function\s+writeMonitorResult\s*\(/.test(cacheSrc),
+      'expected `function writeMonitorResult(` declaration in monitor-infra-cache.js'
+    );
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    const calls = src.match(/writeMonitorResult\s*\(/g) || [];
+    assert.ok(
+      calls.length >= 4,
+      `expected ≥4 writeMonitorResult( call sites in monitor.js, found ${calls.length}`
+    );
+  });
+
+  it('requires ../infra-patterns', () => {
+    // isInfraFailure/isStale are consumed by the infra-cache chokepoint module.
+    const src = fs.readFileSync(INFRA_CACHE_PATH, 'utf8');
+    assert.ok(
+      /require\(['"]\.\.\/infra-patterns['"]\)/.test(src),
+      'expected monitor-infra-cache.js to require("../infra-patterns")'
+    );
+  });
+});
+
+describe('resolveMissingRunIds', () => {
+  afterEach(() => {
+    delete require.cache[MONITOR_ID];
+  });
+
+  it('normalizes names with [tag] suffix when resolving runId', () => {
+    const apiOut = '🧪 Run Integration Tests\thttps://github.com/o/r/actions/runs/12345\n';
+    const stub = {
+      execFileSync: (cmd, args) => {
+        if (args && args[0] === 'rev-parse') return 'deadbeef\n';
+        if (args && args[0] === 'api') return apiOut;
+        return '';
+      },
+      spawnSync: () => ({ status: 0, stdout: '', stderr: '' }),
+    };
+    withStubbedChildProcess(stub, (monitor) => {
+      const failed = [{ name: '🧪 Run Integration Tests [tests]', runId: null }];
+      monitor.__test__.resolveMissingRunIds(failed, '/tmp/wt');
+      assert.equal(failed[0].runId, '12345');
+    });
+  });
+
+  it('jq filter catches non-failure conclusions (timed_out, cancelled, action_required, stale, startup_failure)', () => {
+    let jqArg = '';
+    const stub = {
+      execFileSync: (cmd, args) => {
+        if (args && args[0] === 'rev-parse') return 'deadbeef\n';
+        if (args && args[0] === 'api') {
+          const jqIdx = args.indexOf('--jq');
+          if (jqIdx !== -1) jqArg = args[jqIdx + 1];
+          return '';
+        }
+        return '';
+      },
+      spawnSync: () => ({ status: 0, stdout: '', stderr: '' }),
+    };
+    withStubbedChildProcess(stub, (monitor) => {
+      const failed = [{ name: 'job', runId: null }];
+      monitor.__test__.resolveMissingRunIds(failed, '/tmp/wt');
+    });
+    for (const token of ['timed_out', 'cancelled', 'action_required', 'stale', 'startup_failure']) {
+      assert.ok(jqArg.includes(token), `expected --jq filter to include ${token}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3 (GH-536) — clearStaleInfraCache helper + monitor-entry invocation
+// ---------------------------------------------------------------------------
+
+describe('clearStaleInfraCache (GH-536 Task 3)', () => {
+  // Helper: timestamp string `N` seconds in the past.
+  const ago = (seconds) => new Date(Date.now() - seconds * 1000).toISOString();
+
+  it('is exposed via __test__ as a function', () => {
+    const monitor = freshLoadMonitor();
+    assert.equal(
+      typeof monitor.__test__.clearStaleInfraCache,
+      'function',
+      'expected monitor.__test__.clearStaleInfraCache to be a function'
+    );
+  });
+
+  it('preserves a FRESH infra failure (30s old) — AC scenario 1', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const cached = { exitCode: 2, output: 'Could not resolve to a Repository' };
+    const state = { lastMonitorResult: cached, lastMonitorAt: ago(30) };
+    clearStaleInfraCache(state);
+    assert.equal(state.lastMonitorResult, cached, 'fresh infra cache must be preserved');
+    assert.ok(state.lastMonitorAt, 'fresh lastMonitorAt must be preserved');
+  });
+
+  it('CLEARS a STALE infra failure (120s old) — AC scenario 2', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = {
+      lastMonitorResult: { exitCode: 2, output: 'Could not resolve to a Repository' },
+      lastMonitorAt: ago(120),
+    };
+    clearStaleInfraCache(state);
+    assert.equal(
+      state.lastMonitorResult,
+      undefined,
+      'stale infra cache lastMonitorResult must be cleared'
+    );
+    assert.equal(state.lastMonitorAt, undefined, 'stale infra cache lastMonitorAt must be cleared');
+  });
+
+  it('preserves a STALE NON-INFRA failure (120s old, CI: FAILING) — AC scenario 3 / R10', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const cached = { exitCode: 1, output: 'CI: FAILING' };
+    const lastAt = ago(120);
+    const state = { lastMonitorResult: cached, lastMonitorAt: lastAt };
+    clearStaleInfraCache(state);
+    assert.equal(state.lastMonitorResult, cached, 'non-infra stale cache must be preserved');
+    assert.equal(state.lastMonitorAt, lastAt, 'non-infra stale lastMonitorAt must be preserved');
+  });
+
+  it('CLEARS legacy state (infra-shape, lastMonitorAt undefined) — R15', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = {
+      lastMonitorResult: { exitCode: 2, output: 'ENOTFOUND api.github.com' },
+      // lastMonitorAt omitted — legacy state file
+    };
+    clearStaleInfraCache(state);
+    assert.equal(
+      state.lastMonitorResult,
+      undefined,
+      'legacy-state infra cache must be cleared (missing timestamp = infinitely old)'
+    );
+    assert.equal(state.lastMonitorAt, undefined);
+  });
+
+  it('does NOT delete unrelated state keys — R9 (no full --init wipe)', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = {
+      lastMonitorResult: { exitCode: 2, output: 'ENOTFOUND api.github.com' },
+      lastMonitorAt: ago(120),
+      someUnrelated: 'preserve-me',
+      attempt: 7,
+      prNumber: 42,
+    };
+    clearStaleInfraCache(state);
+    assert.equal(state.someUnrelated, 'preserve-me');
+    assert.equal(state.attempt, 7);
+    assert.equal(state.prNumber, 42);
+  });
+
+  it('is a no-op when there is no cached lastMonitorResult', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = { attempt: 3 };
+    clearStaleInfraCache(state);
+    assert.equal(state.attempt, 3);
+    assert.equal(state.lastMonitorResult, undefined);
+  });
+});
+
+describe('clearStaleInfraCache wired via orchestrator (GH-536 round-2)', () => {
+  // The in-step call was removed because the orchestrator
+  // (follow-up-next.js) now clears stale infra cache BEFORE any step runs,
+  // including triage/fix-ci/report — the in-step variant only fired when
+  // monitor was reached, which never happened when triage blocked on
+  // exitCode 2. These assertions pin the round-2 lift in place.
+  it('declares clearStaleInfraCache but does NOT call it from inside monitor.js', () => {
+    // Declaration lives in monitor-infra-cache.js; monitor.js must not invoke it
+    // (the orchestrator owns invocation). monitor.js only re-exports the symbol.
+    const cacheSrc = fs.readFileSync(INFRA_CACHE_PATH, 'utf8');
+    assert.ok(
+      /function\s+clearStaleInfraCache\s*\(/.test(cacheSrc),
+      'expected `function clearStaleInfraCache(` declaration in monitor-infra-cache.js'
+    );
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    const callCount = (src.match(/clearStaleInfraCache\s*\(/g) || []).length;
+    // 0 call sites — monitor.js references the symbol only in import + __test__.
+    assert.equal(
+      callCount,
+      0,
+      `expected monitor.js to NOT call clearStaleInfraCache( (orchestrator owns invocation), found ${callCount}`
+    );
+  });
+
+  it('orchestrator (follow-up-next.js) clears stale infra cache before any step runs', () => {
+    const orchestratorPath = path.join(__dirname, '..', '..', '..', 'follow-up-next.js');
+    const src = fs.readFileSync(orchestratorPath, 'utf8');
+    assert.ok(
+      /isInfraFailure\(cached\.output/.test(src),
+      'expected orchestrator to check isInfraFailure(cached.output ...) before step dispatch'
+    );
+    assert.ok(
+      /delete state\.lastMonitorResult/.test(src),
+      'expected orchestrator to delete state.lastMonitorResult when cache is stale infra'
+    );
+  });
+});

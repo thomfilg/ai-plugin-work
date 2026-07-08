@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Fake `tmux` stub for the maestro test harness (Task 1, GH-429).
+#
+# Behaviour is driven entirely by environment variables so tests can script
+# tmux responses without a real tmux server:
+#
+#   FAKE_TMUX_CAPTURE_LOG   path to a file where every invocation that mutates
+#                           sessions (new-session / kill-session) is appended,
+#                           one full argv per line. The helper reads this to
+#                           expose `newSessionCalls`.
+#   FAKE_TMUX_LIST_SESSIONS scripted stdout for `tmux list-sessions ...`
+#                           (newline-separated). Empty/unset → nothing.
+#   FAKE_TMUX_CAPTURE_PANE  scripted stdout for `tmux capture-pane ...`.
+#   FAKE_TMUX_HAS_SESSION   "0" (default) → has-session exits 0 (present);
+#                           any other value → exits 1 (absent).
+#
+# Unknown subcommands exit 0 silently so the stub never aborts a script under
+# test.
+set -u
+
+log_call() {
+  if [ -n "${FAKE_TMUX_CAPTURE_LOG:-}" ]; then
+    printf '%s\n' "$*" >>"$FAKE_TMUX_CAPTURE_LOG"
+  fi
+}
+
+sub="${1:-}"
+case "$sub" in
+  list-sessions)
+    if [ -n "${FAKE_TMUX_LIST_SESSIONS:-}" ]; then
+      printf '%s\n' "$FAKE_TMUX_LIST_SESSIONS"
+    fi
+    exit 0
+    ;;
+  capture-pane)
+    if [ -n "${FAKE_TMUX_CAPTURE_PANE:-}" ]; then
+      printf '%s\n' "$FAKE_TMUX_CAPTURE_PANE"
+    fi
+    exit 0
+    ;;
+  has-session)
+    if [ "${FAKE_TMUX_HAS_SESSION:-0}" = "0" ]; then
+      exit 0
+    fi
+    exit 1
+    ;;
+  new-session|kill-session)
+    log_call "tmux $*"
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac

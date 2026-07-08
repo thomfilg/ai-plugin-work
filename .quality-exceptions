@@ -1,0 +1,207 @@
+# .quality-exceptions — static code quality allowlist
+#
+# Purpose:
+#   This file lists pre-existing files that violate one or more of the six
+#   static code quality rules enforced by scripts/workflows/lib/scripts/quality/quality.js.
+#   Listed paths have their hard-fail violations downgraded to warnings tagged
+#   "(allowlisted)" so the runner can exit 0 on current main HEAD while the
+#   debt is paid down incrementally.
+#
+# Burn-down policy (R7, GH-414):
+#   - This allowlist is the high-water mark. New PRs may only SHRINK it,
+#     never grow it. CI rejects any PR that adds a new path here.
+#   - When a file is refactored to comply with all six rules, remove it from
+#     this list in the same PR.
+#   - Allowlisting a file does NOT exempt it from biome formatting or other
+#     lint checks — only from the six quality rules in quality.js.
+#   - See docs/quality.md (Task 14) for full rule thresholds and rationale.
+#
+# Touch-to-fix ratchet (GH-592):
+#   - The "(allowlisted)" downgrade only applies to files NOT touched by the
+#     current PR. If `git diff --name-only $BASE_BRANCH...HEAD` includes a
+#     listed path, every violation on it stays severity:error and the gate
+#     fails until the file has zero violations across all six rules — partial
+#     fixes do not pass.
+#   - Editing a listed file is therefore a commitment to either drive its
+#     violation count to zero (and ideally remove it from this list in the
+#     same PR) or revert your change. The runner tags such errors with
+#     "(allowlisted but touched in this PR — fix or remove from .quality-exceptions)".
+#   - Untouched listed files continue to behave as before: their violations
+#     are downgraded to warnings tagged "(allowlisted)" and do not fail the
+#     gate. This is the touch-to-fix ratchet: a hard, code-enforced version
+#     of the burn-down policy above.
+#
+# Format:
+#   - One path per line, repo-relative (POSIX separators).
+#   - Lines starting with '#' and blank lines are ignored.
+#   - Paths are sorted by file line count descending (largest first) to make
+#     the burn-down prioritization obvious.
+#
+# Generated: from `node scripts/workflows/lib/scripts/quality/quality.js --json`
+# against the GH-414 branch HEAD prior to Task 11+ wiring.
+
+plugins/work/scripts/workflows/work/scripts/follow-up-pr.js
+plugins/work/scripts/workflows/work/workflow-definition.js
+plugins/work/scripts/workflows/work-implement/task-next.js
+plugins/work/scripts/workflows/work/work-next.js
+plugins/work/scripts/workflows/check/scripts/spec-verify.js
+plugins/work/scripts/workflows/lib/task-scope.js
+plugins/work/scripts/workflows/work/scripts/follow-up-pr-comments.js
+plugins/work/scripts/workflows/lib/parse-report-status.js
+plugins/work/scripts/workflows/lib/workflow-engine.js
+plugins/work/scripts/workflows/work/lib/open-questions.js
+plugins/work/scripts/workflows/lib/workflow-monitor.js
+plugins/work/scripts/workflows/lib/preflight.js
+plugins/work/scripts/workflows/check/hooks/qa-progress.js
+plugins/work/scripts/workflows/work/lib/work-claims.js
+plugins/work/scripts/workflows/check/hooks/check-setup.js
+plugins/work/scripts/workflows/check/check.workflow.js
+plugins/work/scripts/workflows/check/hooks/check-start-env.js
+plugins/work/scripts/workflows/work/engine/transition-step.js
+plugins/work/scripts/workflows/check/hooks/check-validate-reports.js
+plugins/work/scripts/workflows/lib/hooks/enforce-ui-imports.js
+plugins/work/scripts/workflows/work-spec/lib/phases/surface_audit.js
+plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-block-write.js
+plugins/work/scripts/workflows/work/lib/task-parser.js
+plugins/work/scripts/workflows/lib/workflow-state.js
+plugins/work/scripts/workflows/work/hooks/work-require-implement.js
+plugins/work/scripts/workflows/lib/scripts/write-report.js
+plugins/work/scripts/workflows/work/work-state/parallel-workers.js
+plugins/work/scripts/workflows/work/gates/check-gate.js
+plugins/work/scripts/workflows/lib/config.js
+plugins/work/scripts/workflows/work/lib/parse-gherkin.js
+plugins/work/scripts/workflows/work-spec/lib/phases/reuse_audit.js
+plugins/work/scripts/workflows/work/engine/unstick-complete.js
+plugins/work/scripts/workflows/work/lib/gherkin-task-refs.js
+plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-screenshot-validator.js
+plugins/work/scripts/workflows/lib/ticket-validation.js
+plugins/work/scripts/workflows/work/engine/cli.js
+plugins/work/scripts/workflows/work/lib/work-actions.js
+plugins/work/scripts/workflows/lib/agent-detection.js
+plugins/work/scripts/workflows/lib/hooks/enforce-screenshot-requirement.js
+plugins/work/scripts/workflows/work/steps/implement.js
+plugins/work/scripts/workflows/work-tasks/lib/phases/draft.js
+plugins/work/scripts/workflows/check/scripts/write-qa-report.js
+plugins/work/scripts/workflows/check/hooks/check-generate-summary.js
+plugins/work/scripts/workflows/lib/request-index.js
+plugins/work/scripts/workflows/lib/hooks/policies/task-description-quality.js
+plugins/work/scripts/workflows/work/engine/inspect.js
+plugins/work/scripts/workflows/work/work-state/task-readiness.js
+plugins/work/scripts/workflows/work/work-state/graph-validation.js
+plugins/work/scripts/workflows/check/lib/app-access.js
+plugins/work/scripts/workflows/work/lib/work-enforcement-context.js
+plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-pretooluse-hooks.js
+plugins/work/scripts/workflows/work-spec/lib/component-shape.js
+plugins/work/scripts/workflows/check/scripts/write-code-review.js
+plugins/work/scripts/workflows/work/hooks/enforce-screenshot-gate.js
+plugins/work/scripts/workflows/work/lib/pr-mergeable.js
+plugins/work/scripts/workflows/work-brief/lib/memory-plugin-config.js
+plugins/work/scripts/workflows/lib/related-tickets.js
+plugins/work/scripts/workflows/work/engine/plan-generator.js
+plugins/work/scripts/workflows/check/agents/qa-api-tester/validate-api-report.js
+plugins/work/scripts/workflows/work/scripts/bootstrap-custom-script.js
+plugins/work/scripts/workflows/work/lib/mark-task-progress.js
+plugins/work/scripts/workflows/lib/hooks/agent-hook-dispatcher.js
+plugins/work/scripts/workflows/work-spec/lib/kind-checks/e2e.js
+plugins/work/scripts/workflows/lib/allocate-output-folder.js
+plugins/work/scripts/workflows/check/scripts/write-tests-report.js
+plugins/work/scripts/listen-all.js
+plugins/work/scripts/workflows/work/hooks/enforce-review-accountability.js
+plugins/work/scripts/workflows/lib/hook-error-log.js
+plugins/work/scripts/communicate.js
+plugins/work/scripts/workflows/work/lib/artifact-archival.js
+plugins/work/scripts/workflows/work/lib/gherkin-coverage.js
+plugins/work/scripts/workflows/work/lib/tdd-enforcement.js
+plugins/work/scripts/workflows/lib/hooks/workflow-router-hook.js
+plugins/work/scripts/workflows/work/hooks/protect-orchestrator-state.js
+plugins/work/scripts/workflows/check/lib/severity-detection.js
+plugins/work/scripts/workflows/lib/scripts/quality/rules/biome-bridge.js
+plugins/work/scripts/workflows/work/steps/tasks-gate.js
+plugins/work/scripts/workflows/work/lib/step-enrichments/spec-gate.js
+plugins/work/scripts/workflows/lib/hooks/policies/agent-authorization.js
+plugins/work/scripts/workflows/work-ci/lib/phases/wait.js
+plugins/work/scripts/workflows/work-brief/lib/phases/draft.js
+plugins/work/scripts/workflows/work-spec/lib/phases/kind_checks.js
+plugins/work/scripts/workflows/check/scripts/write-completion-report.js
+plugins/work/scripts/workflows/work-ci/lib/phases/wait_merge.js
+plugins/work/scripts/workflows/work-completion-checker/lib/phases/kind_checks.js
+plugins/work/scripts/workflows/work-task-review/lib/phases/kind_checks.js
+plugins/work/scripts/workflows/work-task-review/lib/phases/diff_audit.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/shared.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/kind_checks.js
+plugins/work/scripts/workflows/work-ci/lib/phases/rerun_check.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/phases/kind_checks.js
+plugins/work/scripts/workflows/work/hooks/protect-gherkin.js
+plugins/work/scripts/workflows/work-ci/lib/phases/triage.js
+plugins/work/scripts/workflows/work-tasks/lib/phases/gherkin_link.js
+plugins/work/scripts/workflows/work/lib/task-graph.js
+plugins/work/scripts/workflows/work-brief/lib/phases/inputs.js
+plugins/work/scripts/workflows/work-tasks/lib/phases/requirements_extract.js
+plugins/work/scripts/workflows/work/lib/debug-log.js
+plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-precommit-guard.js
+plugins/work/scripts/workflows/work-task-review/lib/phases/reuse_check.js
+plugins/work/scripts/workflows/check/agents/qa-feature-tester/screenshot-naming.js
+plugins/work/scripts/workflows/check/agents/qa-feature-tester/validate-qa-report.js
+plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-preflight.js
+plugins/work/scripts/workflows/work-brief/lib/phases/overlap.js
+plugins/work/scripts/workflows/work-ci/lib/phases/fix_or_document.js
+plugins/work/scripts/workflows/work/lib/work-helpers.js
+plugins/work/scripts/workflows/work-cleanup/lib/phases/inputs.js
+plugins/work/scripts/workflows/work-brief/lib/phases/validate.js
+plugins/work/scripts/workflows/work-reports/lib/phases/emit.js
+plugins/work/scripts/workflows/check/agents/qa-feature-tester/screenshot-size-validator.js
+plugins/work/scripts/workflows/lib/hooks/policies/transition-gate.js
+plugins/work/scripts/workflows/work-code-checker/lib/kind-checks/wiring.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/diff_audit.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/backend.js
+plugins/work/scripts/workflows/work-spec/lib/phases/inputs.js
+plugins/work/scripts/workflows/lib/next-action-footer.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/phases/feature.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/frontend.js
+plugins/work/scripts/workflows/work-cleanup/lib/phases/pr_merged_check.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/devops.js
+plugins/work/hooks/enforce-follow-up-script.js
+plugins/work/scripts/workflows/work/agents/developer-quality-gate.js
+plugins/work/scripts/workflows/work-code-checker/lib/kind-checks/devops.js
+plugins/work/scripts/workflows/work-task-review/lib/kind-checks/shared.js
+plugins/work/scripts/workflows/work-task-review/lib/phases/report.js
+plugins/work/scripts/workflows/lib/hooks/policies/step-gate.js
+plugins/work/scripts/workflows/lib/scripts/get-ticket-id.js
+plugins/work/scripts/workflows/work-tasks/lib/phases/memorize.js
+plugins/work/scripts/workflows/work-pr-step/lib/phases/attachments.js
+plugins/work/scripts/workflows/work/lib/step-enrichments/check-gate.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/phases/report.js
+plugins/work/scripts/workflows/work/lib/step-enrichments/complete.js
+plugins/work/scripts/workflows/work-spec/lib/kind-checks/frontend.js
+plugins/work/scripts/workflows/work-pr-step/lib/phases/description_draft.js
+plugins/work/scripts/workflows/work-completion-checker/lib/phases/memorize.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/shared.js
+plugins/work/scripts/workflows/work/lib/git-utils.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/e2e.js
+plugins/work/scripts/workflows/work-task-review/lib/kind-checks/wiring.js
+plugins/work/scripts/workflows/work/scripts/gh-exec.js
+plugins/work/scripts/workflows/work/steps/task-advance.js
+plugins/work/scripts/workflows/work-code-checker/lib/phases/memorize.js
+plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/wiring.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/standards_audit.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/memorize.js
+plugins/work/scripts/workflows/work-reports/lib/phases/memorize.js
+plugins/work/scripts/workflows/work-task-review/lib/phases/memorize.js
+plugins/work/scripts/listen-communication.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/phases/memorize.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/wiring.js
+plugins/work/scripts/workflows/work-task-review/lib/phases/inputs.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/phases/inputs.js
+plugins/work/scripts/workflows/work/steps/pr.js
+plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/fullstack.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/inputs.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/fullstack.js
+plugins/work/scripts/workflows/work/steps/check.js
+plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/kind-registry.js
+plugins/work/scripts/workflows/work-spec/lib/kind-checks/kind-registry.js
+plugins/work/scripts/workflows/lib/pr-state.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/fullstack.js
+plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/kind-registry.js
+plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/kind-registry.js
+plugins/work/scripts/workflows/work-task-review/lib/kind-checks/kind-registry.js
+plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-subagent-stop.js

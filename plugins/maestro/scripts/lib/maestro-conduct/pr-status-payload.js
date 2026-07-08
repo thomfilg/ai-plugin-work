@@ -1,0 +1,64 @@
+'use strict';
+
+/**
+ * Build the alert payload for a pr-ready or pr-broken pr-status hit.
+ *
+ * Lifted out of `maestro-conduct.runPrStatusDetector` so that function stays
+ * under the cyclomatic-complexity cap. Both branches share the same `actions.alert`
+ * surface; only the instruction string and the conditional paneTail differ.
+ */
+
+function buildPrReadyInstruction({ ctx, sHit, workSession, tmux }) {
+  const sha7 = (sHit.sha || '').slice(0, 7);
+  // NS-scoped session names so the operator's kill instructions are correct
+  // under MAESTRO_NS (e.g. "proj-a/GH-42-work", not the aliased "GH-42-work").
+  const listenSession = tmux.sessionName(ctx.ticket, 'listen');
+  return `Spawn work-workflow:code-checker (Agent tool, keep alive in tmux until verdict) on PR #${sHit.prNumber} sha=${sha7} for ${ctx.ticket}. Reviewer must answer FOUR questions: (1) Did the agent complete every requirement/AC in the ticket? (2) Did it introduce any bug (logic errors, regressions, broken edge cases)? (3) Did it add any security vulnerability (injection, secrets, unsafe shell, path traversal)? (4) Did it bypass any /work workflow gate (state edits, set-step CLI, completion-checker skip, fake TDD evidence, --no-verify, deferral annotations)? Verdict must be APPROVED only if ALL four are clean. On NEEDS-WORK → forward verbatim findings to ${workSession} via tmux send-keys; re-run after agent pushes. On APPROVED → surface PR URL to operator; operator merges PR and kills tmux sessions ${workSession} + ${listenSession} to free the pool slot.`;
+}
+
+function buildPrBrokenInstruction({ sHit }) {
+  const failingList = (sHit.failingChecks || [])
+    .map((c) => `${c.name}(${c.conclusion})`)
+    .join(', ');
+  return `UNBLOCK-PROTOCOL: fix-in-PR (no skip, no --no-verify, no scope-creep escape). Failing: ${failingList || 'see PR'}. Never merge red.`;
+}
+
+/**
+ * Build the full alert payload (caller still owns the `actions.alert` call).
+ * Pane tail is only attached for pr-broken: pr-ready hands off to the
+ * code-checker subagent which captures its own context.
+ */
+function buildPayload({ ctx, sHit, workSession, tmux }) {
+  const isReady = sHit.kind === 'pr-ready';
+  const instruction = isReady
+    ? buildPrReadyInstruction({ ctx, sHit, workSession, tmux })
+    : buildPrBrokenInstruction({ sHit });
+  const paneTail = isReady
+    ? undefined
+    : tmux.capture(workSession).split('\n').slice(-40).join('\n');
+  // Copy-paste-able first move (PR #603). Repo resolved from the worktree —
+  // never hardcoded, maestro drives fleets across arbitrary repos.
+  const { repoSlug } = require('./detectors/gh-shared');
+  const repo = repoSlug(ctx.worktree);
+  const repoFlag = repo ? ` --repo ${repo}` : '';
+  const unblockCmd = isReady
+    ? `gh pr view ${sHit.prNumber}${repoFlag} --web   # inspect, then merge per never-auto-merge-pr`
+    : `gh pr checks ${sHit.prNumber}${repoFlag} && tmux capture-pane -t ${workSession} -p | tail -40   # see failures + nudge agent`;
+  return {
+    session: workSession,
+    ticket: ctx.ticket,
+    kind: sHit.kind,
+    phase: ctx.phase,
+    skill: ctx.skill,
+    prNumber: sHit.prNumber,
+    sha: sHit.sha,
+    checksState: sHit.checksState,
+    mergeable: sHit.mergeable,
+    failingChecks: sHit.failingChecks,
+    ...(paneTail ? { paneTail } : {}),
+    unblockCmd,
+    instruction,
+  };
+}
+
+module.exports = { buildPrReadyInstruction, buildPrBrokenInstruction, buildPayload };
