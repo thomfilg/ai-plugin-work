@@ -1,8 +1,10 @@
 /**
  * Unit tests for the maestro fleet status-line renderer's pure logic:
- *   - resolveTicketIcon: marker/status -> single status glyph, severity order,
- *     freshness gating, nudge escalation.
- *   - formatSegment: per-ticket glyph placement + the done/total✓ ⏳ envelope.
+ *   - resolveTicketStatus: marker/status -> single STATUS key, severity order,
+ *     freshness gating, nudge escalation, presence-based stuck-input.
+ *   - runtime heat: per-band shade walk, hue jumps, 256 fallback, clock modes.
+ *   - renderTicketCell: severity color placement (emoji vs text glyph modes).
+ *   - formatSegment / readConfig / legendLine.
  *
  * Pure functions only — no tmux, no live conductor. Run with:
  *   node --test maestro-statusline.test.js
@@ -11,182 +13,240 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  ICON,
-  NUDGE_WINDOW_SEC,
-  SILENCE_LIMIT_SEC,
-  OVERLAY_FRESH_SEC,
-  HEAT_MIN_MIN,
+  C,
+  STATUS,
   ANSI_RESET,
-  resolveTicketIcon,
+  readConfig,
   heatAnsi,
   formatElapsed,
   elapsedBadge,
+  elapsedMinutes,
+  stuckActive,
+  resolveTicketStatus,
+  renderTicketCell,
   formatSegment,
+  legendLine,
 } = require('../maestro-statusline.js');
 
 const NOW = 1_800_000_000; // fixed clock (seconds)
 
-describe('resolveTicketIcon — severity + freshness', () => {
+// Baseline config (emoji, truecolor, default thresholds) for the pure helpers.
+const CFG = {
+  glyphs: 'emoji',
+  clock: 'age',
+  truecolor: true,
+  silenceLimitSec: 300,
+  nudgeWindowSec: 30 * 60,
+  overlayFreshSec: 300,
+  stuckSanitySec: 12 * 3600,
+  heatBounds: [30, 45, 60, 90],
+};
+const cfg = (over) => ({ ...CFG, ...over });
+
+describe('resolveTicketStatus — severity + freshness', () => {
   it('working when the silence heartbeat is fresh', () => {
-    const m = { silence: { lastActiveAt: NOW - 10, tokens: 100 } };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.working);
+    const m = { silence: { lastActiveAt: NOW - 10 } };
+    assert.equal(resolveTicketStatus(m, 'in_progress', NOW, CFG), 'working');
   });
 
   it('stalled when the heartbeat is older than the silence limit', () => {
-    const m = { silence: { lastActiveAt: NOW - (SILENCE_LIMIT_SEC + 5) } };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.stalled);
+    const m = { silence: { lastActiveAt: NOW - 305 } };
+    assert.equal(resolveTicketStatus(m, 'in_progress', NOW, CFG), 'stalled');
   });
 
   it('question outranks a fresh working heartbeat', () => {
-    const m = {
-      question: { startedAt: NOW - 30, lastAlertAt: NOW - 5 },
-      silence: { lastActiveAt: NOW - 5 },
-    };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.question);
+    const m = { question: { lastAlertAt: NOW - 5 }, silence: { lastActiveAt: NOW - 5 } };
+    assert.equal(resolveTicketStatus(m, 'in_progress', NOW, CFG), 'question');
   });
 
   it('a stale question marker does NOT render (freshness gate)', () => {
-    const m = {
-      question: { startedAt: NOW - 99999, lastAlertAt: NOW - (OVERLAY_FRESH_SEC + 60) },
-      silence: { lastActiveAt: NOW - 5 },
-    };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.working);
+    const m = { question: { lastAlertAt: NOW - 400 }, silence: { lastActiveAt: NOW - 5 } };
+    assert.equal(resolveTicketStatus(m, 'in_progress', NOW, CFG), 'working');
   });
 
-  it('nudge escalation: 1 -> ⚠, 2 -> ⚠⚠, 3+ -> 💀', () => {
+  it('nudge escalation: 1 -> nudge1, 2 -> nudge2, 3+ -> wedged', () => {
     const one = { restartLoop: { restarts: [NOW - 60] } };
     const two = { restartLoop: { restarts: [NOW - 120, NOW - 60] } };
     const three = { restartLoop: { restarts: [NOW - 180, NOW - 120, NOW - 60] } };
-    assert.equal(resolveTicketIcon(one, 'in_progress', NOW), ICON.nudge1);
-    assert.equal(resolveTicketIcon(two, 'in_progress', NOW), ICON.nudge2);
-    assert.equal(resolveTicketIcon(three, 'in_progress', NOW), ICON.wedged);
+    assert.equal(resolveTicketStatus(one, 'in_progress', NOW, CFG), 'nudge1');
+    assert.equal(resolveTicketStatus(two, 'in_progress', NOW, CFG), 'nudge2');
+    assert.equal(resolveTicketStatus(three, 'in_progress', NOW, CFG), 'wedged');
   });
 
   it('nudges outside the restart window are ignored', () => {
     const m = {
-      restartLoop: { restarts: [NOW - (NUDGE_WINDOW_SEC + 100)] },
+      restartLoop: { restarts: [NOW - (CFG.nudgeWindowSec + 100)] },
       silence: { lastActiveAt: NOW - 5 },
     };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.working);
+    assert.equal(resolveTicketStatus(m, 'in_progress', NOW, CFG), 'working');
   });
 
-  it('dead-end killed -> 💀', () => {
-    const m = { deadEnd: { killed: true, freedAt: NOW - 60, trigger: 'question-pending' } };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.wedged);
-  });
-
-  it('pr-broken outranks nudges and working', () => {
+  it('dead-end killed -> wedged; pr-broken outranks nudges/working', () => {
+    assert.equal(
+      resolveTicketStatus(
+        { deadEnd: { killed: true, freedAt: NOW - 60 } },
+        'in_progress',
+        NOW,
+        CFG
+      ),
+      'wedged'
+    );
     const m = {
-      prStatus: { lastState: 'pr-broken', lastEmittedAt: NOW - 4000 },
+      prStatus: { lastState: 'pr-broken' },
       restartLoop: { restarts: [NOW - 60] },
       silence: { lastActiveAt: NOW - 5 },
     };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.prBroken);
+    assert.equal(resolveTicketStatus(m, 'in_progress', NOW, CFG), 'prBroken');
   });
 
-  it('pr-ready shows ✅ when otherwise idle', () => {
-    const m = { prStatus: { lastState: 'pr-ready', lastEmittedAt: NOW - 100 } };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.prReady);
-  });
-
-  it('stuck-input -> ✎', () => {
-    const m = { stuckInput: { text: 'ping me', firstSeenAt: NOW - 30 } };
-    assert.equal(resolveTicketIcon(m, 'in_progress', NOW), ICON.stuck);
-  });
-
-  it('status fallbacks: awaiting-merge / stopped / done', () => {
-    assert.equal(resolveTicketIcon({}, 'awaiting-merge', NOW), ICON.prReady);
-    assert.equal(resolveTicketIcon({}, 'stopped', NOW), ICON.stopped);
-    assert.equal(resolveTicketIcon({}, 'blocked', NOW), ICON.stopped);
-    assert.equal(resolveTicketIcon({}, 'done', NOW), ICON.done);
-  });
-
-  it('no markers, in-progress -> working default', () => {
-    assert.equal(resolveTicketIcon({}, 'in_progress', NOW), ICON.working);
-    assert.equal(resolveTicketIcon(null, undefined, NOW), ICON.working);
-  });
-});
-
-describe('runtime heat — per-band shade walk', () => {
-  it('below the heat floor: no color, bare label', () => {
-    assert.equal(heatAnsi(0, true), '');
-    assert.equal(heatAnsi(HEAT_MIN_MIN - 1, true), '');
-    assert.equal(elapsedBadge(12, true), '12m');
-  });
-
-  it('truecolor walks SHADES within a band, then jumps hue at the boundary', () => {
-    // Yellow band start (30m) = light yellow (255,255,180).
-    assert.equal(heatAnsi(30, true), '\x1b[38;2;255;255;180m');
-    // Just before the orange boundary the yellow has deepened (G/B dropped).
-    const yellowLate = heatAnsi(44, true);
-    assert.match(yellowLate, /^\x1b\[38;2;255;\d+;\d+m$/);
-    assert.notEqual(yellowLate, heatAnsi(30, true));
-    // 45m enters the orange band at its LIGHT shade — a hue jump, not a continuation.
-    assert.equal(heatAnsi(45, true), '\x1b[38;2;255;200;120m');
-    // 60m enters the red band at its light shade.
-    assert.equal(heatAnsi(60, true), '\x1b[38;2;255;90;90m');
-  });
-
-  it('past the last band pins to the deepest red', () => {
-    assert.equal(heatAnsi(90, true), '\x1b[38;2;170;0;0m');
-    assert.equal(heatAnsi(999, true), '\x1b[38;2;170;0;0m');
-  });
-
-  it('256-color fallback emits a per-band ramp index', () => {
-    assert.equal(heatAnsi(30, false), '\x1b[38;5;229m'); // yellow band, lightest
-    assert.equal(heatAnsi(60, false), '\x1b[38;5;210m'); // red band, lightest
-    assert.equal(heatAnsi(999, false), '\x1b[38;5;124m'); // deepest red
-  });
-
-  it('elapsedBadge wraps the label in the heat SGR + reset', () => {
-    assert.equal(elapsedBadge(30, true), `\x1b[38;2;255;255;180m30m${ANSI_RESET}`);
-  });
-
-  it('formatElapsed: minutes then h/m', () => {
-    assert.equal(formatElapsed(5), '5m');
-    assert.equal(formatElapsed(59), '59m');
-    assert.equal(formatElapsed(60), '1h');
-    assert.equal(formatElapsed(72), '1h12m');
-    assert.equal(formatElapsed(125), '2h05m');
-  });
-});
-
-describe('formatSegment — glyph placement + counts envelope', () => {
-  const icons = { 'ECHO-6305': ICON.question, 'ECHO-6306': ICON.working };
-  const iconFor = (id) => icons[id] || '';
-
-  it('prefixes each id with its glyph and keeps the done/total ⏳ envelope', () => {
-    const line = formatSegment(
-      'ECHO',
-      ['ECHO-6305', 'ECHO-6306'],
-      { done: 2, total: 8, pending: 4 },
-      iconFor
-    );
+  it('pr-ready + status fallbacks', () => {
     assert.equal(
-      line,
-      `🎼 ECHO   2/8✓  ▶2 (${ICON.question} ECHO-6305, ${ICON.working} ECHO-6306)  ⏳4`
+      resolveTicketStatus({ prStatus: { lastState: 'pr-ready' } }, 'in_progress', NOW, CFG),
+      'prReady'
     );
+    assert.equal(resolveTicketStatus({}, 'awaiting-merge', NOW, CFG), 'prReady');
+    assert.equal(resolveTicketStatus({}, 'stopped', NOW, CFG), 'stopped');
+    assert.equal(resolveTicketStatus({}, 'done', NOW, CFG), 'done');
+    assert.equal(resolveTicketStatus({}, 'in_progress', NOW, CFG), 'working');
+  });
+});
+
+describe('stuck-input is presence-based (#4)', () => {
+  it('still flags after 40 min stuck (firstSeenAt does not refresh)', () => {
+    const m = {
+      stuckInput: { text: 'ping', firstSeenAt: NOW - 40 * 60 },
+      silence: { lastActiveAt: NOW - 5 },
+    };
+    // Fresh heartbeat would otherwise say working; stuck outranks it and is not
+    // gated by the short overlay window.
+    assert.equal(resolveTicketStatus(m, 'in_progress', NOW, CFG), 'stuck');
+    assert.equal(stuckActive(m.stuckInput, CFG, NOW), true);
   });
 
-  it('falls back to the count-less format when no manifest matches', () => {
-    const line = formatSegment('ECHO', ['ECHO-6305'], null, iconFor);
-    assert.equal(line, `🎼 ECHO   ▶  1  (${ICON.question} ECHO-6305)`);
+  it('drops a marker older than the sanity cap (orphaned by a dead conductor)', () => {
+    const mk = { text: 'ping', firstSeenAt: NOW - (CFG.stuckSanitySec + 60) };
+    assert.equal(stuckActive(mk, CFG, NOW), false);
+  });
+});
+
+describe('runtime heat — per-band shade walk + clock (#2/#6)', () => {
+  it('below the floor: no color', () => {
+    assert.equal(heatAnsi(0, CFG), '');
+    assert.equal(heatAnsi(29, CFG), '');
   });
 
-  it('renders a bare id when no glyph resolves', () => {
-    const line = formatSegment('ECHO', ['ECHO-9999'], { done: 0, total: 1, pending: 0 }, () => '');
-    assert.equal(line, '🎼 ECHO   0/1✓  ▶1 (ECHO-9999)  ⏳0');
+  it('truecolor walks shades within a band, then jumps hue at boundaries', () => {
+    assert.equal(heatAnsi(30, CFG), '\x1b[38;2;255;255;180m'); // yellow light
+    assert.notEqual(heatAnsi(44, CFG), heatAnsi(30, CFG)); // yellow deepened
+    assert.equal(heatAnsi(45, CFG), '\x1b[38;2;255;200;120m'); // hue jump → orange
+    assert.equal(heatAnsi(60, CFG), '\x1b[38;2;255;90;90m'); // hue jump → red
+    assert.equal(heatAnsi(999, CFG), '\x1b[38;2;170;0;0m'); // pinned deepest
   });
 
-  it('appends the runtime badge after the id when badgeFor returns one', () => {
-    const badge = elapsedBadge(72, true);
+  it('256-color fallback emits per-band ramp indices', () => {
+    const c = cfg({ truecolor: false });
+    assert.equal(heatAnsi(30, c), '\x1b[38;5;229m');
+    assert.equal(heatAnsi(60, c), '\x1b[38;5;210m');
+    assert.equal(heatAnsi(999, c), '\x1b[38;5;124m');
+  });
+
+  it('configurable boundaries shift the floor', () => {
+    const c = cfg({ heatBounds: [10, 20, 30, 40] });
+    assert.equal(heatAnsi(9, c), '');
+    assert.equal(heatAnsi(10, c), '\x1b[38;2;255;255;180m');
+  });
+
+  it('elapsedMinutes: age vs stall clock', () => {
+    const src = { created: NOW - 3600, lastActiveAt: NOW - 600 };
+    assert.equal(elapsedMinutes(cfg({ clock: 'age' }), src, NOW), 60);
+    assert.equal(elapsedMinutes(cfg({ clock: 'stall' }), src, NOW), 10);
+    // stall with no heartbeat falls back to age
+    assert.equal(elapsedMinutes(cfg({ clock: 'stall' }), { created: NOW - 1800 }, NOW), 30);
+    assert.equal(elapsedMinutes(CFG, {}, NOW), null);
+  });
+
+  it('elapsedBadge wraps label in heat SGR + reset; formatElapsed h/m', () => {
+    assert.equal(elapsedBadge(30, CFG), `\x1b[38;2;255;255;180m30m${ANSI_RESET}`);
+    assert.equal(elapsedBadge(12, CFG), '12m');
+    assert.equal(formatElapsed(72), '1h12m');
+    assert.equal(formatElapsed(60), '1h');
+  });
+});
+
+describe('renderTicketCell — severity color placement (#1/#3)', () => {
+  it('emoji mode: id tinted, emoji left uncolored', () => {
+    const cell = renderTicketCell('working', 'ECHO-1', '', CFG);
+    assert.equal(cell, `🔨 ${C.green}ECHO-1${C.reset}`);
+  });
+
+  it('text mode: both the glyph and the id are tinted', () => {
+    const cell = renderTicketCell('wedged', 'ECHO-2', '', cfg({ glyphs: 'text' }));
+    assert.equal(cell, `${C.red}x${C.reset} ${C.red}ECHO-2${C.reset}`);
+  });
+
+  it('appends the heat badge; bare id when status is empty', () => {
+    const badge = elapsedBadge(72, CFG);
+    assert.equal(
+      renderTicketCell('working', 'ECHO-3', badge, CFG),
+      `🔨 ${C.green}ECHO-3${C.reset} ${badge}`
+    );
+    assert.equal(renderTicketCell('', 'ECHO-4', '', CFG), 'ECHO-4');
+  });
+});
+
+describe('formatSegment — envelope', () => {
+  const cellFor = (id) => renderTicketCell('working', id, '', cfg({ glyphs: 'text' }));
+
+  it('keeps the done/total ⏳ envelope with colored cells', () => {
     const line = formatSegment(
       'ECHO',
-      ['ECHO-6309'],
-      { done: 7, total: 8, pending: 0 },
-      () => ICON.working,
-      () => badge
+      ['ECHO-1', 'ECHO-2'],
+      { done: 2, total: 8, pending: 4 },
+      cellFor
     );
-    assert.equal(line, `🎼 ECHO   7/8✓  ▶1 (${ICON.working} ECHO-6309 ${badge})  ⏳0`);
+    const c1 = `${C.green}●${C.reset} ${C.green}ECHO-1${C.reset}`;
+    const c2 = `${C.green}●${C.reset} ${C.green}ECHO-2${C.reset}`;
+    assert.equal(line, `🎼 ECHO   2/8✓  ▶2 (${c1}, ${c2})  ⏳4`);
+  });
+
+  it('count-less fallback when no manifest matches', () => {
+    const line = formatSegment('ECHO', ['ECHO-1'], null, cellFor);
+    assert.equal(line, `🎼 ECHO   ▶  1  (${C.green}●${C.reset} ${C.green}ECHO-1${C.reset})`);
+  });
+});
+
+describe('readConfig + legendLine', () => {
+  it('parses env knobs with defaults', () => {
+    const saved = { ...process.env };
+    try {
+      delete process.env.MAESTRO_STATUSLINE_GLYPHS;
+      delete process.env.MAESTRO_HEAT_CLOCK;
+      const d = readConfig();
+      assert.equal(d.glyphs, 'emoji');
+      assert.equal(d.clock, 'age');
+      assert.deepEqual(d.heatBounds, [30, 45, 60, 90]);
+
+      process.env.MAESTRO_STATUSLINE_GLYPHS = 'text';
+      process.env.MAESTRO_HEAT_CLOCK = 'stall';
+      process.env.MAESTRO_HEAT_WARN_MIN = '15';
+      process.env.SILENCE_LIMIT_SEC = '120';
+      const o = readConfig();
+      assert.equal(o.glyphs, 'text');
+      assert.equal(o.clock, 'stall');
+      assert.equal(o.heatBounds[0], 15);
+      assert.equal(o.silenceLimitSec, 120);
+    } finally {
+      process.env = saved;
+    }
+  });
+
+  it('legendLine lists every status glyph', () => {
+    const emoji = legendLine(CFG);
+    assert.match(emoji, /🔨 working/);
+    assert.match(emoji, /💀 wedged/);
+    const text = legendLine(cfg({ glyphs: 'text' }));
+    assert.match(text, /● working/);
+    assert.match(text, /x wedged/);
+    assert.equal(Object.keys(STATUS).length, 11);
   });
 });
