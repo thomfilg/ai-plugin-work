@@ -6,6 +6,21 @@ This is a Claude Code plugin (Node.js, CommonJS only). It provides deterministic
 
 See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](./docs/README.md)** for full architecture documentation.
 
+### Codex ↔ Claude Code
+
+This plugin family runs on **both Claude Code and Codex CLI**. The full migration
+map — plugins, skills, subagents, hooks, MCP, permissions, slash commands,
+statusline, env vars, and marketplace — lives in
+**[docs/codex-support/05-codex-claude-plugin-map.md](../../docs/codex-support/05-codex-claude-plugin-map.md)**,
+alongside the machine-verified series in [`docs/codex-support/`](../../docs/codex-support/)
+(ground truth → touchpoint inventory → adapter design → work breakdown).
+
+Load-bearing facts when porting:
+- Manifest dir `.claude-plugin/` ↔ `.codex-plugin/`; `CLAUDE.md` ↔ `AGENTS.md`.
+- Env vars `CLAUDE_PLUGIN_ROOT`/`CLAUDE_PLUGIN_DATA` ↔ `PLUGIN_ROOT`/`PLUGIN_DATA` (Codex sets both — write `PLUGIN_ROOT:-CLAUDE_PLUGIN_ROOT` fallbacks).
+- Codex degradations announce a greppable `[<plugin>:codex-degraded]` prefix (see [`03-adapter-design.md`](../../docs/codex-support/03-adapter-design.md) §0/§M).
+- Codex `tui.status_line` is **built-in-fields-only** ([openai/codex#20140](https://github.com/openai/codex/issues/20140)), so command-backed status bars (the `/work` ⚙ bar, the 🔄 follow-up bar) can't render on codex — they degrade to a `/status` + `watch` fallback.
+
 ## Development Rules
 
 ### Language & Runtime

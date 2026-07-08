@@ -9,6 +9,8 @@
 
 'use strict';
 
+const { formatDurationMs } = require('../../../lib/statusline/duration');
+
 // GH-670: one line for demoted body-only COMMENTED reviews from
 // non-allowlisted reviewers. Deliberately does NOT start with "Reviews:" so
 // triage's /Reviews:.*BLOCKING/ signal can never match it.
@@ -47,11 +49,7 @@ function buildOutput(state, prInfo, ci, reviews, formatReport) {
 
 function formatElapsed(monitorStartTime) {
   if (!monitorStartTime) return '';
-  const ms = Date.now() - new Date(monitorStartTime).getTime();
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  return formatDurationMs(Date.now() - new Date(monitorStartTime).getTime());
 }
 
 function pushCount(parts, emoji, list) {
