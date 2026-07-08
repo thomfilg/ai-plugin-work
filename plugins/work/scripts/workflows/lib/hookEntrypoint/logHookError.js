@@ -46,30 +46,33 @@ let _logFd = null;
  * Open the log file once and return the fd. Subsequent calls return the cached fd.
  * Returns -1 sentinel if the open failed (caller should silently discard).
  */
+/**
+ * Open the log path, refusing symlinks atomically. O_NOFOLLOW makes the open
+ * itself fail with ELOOP when a symlink sits at the path — no check-then-open
+ * window exists (POSIX-only; harmless 0 where undefined). On ELOOP the
+ * hostile/stale link is removed and the open retried once so the log
+ * self-heals instead of caching the -1 sentinel forever.
+ */
+function openLogFdNoFollow() {
+  // O_APPEND ensures atomic-ish writes; 0o600 = owner-only permissions.
+  const flags =
+    fs.constants.O_CREAT |
+    fs.constants.O_APPEND |
+    fs.constants.O_WRONLY |
+    (fs.constants.O_NOFOLLOW || 0);
+  try {
+    return fs.openSync(LOG_FILE, flags, 0o600);
+  } catch (err) {
+    if (!err || err.code !== 'ELOOP') throw err;
+    fs.unlinkSync(LOG_FILE);
+    return fs.openSync(LOG_FILE, flags, 0o600);
+  }
+}
+
 function getLogFd() {
   if (_logFd !== null) return _logFd;
   try {
-    // O_APPEND ensures atomic-ish writes; 0o600 = owner-only permissions.
-    // O_NOFOLLOW makes the open itself refuse a symlink at the log path (ELOOP),
-    // closing the check-to-open race window — the security property does not
-    // depend on the lstat guard below. POSIX-only; harmless 0 where undefined.
-    const flags =
-      fs.constants.O_CREAT |
-      fs.constants.O_APPEND |
-      fs.constants.O_WRONLY |
-      (fs.constants.O_NOFOLLOW || 0);
-
-    // Best-effort cleanup so a stale symlink doesn't permanently disable the
-    // log (open would fail once and cache the -1 sentinel): lstatSync checks
-    // the link itself (not its target); a detected symlink is removed.
-    if (fs.existsSync(LOG_FILE)) {
-      const stat = fs.lstatSync(LOG_FILE);
-      if (stat.isSymbolicLink()) {
-        fs.unlinkSync(LOG_FILE);
-      }
-    }
-
-    _logFd = fs.openSync(LOG_FILE, flags, 0o600);
+    _logFd = openLogFdNoFollow();
   } catch {
     _logFd = -1; // sentinel: open failed, don't retry on subsequent calls
   }
