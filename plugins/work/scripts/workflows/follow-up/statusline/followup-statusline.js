@@ -16,6 +16,9 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const { findActiveMarker } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'marker'));
+const { readSessionId, tasksBase } = require(
+  path.join(__dirname, '..', '..', 'lib', 'statusline', 'session-scope')
+);
 const { composeStatusLine, formatElapsed } = require(
   path.join(__dirname, '..', 'lib', 'steps', 'monitor-status-line')
 );
@@ -45,19 +48,7 @@ function prUrl(worktreeRoot, pr) {
 }
 
 // The Claude session Claude runs this statusLine in (session_id on stdin).
-let SESSION = '';
-try {
-  SESSION = JSON.parse(fs.readFileSync(0, 'utf8') || '{}').session_id || '';
-} catch {
-  /* no stdin */
-}
-
-// TASKS_BASE for the current project — direnv exports it into the session env.
-function tasksBase() {
-  if (process.env.TASKS_BASE) return process.env.TASKS_BASE;
-  if (process.env.WORKTREES_BASE) return path.join(process.env.WORKTREES_BASE, 'tasks');
-  return '';
-}
+const SESSION = readSessionId();
 
 // The follow-up state for a ticket, or null when it's finished, stale, or
 // unreadable (so the bar shows nothing).
