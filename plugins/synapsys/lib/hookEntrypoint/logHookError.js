@@ -49,12 +49,19 @@ let _logFd = null;
 function getLogFd() {
   if (_logFd !== null) return _logFd;
   try {
-    // O_APPEND ensures atomic-ish writes; 0o600 = owner-only permissions
-    // Opening by fd avoids TOCTOU -- no path-based reopens after this point
-    const flags = fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_WRONLY;
+    // O_APPEND ensures atomic-ish writes; 0o600 = owner-only permissions.
+    // O_NOFOLLOW makes the open itself refuse a symlink at the log path (ELOOP),
+    // closing the check-to-open race window — the security property does not
+    // depend on the lstat guard below. POSIX-only; harmless 0 where undefined.
+    const flags =
+      fs.constants.O_CREAT |
+      fs.constants.O_APPEND |
+      fs.constants.O_WRONLY |
+      (fs.constants.O_NOFOLLOW || 0);
 
-    // Guard against symlink attacks before opening: lstatSync checks the link
-    // itself (not its target), so a malicious symlink is detected and removed.
+    // Best-effort cleanup so a stale symlink doesn't permanently disable the
+    // log (open would fail once and cache the -1 sentinel): lstatSync checks
+    // the link itself (not its target); a detected symlink is removed.
     if (fs.existsSync(LOG_FILE)) {
       const stat = fs.lstatSync(LOG_FILE);
       if (stat.isSymbolicLink()) {
