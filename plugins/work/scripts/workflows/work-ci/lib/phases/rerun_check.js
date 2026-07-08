@@ -29,7 +29,11 @@ function readJson(p) {
 function isAddressed(t) {
   if (!t) return false;
   if (t.category === 'pre-existing' && t.documentation) return true;
-  if (t.category === 'cache-miss' && typeof t.rerunRunId === 'string' && /^\d{6,}$/.test(t.rerunRunId)) {
+  if (
+    t.category === 'cache-miss' &&
+    typeof t.rerunRunId === 'string' &&
+    /^\d{6,}$/.test(t.rerunRunId)
+  ) {
     return true;
   }
   return false;

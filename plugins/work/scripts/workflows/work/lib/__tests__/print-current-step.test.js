@@ -42,11 +42,15 @@ test('print-current-step: single state file → prints mapped step name', () => 
   try {
     const implementIndex = ALL_STEPS.indexOf('implement');
     assert.ok(implementIndex >= 0, 'step registry must contain `implement`');
-    writeStateFile(tmp, 'TKT-1', JSON.stringify({
-      ticketId: 'TKT-1',
-      currentStep: implementIndex + 1, // 1-indexed
-      status: 'in_progress',
-    }));
+    writeStateFile(
+      tmp,
+      'TKT-1',
+      JSON.stringify({
+        ticketId: 'TKT-1',
+        currentStep: implementIndex + 1, // 1-indexed
+        status: 'in_progress',
+      })
+    );
 
     const res = runWithTasksBase(tmp);
     assert.equal(res.status, 0, `stderr=${res.stderr}`);
@@ -63,12 +67,20 @@ test('print-current-step: newest mtime wins across multiple state files', () => 
     const briefIndex = ALL_STEPS.indexOf('brief');
     assert.ok(ciIndex >= 0 && briefIndex >= 0);
 
-    const olderPath = writeStateFile(tmp, 'OLD-1', JSON.stringify({
-      currentStep: briefIndex + 1,
-    }));
-    const newerPath = writeStateFile(tmp, 'NEW-1', JSON.stringify({
-      currentStep: ciIndex + 1,
-    }));
+    const olderPath = writeStateFile(
+      tmp,
+      'OLD-1',
+      JSON.stringify({
+        currentStep: briefIndex + 1,
+      })
+    );
+    const newerPath = writeStateFile(
+      tmp,
+      'NEW-1',
+      JSON.stringify({
+        currentStep: ciIndex + 1,
+      })
+    );
 
     // Force mtimes so the test is independent of write order timing.
     const past = new Date(Date.now() - 60_000);
@@ -100,11 +112,15 @@ test('print-current-step: malformed JSON → exit 0, stdout empty (fail-silent)'
 test('print-current-step: missing currentStep → exit 0, stdout empty (fail-silent, no fallback to step 1)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pcs-missing-step-'));
   try {
-    writeStateFile(tmp, 'TKT-NO-STEP', JSON.stringify({
-      ticketId: 'TKT-NO-STEP',
-      status: 'in_progress',
-      // currentStep intentionally omitted
-    }));
+    writeStateFile(
+      tmp,
+      'TKT-NO-STEP',
+      JSON.stringify({
+        ticketId: 'TKT-NO-STEP',
+        status: 'in_progress',
+        // currentStep intentionally omitted
+      })
+    );
 
     const res = runWithTasksBase(tmp);
     assert.equal(res.status, 0, `stderr=${res.stderr}`);

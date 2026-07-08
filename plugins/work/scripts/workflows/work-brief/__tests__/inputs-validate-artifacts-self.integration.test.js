@@ -39,15 +39,9 @@ describe('inputs.validateArtifacts() — _related/<self>.md rejection', () => {
     root = made.root;
     tasksDir = made.tasksDir;
     // Linked ticket file (satisfies existing happy-path requirement).
-    fs.writeFileSync(
-      path.join(tasksDir, '_related', `${LINKED_ID}.md`),
-      VALID_BODY
-    );
+    fs.writeFileSync(path.join(tasksDir, '_related', `${LINKED_ID}.md`), VALID_BODY);
     // Offending self-file inside _related/.
-    fs.writeFileSync(
-      path.join(tasksDir, '_related', `${SELF_ID}.md`),
-      VALID_BODY
-    );
+    fs.writeFileSync(path.join(tasksDir, '_related', `${SELF_ID}.md`), VALID_BODY);
   });
 
   after(() => {
@@ -83,10 +77,7 @@ describe('inputs.validateArtifacts() — _related/<self>.md rejection', () => {
     const isoTasksDir = path.join(isoRoot, SELF_ID);
     fs.mkdirSync(path.join(isoTasksDir, '_related'), { recursive: true });
     // Only the offending self-file exists — no linked tickets at all.
-    fs.writeFileSync(
-      path.join(isoTasksDir, '_related', `${SELF_ID}.md`),
-      VALID_BODY
-    );
+    fs.writeFileSync(path.join(isoTasksDir, '_related', `${SELF_ID}.md`), VALID_BODY);
     const manifest = {
       self: { id: SELF_ID, title: 'Self ticket' },
       parent: null,
@@ -105,10 +96,7 @@ describe('inputs.validateArtifacts() — _related/<self>.md rejection', () => {
     const cleanRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'inputs-validate-self-clean-'));
     const cleanTasksDir = path.join(cleanRoot, SELF_ID);
     fs.mkdirSync(path.join(cleanTasksDir, '_related'), { recursive: true });
-    fs.writeFileSync(
-      path.join(cleanTasksDir, '_related', `${LINKED_ID}.md`),
-      VALID_BODY
-    );
+    fs.writeFileSync(path.join(cleanTasksDir, '_related', `${LINKED_ID}.md`), VALID_BODY);
     const manifest = {
       self: { id: SELF_ID, title: 'Self ticket' },
       parent: null,

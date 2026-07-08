@@ -83,8 +83,9 @@ function offsetToLine(source, offset) {
 function parseComplexityFromDescription(description) {
   if (typeof description !== 'string') return { value: null, name: null };
   const valueMatch = description.match(/Complexity of (\d+)/i) || description.match(/\((\d+)\)/);
-  const nameMatch = description.match(/in (?:function|method)\s+([A-Za-z_$][\w$]*)/i)
-    || description.match(/\bin\s+([A-Za-z_$][\w$]*)/);
+  const nameMatch =
+    description.match(/in (?:function|method)\s+([A-Za-z_$][\w$]*)/i) ||
+    description.match(/\bin\s+([A-Za-z_$][\w$]*)/);
   return {
     value: valueMatch ? Number(valueMatch[1]) : null,
     name: nameMatch ? nameMatch[1] : null,

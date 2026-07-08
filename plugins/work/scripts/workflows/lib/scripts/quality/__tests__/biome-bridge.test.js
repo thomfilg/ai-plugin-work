@@ -45,10 +45,9 @@ test('biome-bridge: one cognitive-complexity diagnostic folds into one violation
     stdout: Buffer.from(JSON.stringify(biomeJson)),
     stderr: Buffer.from(''),
   });
-  const violations = rule.checkAll(
-    [{ path: 'src/big.js', source: 'function bigFn(){}' }],
-    { spawnSync: spawn },
-  );
+  const violations = rule.checkAll([{ path: 'src/big.js', source: 'function bigFn(){}' }], {
+    spawnSync: spawn,
+  });
   assert.equal(violations.length, 1);
   const v = violations[0];
   assert.equal(v.rule, 'cognitive-complexity');
@@ -67,10 +66,9 @@ test('biome-bridge: empty diagnostics → empty violations', () => {
     stdout: Buffer.from(JSON.stringify({ diagnostics: [] })),
     stderr: Buffer.from(''),
   });
-  const violations = rule.checkAll(
-    [{ path: 'src/clean.js', source: 'const x = 1;' }],
-    { spawnSync: spawn },
-  );
+  const violations = rule.checkAll([{ path: 'src/clean.js', source: 'const x = 1;' }], {
+    spawnSync: spawn,
+  });
   assert.deepEqual(violations, []);
 });
 
@@ -95,7 +93,7 @@ test('biome-bridge: malformed JSON output → throws config error', () => {
   });
   assert.throws(
     () => rule.checkAll([{ path: 'a.js', source: '' }], { spawnSync: spawn }),
-    /biome|json|parse/i,
+    /biome|json|parse/i
   );
 });
 
@@ -109,7 +107,7 @@ test('biome-bridge: spawn failure (error or null status) → throws config error
   });
   assert.throws(
     () => rule.checkAll([{ path: 'a.js', source: '' }], { spawnSync: spawn }),
-    /biome|spawn|npx/i,
+    /biome|spawn|npx/i
   );
 });
 
@@ -136,10 +134,7 @@ test('biome-bridge: ignores non-cognitive-complexity diagnostics', () => {
     stdout: Buffer.from(JSON.stringify(biomeJson)),
     stderr: Buffer.from(''),
   });
-  const violations = rule.checkAll(
-    [{ path: 'a.js', source: 'x' }],
-    { spawnSync: spawn },
-  );
+  const violations = rule.checkAll([{ path: 'a.js', source: 'x' }], { spawnSync: spawn });
   assert.equal(violations.length, 1);
   assert.equal(violations[0].rule, 'cognitive-complexity');
 });
@@ -160,7 +155,7 @@ test('biome-bridge: invokes npx biome lint --reporter=json with files', () => {
       { path: 'a.js', source: '' },
       { path: 'b.js', source: '' },
     ],
-    { spawnSync: spawn },
+    { spawnSync: spawn }
   );
   assert.ok(captured, 'spawn should have been called');
   assert.equal(captured.cmd, 'npx');

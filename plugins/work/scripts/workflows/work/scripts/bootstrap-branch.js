@@ -87,8 +87,9 @@ const SAFETY_REGEX = /^[A-Za-z0-9._\-/]+$/;
  */
 function inferPrefixCandidates(regex) {
   const candidates = [];
-  const groupHead = /^\^\(\?:?([A-Za-z0-9_|\\\-]+)\)\\?\//.exec(regex)
-    || /^\^\(([A-Za-z0-9_|\\\-]+)\)\\?\//.exec(regex);
+  const groupHead =
+    /^\^\(\?:?([A-Za-z0-9_|\\\-]+)\)\\?\//.exec(regex) ||
+    /^\^\(([A-Za-z0-9_|\\\-]+)\)\\?\//.exec(regex);
   if (groupHead) {
     for (const alt of groupHead[1].split('|')) {
       candidates.push(`${alt.replace(/\\/g, '')}/`);
@@ -163,7 +164,9 @@ function main() {
   // --summary is only required when there is no Linear verbatim path.
   const providerIsLinear = (getConfig('TICKET_PROVIDER') || '').toLowerCase() === 'linear';
   if (!args.summary && !(args.gitBranchName && providerIsLinear)) {
-    fail('missing required flag --summary (required unless --git-branch-name is provided with TICKET_PROVIDER=linear)');
+    fail(
+      'missing required flag --summary (required unless --git-branch-name is provided with TICKET_PROVIDER=linear)'
+    );
   }
   const name = resolveBranchName(args);
   const regex = getConfig('BRANCH_NAME_REGEX') || '';

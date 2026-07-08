@@ -1280,7 +1280,6 @@ describe('enforce-step-workflow', () => {
 
       const evidence = readEvidence();
       assert.ok(evidence['implement']?.executed, 'Evidence should be untouched');
-      assert.ok(evidence['implement']?.executed, 'Evidence should be untouched');
       assert.ok(evidence['commit']?.executed, 'Evidence should be untouched');
     });
   });

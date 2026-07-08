@@ -23,6 +23,7 @@ const { spawnSync } = require('node:child_process');
 
 const { AllowlistLoader } = require('./shared/allowlist');
 const config = require('../../config');
+const adjacentAssertions = require('./rules/adjacent-assertions');
 const biomeBridge = require('./rules/biome-bridge');
 const eslintBridge = require('./rules/eslint-bridge');
 const jscpdBridge = require('./rules/jscpd-bridge');
@@ -205,6 +206,9 @@ function collectViolations(absFiles, repoRoot) {
   violations.push(...eslintBridge.checkAll(lintable, repoRoot));
   violations.push(...jscpdBridge.checkAll(lintable, repoRoot));
   violations.push(...runBiomeBridge(lintable, repoRoot));
+  // Runs on ALL files (tests included) — the duplicated-assertion merge
+  // artifact this rule exists for lives almost exclusively in test files.
+  violations.push(...adjacentAssertions.checkAll(absFiles, repoRoot));
   return violations;
 }
 

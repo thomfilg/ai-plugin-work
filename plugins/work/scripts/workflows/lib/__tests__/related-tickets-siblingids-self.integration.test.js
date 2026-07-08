@@ -39,7 +39,10 @@ describe('siblingIds() filters self.id defensively from a legacy manifest', () =
 
     const ids = rt.siblingIds(m);
 
-    assert.ok(!ids.includes(SELF_ID), `expected self.id "${SELF_ID}" to be filtered, got: ${ids.join(',')}`);
+    assert.ok(
+      !ids.includes(SELF_ID),
+      `expected self.id "${SELF_ID}" to be filtered, got: ${ids.join(',')}`
+    );
     assert.ok(ids.includes('GH-280'), 'expected GH-280 preserved');
     assert.ok(ids.includes('GH-281'), 'expected GH-281 preserved');
   });
@@ -54,7 +57,10 @@ describe('siblingIds() filters self.id defensively from a legacy manifest', () =
 
     const ids = rt.siblingIds(m);
 
-    assert.ok(!ids.includes(SELF_ID), `expected self.id "${SELF_ID}" to be filtered from all buckets, got: ${ids.join(',')}`);
+    assert.ok(
+      !ids.includes(SELF_ID),
+      `expected self.id "${SELF_ID}" to be filtered from all buckets, got: ${ids.join(',')}`
+    );
     assert.deepEqual(
       ids.sort(),
       ['GH-300', 'GH-301', 'GH-302', 'GH-303'].sort(),

@@ -184,6 +184,8 @@ describe('validateIdentifier', () => {
   it('is not confused by a global-flagged allow pattern', () => {
     const allow = /^[a-z]+$/g;
     assert.equal(validateIdentifier('abc/abc', { allow }), null);
+    // Repeated on purpose: a /g-flagged pattern carries lastIndex state — the
+    // second call must not be skewed by the first call's match position.
     assert.equal(validateIdentifier('abc/abc', { allow }), null);
   });
 

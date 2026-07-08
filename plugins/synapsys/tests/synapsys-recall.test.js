@@ -194,7 +194,10 @@ test('suppressedByFireMode: memory with fire_mode: always is NOT suppressed and 
     };
 
     assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+    // Repeated on purpose: each call may write a fired-marker; 'always' mode
+    // must stay unsuppressed across successive calls in the same session.
     assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+    // Third call: still not suppressed.
     assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
   });
 });

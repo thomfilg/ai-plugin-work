@@ -102,7 +102,11 @@ describe('brief-next.js integration (factory delegator)', () => {
     assert.equal(r.status, 0, `expected exit 0, got ${r.status}. Output:\n${combined}`);
 
     // Header shape (baseline from createPhaseRunner)
-    assert.match(r.stdout, /^brief-next: GH-99982\n/, 'header line should start with script:ticket');
+    assert.match(
+      r.stdout,
+      /^brief-next: GH-99982\n/,
+      'header line should start with script:ticket'
+    );
     assert.match(r.stdout, /  tasks dir: /, 'header should include tasks dir line');
     assert.match(
       r.stdout,
@@ -124,11 +128,7 @@ describe('brief-next.js integration (factory delegator)', () => {
 
   it('brief-next.js delegates to createPhaseRunner factory', () => {
     const src = fs.readFileSync(BRIEF_NEXT, 'utf8');
-    assert.match(
-      src,
-      /createPhaseRunner\s*\(/,
-      'brief-next.js must call createPhaseRunner(...)'
-    );
+    assert.match(src, /createPhaseRunner\s*\(/, 'brief-next.js must call createPhaseRunner(...)');
     assert.match(
       src,
       /require\(['"][^'"]*lib\/phase-runner\/create-phase-runner['"]\)/,
