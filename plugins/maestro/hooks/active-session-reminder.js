@@ -25,6 +25,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const {
   SESSION_DIR,
@@ -82,6 +83,60 @@ function parsePendingAlert(line, cutoff) {
   return a;
 }
 
+// Banner compression (GH-680): an actionable alert surfaced verbatim once this
+// session collapses to a `[REPEAT n] <id>: <first 80 chars>` one-liner on later
+// prompts, cutting conductor token burn while preserving the PR #603 re-fire
+// guarantee (the line still re-appears every prompt until the alert ages out).
+// The shown-marker is session-scoped and lives under namespace.stateDir(); all
+// marker I/O is fail-open so a read/write error simply reverts to full output.
+const SHOWN_FULL = 160; // first-surface instruction slice
+const SHOWN_HEAD = 80; // compressed one-liner instruction slice
+
+/** Filesystem-safe infix for a session id. */
+function safeSessionId(id) {
+  return String(id).replace(/[^A-Za-z0-9_-]+/g, '-');
+}
+
+/**
+ * Resolve the current session id: CLAUDE_CODE_SESSION_ID when set, else a stable
+ * hash of SESSION_DIR so repeat prompts in the same orchestration share a marker.
+ */
+function currentSessionId() {
+  const explicit = (process.env.CLAUDE_CODE_SESSION_ID || '').trim();
+  if (explicit) return safeSessionId(explicit);
+  return crypto.createHash('sha1').update(String(SESSION_DIR)).digest('hex').slice(0, 12);
+}
+
+/** Absolute path to the session-scoped banner shown-marker. */
+function shownMarkerPath(sessionId) {
+  return path.join(namespace.stateDir(), `_banner-shown-${sessionId}.json`);
+}
+
+/** Stable fingerprint for one alert occurrence: "<session|ticket>|<kind>|<ts>". */
+function alertFingerprint(a) {
+  return `${a.session || a.ticket}|${a.kind}|${a.ts || ''}`;
+}
+
+/** Load the shown-marker map (fingerprint → surface count). Fail-open to {}. */
+function loadShownMarker(markerPath) {
+  try {
+    const obj = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Persist the shown-marker map. Fail-open (never throws, never blocks). */
+function saveShownMarker(markerPath, shown) {
+  try {
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, JSON.stringify(shown));
+  } catch {
+    /* fail-open */
+  }
+}
+
 function pendingDecisionLines() {
   const raw = readAlertTail();
   if (!raw) return [];
@@ -92,11 +147,29 @@ function pendingDecisionLines() {
     if (a) latest.set(`${a.session || a.ticket}|${a.kind}`, a);
   }
   if (!latest.size) return [];
+
+  const markerPath = shownMarkerPath(currentSessionId());
+  const shown = loadShownMarker(markerPath);
+  // Rebuild the marker from only the currently-live fingerprints so aged-out
+  // alerts prune automatically and the file stays bounded.
+  const next = {};
+
   const out = ['  PENDING DECISIONS (recent actionable alerts — handle or they re-fire):'];
   for (const a of latest.values()) {
-    const inst = String(a.instruction || '').slice(0, 160);
-    out.push(`    ⚑ ${a.session || a.ticket} ${a.kind}: ${inst}`);
+    const id = a.session || a.ticket;
+    const fp = alertFingerprint(a);
+    const seen = Number(shown[fp]) || 0;
+    if (seen === 0) {
+      // First surface this session: full instruction body.
+      out.push(`    ⚑ ${id} ${a.kind}: ${String(a.instruction || '').slice(0, SHOWN_FULL)}`);
+    } else {
+      // Already surfaced: compress to a one-liner but keep re-firing.
+      const head = String(a.instruction || '').slice(0, SHOWN_HEAD);
+      out.push(`    ⚑ [REPEAT ${seen}] ${id} ${a.kind}: ${head}`);
+    }
+    next[fp] = seen + 1;
   }
+  saveShownMarker(markerPath, next);
   return out;
 }
 

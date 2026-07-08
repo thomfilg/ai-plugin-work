@@ -118,87 +118,13 @@ bash scripts/maestro-bootstrap.sh --skill=qc-work --allow-generic 5915
 - **Silent agents** auto-restart after `SILENCE_LIMIT_SEC` (default 300s). `/work` is resumable from `.work-state.json`.
 - **Snapshot** anytime with `bash plugins/maestro/scripts/maestro-pulse.sh` (or `/pulse`).
 
-## Daemon event vocabulary (the only thing your Monitor filter should match)
+## Daemon events & Monitor filter
 
-The .js daemon emits exactly these event kinds. Anything else is bookkeeping noise — do not subscribe to it. Each kind below is dedup'd as noted; if you see it, it carries new information.
-
-| Event | Shape | Emitted by | Dedup |
-|---|---|---|---|
-| `QUESTION-DETECTED` | `[<S>] QUESTION-DETECTED: …` + structured `ACTION` row | `detectors/question.js` | Per-session, fires once when prompt sits ≥`Q_WAIT_MIN` minutes |
-| `ACTION … kind=…` | JSONL row in `/tmp/maestro-alerts.jsonl`, summary line in tmux `maestro-alerts` | `actions.alert` | One per kind per ticket per state, then mutes until state flips |
-| `pr-ready` | `ACTION … kind=pr-ready prNumber=N sha=…` | `detectors/pr-status.js` | Emit on first sight + state transition; re-emit same state at most every `PR_STATUS_RE_EMIT_MIN` (30m) |
-| `pr-broken` | `ACTION … kind=pr-broken failingChecks=[…]` | `detectors/pr-status.js` | Same dedup as `pr-ready` |
-| `pr-pending` | log-only, `<S> pr-pending PR #N sha=… checks running` | `detectors/pr-status.js` | Per-tick log; informational, **not** an alert |
-| `wedged` | `ACTION … kind=wedged restartsInWindow=N` + `<S> WEDGED — N auto-restarts in Mm` | `actions.autoRestart` (restart-loop guard) | Once per session per `WEDGED_QUIET_MIN` (60m) suppression window |
-| `AUTO-RESTART after Ns silence` | log-only | `actions.autoRestart` | One per restart, not throttled |
-| `AUTO-RESTART skipped: non-work helper` | log-only | `runSilenceDetector` | Throttled by `SILENCE_LIMIT_SEC` |
-| `NUDGE soft` / `NUDGE interrupt` | log-only + tmux send to agent pane | `actions.soft` / `actions.interrupt` | Per phase `reNudgeMin` |
-| `nudges-exhausted` | `ACTION … kind=nudges-exhausted` | `handlePhaseStall` | One alert per phase, until phase advances |
-| `pr-comments-stuck` | `ACTION … kind=pr-comments-stuck` | `handlePrComments` | One alert until comment count or HEAD changes |
-| `commit-stall NNNm` | `<S> commit-stall NNNm in phase=… (threshold=TTTm)` | `runCommitStallDetector` | **Threshold-only**: emits at `[30, 60, 120, 240, 480]` minutes, at most 5 lines per stall |
-| `stop-condition-met` | `ACTION … kind=stop-condition-met oracle=…` + `<S> STOP-CONDITION-MET — tmux killed, slot freed` | `stop-condition.maybeStopOnOracle` → `actions.freeStopConditionSlot` | Once per ticket lifecycle (`stop-condition` marker); ticket marked `done` |
-| `dead-end-probe` | `ACTION … kind=dead-end-probe attempts=N` | `dead-end-rotation` | First dead-end of a lifecycle: a diagnostic prompt is sent to the AGENT (no kill); wait `DEAD_END_PROBE_GRACE_MIN`, read the pane reply, intervene or let the next re-emit rotate |
-| `dead-end` | `ACTION … kind=dead-end attempts=N exhausted=bool` | `dead-end-rotation` → `killAndBootstrapNext` | Kill+rotate strike: manifest `pending` (re-eligible) below `DEAD_END_MAX_ATTEMPTS`, `blocked` at max. Attempts persist across re-bootstraps; reset only on phase advance. The just-killed ticket is excluded from the next bootstrap pick |
-| `kill-during-ci` | `ACTION … kind=kill-during-ci phase=…` | `ci-gate-rotation` → `actions.freeCiPhaseSlot` | /work agent parked at `ci`/`complete` is killed + slot rotated (PR #603 decision): `complete`→`done`, `ci`→`awaiting-merge`. /work-only (follow-up/generic pools rotate via oracles). Gate: `AUTO_FREE_CI_SLOT=0` disables |
-| `comment-loop` | `ACTION … kind=comment-loop cycles=N` | `pr-comments-handler` | ≥`COMMENT_LOOP_CYCLES` (3) fix→push→re-comment cycles: nudging is SUPPRESSED (it feeds the loop); operator judges the threads. Re-emits per `COMMENT_LOOP_RE_EMIT_MIN` (60m) |
-| `auth-broken` | `ACTION … kind=auth-broken line=…` | `runAuthBrokenDetector` | Credential failure visible in the pane (403 / Bad credentials / Could not resolve to a Repository) — gh account flapping breaks whole fleets silently. Re-emits per `AUTH_BROKEN_RE_EMIT_MIN` (30m) |
-| `spinner-hang` | `ACTION … kind=spinner-hang elapsedMin=N line=…` | `runSpinnerDetector` | Progress-gated: never fires while the worktree changed <`PROGRESS_FRESH_MIN`; re-emits per `SPINNER_RE_INTERRUPT_MIN`. Default is ALERT-ONLY (`SPINNER_AUTO_INTERRUPT=1` restores the old blind Esc) |
-| `stuck-input` | `ACTION … kind=stuck-input text=…` | `runStuckInputDetector` | Text sat unsubmitted in an IDLE agent's composer ≥`STUCK_INPUT_MIN` (5m); re-emits per `STUCK_INPUT_RE_EMIT_MIN` (15m). Alert-only unless `STUCK_INPUT_AUTO_SUBMIT=1` |
-| `no-progress` | `ACTION … kind=no-progress elapsedMin=N` | `runNoProgressCheck` | Worktree unchanged ≥`NO_PROGRESS_ALERT_MIN` (45m) while the pane LOOKS active — the backstop for panes that defeat silence detection (tail -f, polling loops). Re-emits per `NO_PROGRESS_RE_EMIT_MIN` (60m) |
-| `DEAD-END-HOLD` | log-only | `actions.freeDeadEndSlot` | A question-pending dead-end with NO queued work to rotate to holds the session alive instead of killing it (one line per 30m) |
-| `TICK-ERROR` / `DAEMON-CRASH` / `CONDUCTOR-USURPED` | log-only | main loop guards | A detector threw (session skipped, others unaffected) / an exception escaped (daemon logs + keeps ticking) / the lock was force-taken by a newer conductor (this one exits) |
-| `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged ‖ …` | log-only | `maybeEmitHeartbeat` (main loop) | Once per `HEARTBEAT_MIN` (default 30m); always emits even when nothing else changed |
-
-## Recommended Monitor filter
-
-Use this exact regex. Anything outside it is noise:
-
-```
-QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop-condition-met|wedged|WEDGED|HEARTBEAT|commit-stall|spinner-hang|stuck-input|no-progress|DEAD-END|dead-end|kill-during-ci|comment-loop|auth-broken|SLOT-FREED|POOL-FILL|DAEMON-CRASH|CONDUCTOR-USURPED|TICK-ERROR
-```
-
-Every `ACTION` payload now carries `action_required: true` on EVERY repeat of an actionable kind (not just the first — operators tuned out `[REPEAT N]` events while agents burned dead-end strikes) and, where mechanical, a copy-paste-able `unblockCmd`. With `MAESTRO_STOP_GUARD=1` set in the conducting session, the Stop hook refuses to end a turn while unacked `action_required` alerts exist — engage or ack, never "standing by".
-
-`stop-condition-met` is a **positive** signal — the ticket's compiled oracle exited 0, the agent finished, its slot was freed and the next queued ticket bootstrapped. `pr-ready` is the **positive** signal — when you see it, the agent's PR is CLEAN and all checks are green; merge it (or hold per `[[never-auto-merge-pr]]`). `wedged` is the **escalation** signal — auto-restart loop hit its cap; operator must inspect. `HEARTBEAT` is the periodic forced re-read; never ignore it.
+The full daemon event vocabulary (every emitted `kind`, its shape, emitter, and dedup rule) plus the exact Monitor filter regex live in **[`reference/event-vocabulary.md`](reference/event-vocabulary.md)** — read it on demand when wiring the Monitor or decoding an event. Key signals: `pr-ready` / `stop-condition-met` are **positive**, `wedged` is **escalation**, and benign `HEARTBEAT` beats now route non-waking (they update the state file, logfile, and `_heartbeat.json` marker without waking the conductor). With `MAESTRO_STOP_GUARD=1` the Stop hook refuses to end a turn while unacked `action_required` alerts exist — engage or ack, never "standing by".
 
 ## Env
 
-| Variable | Default | What it tunes |
-|---|---|---|
-| `MAESTRO_NS` | (unset) | Namespace key (`[A-Za-z0-9_-]+`). Isolates state/log/alert/inbox/lock + tmux session names (`<ns>/<TICKET>-work`) so N maestro instances run on one machine without racing. Set it in each project's `.envrc`. See `docs/OPERATOR_PLAYBOOK.md` → "Running concurrent maestro instances". |
-| `MAESTRO_FORCE` | (unset) | `1` takes over a live per-namespace conductor lock instead of refusing to start. |
-| `WORKTREES_BASE` | — | Where worktrees live |
-| `REPO_NAME` | `claude-plugin-work` | Resolves to `<base>/<repo>-<ticket>` worktree path |
-| `BASE_BRANCH` | `main` | Branch the worktree forks from |
-| `SILENCE_LIMIT_SEC` | 300 | Auto-restart after this much pane silence |
-| `Q_WAIT_MIN` | 3 | Question-pending alert delay |
-| `TICK_SEC` | 60 | Daemon tick cadence |
-| `COMMIT_STALL_MIN` | 30 | Floor below which commit-stall is suppressed |
-| `PR_STATUS_RE_EMIT_MIN` | 30 | Cooldown between re-emits of same PR state |
-| `RESTART_LOOP_THRESHOLD` | 3 | Restarts within window before declaring WEDGED |
-| `RESTART_WINDOW_MIN` | 30 | Rolling window for restart-loop counter |
-| `WEDGED_QUIET_MIN` | 60 | How long to suppress restarts after WEDGED |
-| `HEARTBEAT_MIN` | 30 | Heartbeat cadence |
-| `ORACLE_TIMEOUT_MS` | 30000 | Per-tick wall-clock budget for a stopCondition oracle |
-| `AUTO_FREE_STOP_CONDITION` | (on) | Set `0` to disable stop-condition kill/rotate |
-| `AUTO_BOOTSTRAP_NEXT` | (off) | Set `1` so the conductor tops the pool up from the queue |
-| `PROGRESS_FRESH_MIN` | 10 | Worktree change younger than this suppresses spinner/phase-stall/restart actions (agent is WORKING, however the pane looks) |
-| `Q_RE_NUDGE_MIN` | 10 | Cooldown between question-pending re-alerts (was: every tick — killed waiting agents in ~2 min) |
-| `Q_DEAD_END_MIN` | 45 | A question must be pending this long before dead-end rotation is even considered |
-| `SPINNER_AUTO_INTERRUPT` | (off) | `1` restores blind Esc on spinner-hang; default emits a `spinner-hang` alert for the operator to judge |
-| `STUCK_INPUT_MIN` / `STUCK_INPUT_RE_EMIT_MIN` | 5 / 15 | Composer-text persistence before `stuck-input` fires / re-emits |
-| `STUCK_INPUT_AUTO_SUBMIT` | (off) | `1` auto-presses End+C-m on stuck composer text (careful: submits whatever is queued) |
-| `NO_PROGRESS_ALERT_MIN` / `NO_PROGRESS_RE_EMIT_MIN` | 45 / 60 | No-worktree-change alert threshold / re-emit cadence |
-| `NUDGE_STORM_MUTE_MIN` | 60 | Past 2× maxNudges, phase-stall reminders drop to one per this interval |
-| `GH_CALL_TIMEOUT_MS` / `GIT_CALL_TIMEOUT_MS` | 15000 / 10000 | Hard caps on gh/git subprocesses inside the tick (a hung gh froze the whole daemon) |
-| `MAESTRO_RESTART_MODE` | (auto) | `fresh` or `continue` forces the restart style; default: `--continue` for generic commands with a resumable conversation, fresh `/skill` for work/follow-up |
-| `MAESTRO_BRANCH_TEMPLATE` | `{ticket}` | Worktree branch name template (`{ticket}`, `{ticket_lower}`). The old `-maestro` suffix default is gone (remotes rejected it); PR detection still recognizes legacy `<ticket>-maestro` branches |
-| `MAESTRO_PENDING_WINDOW_MIN` | 90 | How far back the UserPromptSubmit hook surfaces unanswered actionable alerts |
-| `DEAD_END_MAX_ATTEMPTS` / `DEAD_END_PROBE_GRACE_MIN` | 3 / 3 | Cross-lifecycle strikes before `blocked` / grace minutes after the diagnostic probe before a kill may proceed |
-| `AUTO_FREE_CI_SLOT` | (on) | `0` disables CI-phase rotation (kill-during-ci) AND pr-ready slot freeing — independent of `AUTO_FREE_DEAD_END` |
-| `COMMENT_LOOP_CYCLES` / `COMMENT_LOOP_RE_EMIT_MIN` | 3 / 60 | Fix→push→re-comment cycles before LOOP escalation / re-emit cadence |
-| `AUTH_BROKEN_RE_EMIT_MIN` | 30 | Cooldown between auth-broken alerts per session |
-| `MAESTRO_STOP_GUARD` | (off) | `1` in the CONDUCTING session: Stop hook exits 2 while unacked `action_required` alerts exist (ack: write the alert's ts to `~/.cache/maestro-stop-guard.state`). Leave unset in unrelated sessions |
+Every daemon tunable (namespace, cadence floors, wake filter, rotation gates) is documented in **[`reference/env-vars.md`](reference/env-vars.md)** — read it before tuning. The most load-bearing defaults: `HEARTBEAT_MIN`=30 / `HEARTBEAT_MAX_MIN`=120 (unchanged-state beat cadence; a state-change beat still emits immediately), `CONDUCT_WAKE_EVENTS`=the actionable allowlist (`all`/`*` restores always-wake), `SILENCE_LIMIT_SEC`=300 (auto-restart), `MAESTRO_NS` (concurrent-instance isolation), and `MAESTRO_STOP_GUARD` for the conducting session.
 
 ## After launch
 

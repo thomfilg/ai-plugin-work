@@ -55,10 +55,81 @@ function alertKey(obj) {
   return `${namespace.flattenKey(obj.session || obj.ticket)}|${obj.kind}|${obj.sha || obj.phase || '_'}`;
 }
 
-function log(line) {
+// Kinds the operator must act on now (answer a menu, decide on PR, kill a
+// wedge). Other kinds are informational reminders the operator can fast-route.
+// Declared before wakesConductor() so it can serve as the default wake set.
+const ACTION_REQUIRED_KINDS = new Set([
+  'question-pending',
+  'nudges-exhausted',
+  'wedged',
+  'dead-end',
+  'dead-end-probe',
+  'pr-ready',
+  'pr-broken',
+  'pr-comments-stuck',
+  'comment-loop',
+  'stuck-input',
+  'auth-broken',
+]);
+
+/**
+ * Resolve the CONDUCT_WAKE_EVENTS allowlist (GH-680). The single wake channel
+ * is process.stderr.write in log(); only kinds in this set are allowed to hit
+ * it, so benign HEARTBEATs update state/log/statusline without waking the
+ * conductor model. Parsing is comma-split + trim, fail-closed for unknown
+ * kinds; `all`/`*` restores the pre-680 always-wake behavior.
+ *
+ * @returns {{ all: boolean, kinds: Set<string> }}
+ */
+function parseWakeEvents() {
+  const raw = process.env.CONDUCT_WAKE_EVENTS;
+  if (raw == null || raw.trim() === '') {
+    return { all: false, kinds: ACTION_REQUIRED_KINDS };
+  }
+  const tokens = raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (tokens.includes('all') || tokens.includes('*')) {
+    return { all: true, kinds: new Set() };
+  }
+  return { all: false, kinds: new Set(tokens) };
+}
+
+/**
+ * True iff an alert of `kind` may wake the conductor model (write to the
+ * stderr wake channel). Unknown kinds never match (fail-closed); the `all`/`*`
+ * escape hatch wakes on every kind. Read fresh each call so an env change (or
+ * a test reloading the module) takes effect without a restart.
+ *
+ * @param {string} kind
+ * @returns {boolean}
+ */
+function wakesConductor(kind) {
+  const { all, kinds } = parseWakeEvents();
+  return all || kinds.has(kind);
+}
+
+/**
+ * Append a line to the logfile and, when the line's `kind` is wake-eligible,
+ * also write it to process.stderr (the conductor's model-wake channel).
+ *
+ * Backward compatible: the positional single-arg form `log(line)` still writes
+ * to stderr unconditionally (no kind ⇒ legacy always-wake). Pass
+ * `log(line, { kind })` to gate the stderr write through wakesConductor(kind)
+ * — a non-waking kind (e.g. HEARTBEAT under the default allowlist) is logged
+ * to the file but suppressed on stderr (GH-680).
+ *
+ * @param {string} line
+ * @param {{ kind?: string }} [opts]
+ */
+function log(line, opts) {
   const ts = new Date().toISOString();
   const out = `[${ts}] ${line}\n`;
-  process.stderr.write(out);
+  const kind = opts && opts.kind;
+  if (kind === undefined || wakesConductor(kind)) {
+    process.stderr.write(out);
+  }
   try {
     fs.appendFileSync(namespace.logFile(), out);
   } catch {}
@@ -85,22 +156,6 @@ function log(line) {
  * freeDeadEndSlot at count >= 3). The instruction string gets a [REPEAT N]
  * prefix when count > 1 so the operator can see momentum.
  */
-// Kinds the operator must act on now (answer a menu, decide on PR, kill a
-// wedge). Other kinds are informational reminders the operator can fast-route.
-const ACTION_REQUIRED_KINDS = new Set([
-  'question-pending',
-  'nudges-exhausted',
-  'wedged',
-  'dead-end',
-  'dead-end-probe',
-  'pr-ready',
-  'pr-broken',
-  'pr-comments-stuck',
-  'comment-loop',
-  'stuck-input',
-  'auth-broken',
-]);
-
 function alert(obj) {
   if (!obj || typeof obj.instruction !== 'string' || !obj.instruction.trim()) {
     log(`ALERT-DROPPED (no instruction): ${JSON.stringify(obj)}`);
@@ -130,8 +185,19 @@ function alert(obj) {
   tmux.ensureSession(ALERT_SESSION);
   const summary = `ACTION ${obj.session || obj.ticket || '?'} kind=${obj.kind} → ${instruction}`;
   tmux.sendLine(ALERT_SESSION, summary);
-  log(`ACTION ${JSON.stringify(payload)}`);
+  // Pass the kind so the closing wake-channel write is gated by the
+  // CONDUCT_WAKE_EVENTS allowlist — actionable kinds stay wake-eligible while
+  // non-allowlisted kinds are logged only (GH-680).
+  log(`ACTION ${JSON.stringify(payload)}`, { kind: obj.kind });
   return { count };
 }
 
-module.exports = { alert, log, resetCount, alertKey, ALERT_FILE, ALERT_SESSION };
+module.exports = {
+  alert,
+  log,
+  wakesConductor,
+  resetCount,
+  alertKey,
+  ALERT_FILE,
+  ALERT_SESSION,
+};

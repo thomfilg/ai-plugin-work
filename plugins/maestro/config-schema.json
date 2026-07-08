@@ -72,6 +72,24 @@
       "description": "Window (min) a pending task may wait before alerting",
       "section": "Conductor Tuning",
       "advanced": true
+    },
+    "CONDUCT_WAKE_EVENTS": {
+      "type": "string",
+      "default": "question-pending,nudges-exhausted,wedged,dead-end,dead-end-probe,pr-ready,pr-broken,pr-comments-stuck,comment-loop,stuck-input,auth-broken",
+      "description": "Allowlist of event kinds that wake the conductor model (all/* wakes on every kind)",
+      "section": "Conductor Tuning"
+    },
+    "HEARTBEAT_MIN": {
+      "type": "number",
+      "default": "30",
+      "description": "Minimum minutes between unchanged-state heartbeat emits (state changes emit immediately)",
+      "section": "Conductor Tuning"
+    },
+    "HEARTBEAT_MAX_MIN": {
+      "type": "number",
+      "default": "120",
+      "description": "Maximum minutes before an unchanged-state heartbeat is forced",
+      "section": "Conductor Tuning"
     }
   }
 }
