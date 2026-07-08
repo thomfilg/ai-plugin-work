@@ -245,6 +245,67 @@ function readTicketMarkers(id, dir) {
   };
 }
 
+// `ts` is a marker timestamp (epoch sec); fresh within `win` seconds of `now`.
+function freshTs(ts, win, now) {
+  return typeof ts === 'number' && ts > 0 && now - ts <= win;
+}
+
+// Auto-restart ("nudge") escalation level — restarts[] grows once per restart;
+// 0 when the last restart is outside the window (stale).
+function nudgeLevelOf(m, nowSec) {
+  const restarts =
+    m.restartLoop && Array.isArray(m.restartLoop.restarts) ? m.restartLoop.restarts : [];
+  if (!restarts.length) return 0;
+  const last = restarts[restarts.length - 1];
+  return freshTs(last, NUDGE_WINDOW_SEC, nowSec) ? restarts.length : 0;
+}
+
+// Ordered marker rules — first matching predicate wins, so each agent shows
+// exactly one glyph, highest-severity-first. Each predicate is its own function
+// (ctx = { m, nowSec, nudge }) so the dispatcher stays flat. PR state is
+// persisted (lastEmittedAt marks the last TRANSITION), so trust lastState
+// directly rather than gating it on freshness.
+const ICON_RULES = [
+  {
+    icon: ICON.wedged,
+    test: (c) =>
+      (c.m.deadEnd &&
+        c.m.deadEnd.killed &&
+        freshTs(c.m.deadEnd.freedAt, NUDGE_WINDOW_SEC, c.nowSec)) ||
+      c.nudge >= 3,
+  },
+  {
+    icon: ICON.question,
+    test: (c) =>
+      c.m.question &&
+      freshTs(c.m.question.lastAlertAt || c.m.question.startedAt, OVERLAY_FRESH_SEC, c.nowSec),
+  },
+  { icon: ICON.prBroken, test: (c) => c.m.prStatus && c.m.prStatus.lastState === 'pr-broken' },
+  {
+    icon: ICON.stuck,
+    test: (c) => c.m.stuckInput && freshTs(c.m.stuckInput.firstSeenAt, OVERLAY_FRESH_SEC, c.nowSec),
+  },
+  { icon: ICON.nudge2, test: (c) => c.nudge === 2 },
+  { icon: ICON.nudge1, test: (c) => c.nudge === 1 },
+  { icon: ICON.prReady, test: (c) => c.m.prStatus && c.m.prStatus.lastState === 'pr-ready' },
+];
+
+// Working vs stalled from the silence heartbeat (lastActiveAt bumps whenever the
+// pane hash or token count moves). '' when there is no heartbeat marker.
+function livenessIcon(m, nowSec) {
+  const s = m.silence;
+  if (!s || typeof s.lastActiveAt !== 'number' || s.lastActiveAt <= 0) return '';
+  return nowSec - s.lastActiveAt >= SILENCE_LIMIT_SEC ? ICON.stalled : ICON.working;
+}
+
+// Manifest-status fallback when no live marker has an opinion yet.
+function statusIcon(status) {
+  if (status === 'awaiting-merge') return ICON.prReady;
+  if (status === 'stopped' || status === 'blocked') return ICON.stopped;
+  if (status === 'done') return ICON.done;
+  return ICON.working; // live, in-progress, no signal yet
+}
+
 /**
  * Map a ticket's markers + manifest status to a single status glyph.
  * Highest-severity-first so one agent shows exactly one icon. Pure: all
@@ -252,41 +313,11 @@ function readTicketMarkers(id, dir) {
  */
 function resolveTicketIcon(markers, status, nowSec) {
   const m = markers || {};
-  const fresh = (ts, win) => typeof ts === 'number' && ts > 0 && nowSec - ts <= win;
-
-  // Auto-restart ("nudge") escalation — restarts[] grows once per restart.
-  const restarts =
-    m.restartLoop && Array.isArray(m.restartLoop.restarts) ? m.restartLoop.restarts : [];
-  const lastRestart = restarts.length ? restarts[restarts.length - 1] : 0;
-  const nudgeLevel = fresh(lastRestart, NUDGE_WINDOW_SEC) ? restarts.length : 0;
-
-  const killed = m.deadEnd && m.deadEnd.killed && fresh(m.deadEnd.freedAt, NUDGE_WINDOW_SEC);
-  if (killed || nudgeLevel >= 3) return ICON.wedged;
-
-  if (m.question && fresh(m.question.lastAlertAt || m.question.startedAt, OVERLAY_FRESH_SEC)) {
-    return ICON.question;
+  const ctx = { m, nowSec, nudge: nudgeLevelOf(m, nowSec) };
+  for (const rule of ICON_RULES) {
+    if (rule.test(ctx)) return rule.icon;
   }
-  // PR state is persisted (lastEmittedAt marks the last TRANSITION, not the last
-  // check), so trust lastState directly rather than gating on freshness.
-  if (m.prStatus && m.prStatus.lastState === 'pr-broken') return ICON.prBroken;
-  if (m.stuckInput && fresh(m.stuckInput.firstSeenAt, OVERLAY_FRESH_SEC)) return ICON.stuck;
-
-  if (nudgeLevel === 2) return ICON.nudge2;
-  if (nudgeLevel === 1) return ICON.nudge1;
-
-  if (m.prStatus && m.prStatus.lastState === 'pr-ready') return ICON.prReady;
-
-  // Working vs stalled from the silence heartbeat (lastActiveAt bumps whenever
-  // the pane hash or token count moves).
-  if (m.silence && typeof m.silence.lastActiveAt === 'number' && m.silence.lastActiveAt > 0) {
-    return nowSec - m.silence.lastActiveAt >= SILENCE_LIMIT_SEC ? ICON.stalled : ICON.working;
-  }
-
-  // Manifest-status fallbacks when no live marker has an opinion yet.
-  if (status === 'awaiting-merge') return ICON.prReady;
-  if (status === 'stopped' || status === 'blocked') return ICON.stopped;
-  if (status === 'done') return ICON.done;
-  return ICON.working; // live, in-progress, no signal yet
+  return livenessIcon(m, nowSec) || statusIcon(status);
 }
 
 /**
