@@ -28,7 +28,8 @@ runStatuslineInstaller({
   rendererName: 'work-statusline.sh',
   chainFile: path.join(os.homedir(), '.cache', 'work', 'statusline-chain.cmd'),
   codexNote:
-    'Watch /work progress from the CLI instead:\n' +
+    'On codex, /statusline configures built-in fields only and /status prints session\n' +
+    'info — neither renders /work state. Watch it from the CLI instead:\n' +
     "  watch -n 3 'cat <TASKS_BASE>/<ticket>/.work-state.json'\n" +
     '(the /work engine keeps writing that state file on codex too)\n',
 });

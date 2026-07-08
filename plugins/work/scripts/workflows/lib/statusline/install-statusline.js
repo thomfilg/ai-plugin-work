@@ -87,8 +87,13 @@ function runStatuslineInstaller(opts) {
   const write = opts.write || ((s) => process.stdout.write(s));
   const exit = opts.exit || ((c) => process.exit(c));
   if (detectRuntime() === 'codex') {
+    // Codex CLI DOES have a status line (/statusline → tui.status_line), but it
+    // only renders a fixed enum of built-in fields (model, git branch, tokens…)
+    // — not command-backed renderers like this one (openai/codex#20140). So the
+    // bar can't paint on codex; refuse cleanly and point at the CLI alternative.
     write(
-      '[work:codex-degraded] statusline unavailable — codex has no plugin statusline surface.\n' +
+      "[work:codex-degraded] statusline unavailable — codex's status line (tui.status_line) " +
+        'renders only built-in fields, not command-backed renderers like this one.\n' +
         opts.codexNote
     );
     return exit(0);

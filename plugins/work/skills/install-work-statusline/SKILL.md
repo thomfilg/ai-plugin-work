@@ -76,3 +76,25 @@ work bar is outermost and chains follow-up (which chains maestro).
 - **Renderer:** `scripts/workflows/work/statusline/work-statusline.sh` → `work-statusline.js`.
 - **Data source:** the engine's existing `<TASKS_BASE>/<ticket>/.work-state.json` + `.work.pid` (no files created by the bar).
 - **Chain file:** `~/.cache/work/statusline-chain.cmd` holds the prior status line command; the renderer runs it beneath the work line.
+
+## Codex
+
+The `/stats` and `/health` skills work on codex (plain node, no symlink deps).
+The **bar itself cannot render on codex CLI**: codex does have a status line
+(`/statusline` → `tui.status_line` in `~/.codex/config.toml`), but it renders
+only a fixed enum of built-in fields (model, git branch, token counters, cwd,
+version…) — it does **not** support command-backed renderers like this one yet
+([openai/codex#20140](https://github.com/openai/codex/issues/20140)). Under
+`AGENT_RUNTIME=codex` the installer therefore refuses cleanly (exit 0) and
+prints the CLI alternative. The codex IDE extension is a sidebar, not a bottom
+status bar, so it has no equivalent surface either.
+
+| Claude Code | Codex CLI |
+|---|---|
+| this ⚙ `statusLine` bar | `/statusline` (built-in fields only — can't show `/work` state) |
+| status/details | `/status` |
+| terminal title | `/title` |
+| background command status | `/ps` |
+
+For live `/work` state on codex, watch the state file directly:
+`watch -n 3 'cat <TASKS_BASE>/<ticket>/.work-state.json'`.
