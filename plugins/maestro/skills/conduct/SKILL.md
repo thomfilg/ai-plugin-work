@@ -54,6 +54,19 @@ Concurrent instances: see the "Running concurrent maestro instances" section in
 `docs/OPERATOR_PLAYBOOK.md` for the one-conductor rule and the `MAESTRO_NS`
 isolation recipe.
 
+## Anti-pattern — don't re-confirm what the state file already answers
+
+Every conductor wake burns a model turn. The daemon has already done the polling
+for you: the alert line, the `_heartbeat.json` marker, and the state file under
+`STATE_DIR` carry the current fleet answer (PR status, mergeState, phase, attempt
+counts). Do **not** re-run `gh pr view` / `gh pr checks` or `tmux capture-pane`
+just to re-confirm a fact the emitted event already stated — that is a redundant
+confirmation that costs a turn and adds no signal. Act on the state you were
+woken with; only capture the pane when the event itself tells you to look
+(`QUESTION-DETECTED`, `spinner-hang`, `no-progress`, `stuck-input`) or when the
+state file is genuinely stale/absent. See the wake-filter and anti-pattern notes
+in `docs/OPERATOR_PLAYBOOK.md`.
+
 ## Under Codex
 
 - **Invocation**: mention `$conduct` (maestro:conduct) — codex has no
