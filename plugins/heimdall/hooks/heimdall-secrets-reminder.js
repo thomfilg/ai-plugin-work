@@ -16,7 +16,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require(path.join(__dirname, '..', 'lib', 'safeSubprocess'));
 
 function projectDir() {
   if (process.env.CLAUDE_PROJECT_DIR) return process.env.CLAUDE_PROJECT_DIR;
@@ -35,7 +35,9 @@ function main() {
   // The status script owns the verdict AND the case-specific message (install
   // not run vs. installed-but-docker-bypassable) via --reminder. Single source
   // of truth: the hook just forwards its text. Args passed as argv (no shell).
-  const r = spawnSync(process.execPath, [status, dir, '--reminder'], { encoding: 'utf8' });
+  // safeSubprocess adds the default 15s deadline; a timed-out status probe
+  // yields status null !== 2 and the reminder stays silent (fail-open nag).
+  const r = safeSpawnSync(process.execPath, [status, dir, '--reminder'], { encoding: 'utf8' });
   if (r.status !== 2 || !r.stdout || !r.stdout.trim()) return; // protected / no config / nothing to say
 
   process.stdout.write(

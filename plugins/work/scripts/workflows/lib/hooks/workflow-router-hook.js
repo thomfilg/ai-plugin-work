@@ -15,16 +15,8 @@
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', 'hookEntrypoint'));
 const { safeExec } = require(path.join(__dirname, '..', 'safe-exec'));
-
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
 
 const WORKFLOWS_DIR = path.join(__dirname, '..', '..');
 const ENGINE_PATH = path.join(__dirname, '..', 'workflow-engine.js');
@@ -107,6 +99,17 @@ function main() {
   process.exit(0);
 }
 
+/** Whether a workflows-dir entry is a subdirectory worth scanning. */
+function isWorkflowSearchDir(entry) {
+  return (
+    entry.isDirectory() &&
+    !entry.name.startsWith('.') &&
+    entry.name !== 'node_modules' &&
+    entry.name !== 'lib' &&
+    entry.name !== '__tests__'
+  );
+}
+
 /**
  * Scan workflows directory and build command → name map.
  * @returns {{ [command: string]: string }}
@@ -119,13 +122,7 @@ function buildCommandMap() {
   // Scan the workflows dir and one level of subdirectories for *.workflow.js
   const searchDirs = [WORKFLOWS_DIR];
   for (const entry of fs.readdirSync(WORKFLOWS_DIR, { withFileTypes: true })) {
-    if (
-      entry.isDirectory() &&
-      !entry.name.startsWith('.') &&
-      entry.name !== 'node_modules' &&
-      entry.name !== 'lib' &&
-      entry.name !== '__tests__'
-    ) {
+    if (isWorkflowSearchDir(entry)) {
       searchDirs.push(path.join(WORKFLOWS_DIR, entry.name));
     }
   }
@@ -147,8 +144,9 @@ function buildCommandMap() {
   return map;
 }
 
-try {
-  main();
-} catch {
-  process.exit(0);
-}
+// Canonical entry protocol: stdin is drained/parsed by runHook (this hook
+// reads the prompt from CLAUDE_USER_PROMPT, so the payload is unused) and
+// unexpected errors are logged via logHookError and exit 0 (fail open).
+// NOTE: draining means the hook now waits for stdin EOF — hook runtimes pipe
+// the payload and close the stream; a custom spawner must not hold it open.
+runHook(main, { file: __filename });

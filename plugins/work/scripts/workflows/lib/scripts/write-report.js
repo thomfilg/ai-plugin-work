@@ -19,7 +19,7 @@
  *      - Timestamp is a finite number within TOKEN_MAX_AGE_MS (prevents replay)
  *      - Agent name is a non-empty string matching allowedAgents
  *   4. Required fields are validated before writing
- *   5. The report is written atomically (tmp + rename)
+ *   5. The report is written atomically (tmp + rename via the vendored safeIO writer)
  *
  * Why not CLAUDE_CURRENT_AGENT?
  *   Any agent can spoof it: `CLAUDE_CURRENT_AGENT=x node script.js`
@@ -33,6 +33,7 @@
 const fs = require('fs');
 const path = require('path');
 const { normalizeAgentName } = require('../agent-detection');
+const { writeFileAtomic } = require('../safeIO');
 
 /** Max age for a token to be considered valid (10 seconds) */
 const TOKEN_MAX_AGE_MS = 10_000;
@@ -137,6 +138,166 @@ function consumeToken(scriptBasename, ticketId) {
  * @property {string} [reportType] — Report type for post-write status validation (e.g. 'tests', 'codeReview', 'completion')
  */
 
+/** Read stdin to completion and parse it as JSON — exits 1 on invalid input. */
+async function readInputFromStdin(name) {
+  let rawInput = '';
+  for await (const chunk of process.stdin) {
+    rawInput += chunk;
+  }
+  try {
+    return JSON.parse(rawInput);
+  } catch (e) {
+    process.stderr.write(`[${name}] ERROR: Invalid JSON input.\n${e.message}\n`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Enforcement 1: Hook-issued token verification.
+ * The PreToolUse hook (Rule 5) writes a token file after verifying agent
+ * identity via Claude Code's internal hookData. We consume that token here.
+ * This cannot be spoofed because the token is written by the hook process,
+ * not by the Bash command the agent executes.
+ * Exits 2 on any failure; returns the verified token on success.
+ */
+function requireVerifiedToken(name, allowedAgents) {
+  const scriptBasename = path.basename(process.argv[1] || '');
+  const token = consumeToken(scriptBasename); // reads + deletes token atomically
+
+  if (!token) {
+    process.stderr.write(
+      `[${name}] BLOCKED: No valid write token found.\n` +
+        `  Expected token at: ${tokenPath(scriptBasename)}\n` +
+        `  The PreToolUse hook must approve this call first.\n` +
+        `  This script can only be called through Claude Code's agent system.\n`
+    );
+    process.exit(2);
+  }
+
+  // Validate token structure: timestamp must be a finite number, agent must be a string
+  if (typeof token.timestamp !== 'number' || !Number.isFinite(token.timestamp)) {
+    process.stderr.write(`[${name}] BLOCKED: Token has invalid or missing timestamp.\n`);
+    process.exit(2);
+  }
+  if (typeof token.agent !== 'string' || !token.agent) {
+    process.stderr.write(`[${name}] BLOCKED: Token has invalid or missing agent field.\n`);
+    process.exit(2);
+  }
+
+  // Check token freshness — prevents replay with pre-placed token files
+  // Reject expired AND future timestamps (clock skew / tampered tokens)
+  const age = Date.now() - token.timestamp;
+  if (age < 0 || age > TOKEN_MAX_AGE_MS) {
+    process.stderr.write(
+      `[${name}] BLOCKED: Write token expired (${age}ms old, max ${TOKEN_MAX_AGE_MS}ms).\n` +
+        `  Token was issued at ${new Date(token.timestamp).toISOString()}\n`
+    );
+    process.exit(2);
+  }
+
+  // Check agent in token matches allowedAgents
+  const agentMatch = allowedAgents.some(
+    (a) => normalizeAgentName(a) === normalizeAgentName(token.agent)
+  );
+  if (!agentMatch) {
+    process.stderr.write(
+      `[${name}] BLOCKED: Token agent "${token.agent}" is not authorized.\n` +
+        `  Allowed agents: ${allowedAgents.join(', ')}\n` +
+        `  Only these agents can use this writer.\n`
+    );
+    process.exit(2);
+  }
+
+  return token;
+}
+
+/** Enforcement 2 + 3: required fields + writer-specific validation. Exits 1 on errors. */
+function requireValidInput(name, input, requiredFields, validate) {
+  const errors = [];
+  for (const field of requiredFields) {
+    if (input[field] === undefined || input[field] === null || input[field] === '') {
+      errors.push(`Missing required field: "${field}"`);
+    }
+  }
+  if (validate) {
+    const extra = validate(input);
+    if (extra && extra.length > 0) {
+      errors.push(...extra);
+    }
+  }
+  if (errors.length > 0) {
+    process.stderr.write(
+      `[${name}] VALIDATION FAILED:\n` + errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n') + '\n'
+    );
+    process.exit(1);
+  }
+}
+
+/** reportPath must be a non-empty absolute path inside the token's tasksBase. Exits 1/2. */
+function requireSafeReportPath(name, input, token) {
+  const reportPath = input.reportPath;
+  if (typeof reportPath !== 'string' || !reportPath.trim()) {
+    process.stderr.write(`[${name}] ERROR: "reportPath" must be a non-empty string.\n`);
+    process.exit(1);
+  }
+  // Guard against path traversal — reportPath must be absolute
+  if (!path.isAbsolute(reportPath)) {
+    process.stderr.write(`[${name}] ERROR: "reportPath" must be an absolute path.\n`);
+    process.exit(1);
+  }
+  // Scope reportPath to the ticket's task folder (bound into token by hook)
+  if (token.tasksBase) {
+    const resolved = path.resolve(reportPath);
+    if (!resolved.startsWith(token.tasksBase + path.sep) && resolved !== token.tasksBase) {
+      process.stderr.write(
+        `[${name}] BLOCKED: reportPath is outside the ticket's task folder.\n` +
+          `  reportPath: ${resolved}\n` +
+          `  Allowed folder: ${token.tasksBase}/\n`
+      );
+      process.exit(2);
+    }
+  }
+  return reportPath;
+}
+
+/** Post-write validation: formatted output must have a parseable Status line (GH-326). */
+function requireStatusLine(name, newContent, reportType) {
+  if (!reportType) return;
+  const { STATUS_LINE_RE, resolveAlias } = require('../parse-report-status');
+  const statusMatch = newContent.match(STATUS_LINE_RE);
+  const hasValidStatus = statusMatch && resolveAlias(statusMatch[1].toUpperCase(), reportType);
+  if (!hasValidStatus) {
+    process.stderr.write(
+      `[${name}] VALIDATION FAILED: Formatted report has no parseable Status line.\n` +
+        `  parseReportStatus returned: ${hasValidStatus ? 'valid' : 'UNKNOWN'}\n` +
+        `  The formatReport() function must include a "Status: <VALUE>" line.\n` +
+        `  This is a bug in the report writer, not in the agent input.\n`
+    );
+    process.exit(1);
+  }
+}
+
+/** Prepend strategy: if file exists, preserve old content with separator. */
+function composeFinalContent(reportPath, newContent) {
+  if (!fs.existsSync(reportPath)) return newContent;
+  const oldContent = fs.readFileSync(reportPath, 'utf8');
+  const timestamp = new Date().toISOString();
+  return newContent + `\n\n---\n## Previous Run: ${timestamp}\n---\n\n` + oldContent;
+}
+
+/** Reject symlink targets — prevents overwriting unexpected files. Exits 2. */
+function rejectSymlinkTarget(name, reportPath) {
+  try {
+    const stat = fs.lstatSync(reportPath);
+    if (stat.isSymbolicLink()) {
+      process.stderr.write(`[${name}] BLOCKED: reportPath is a symlink — refusing to write.\n`);
+      process.exit(2);
+    }
+  } catch {
+    /* file doesn't exist yet — fine */
+  }
+}
+
 /**
  * Create a report writer instance.
  *
@@ -147,177 +308,30 @@ function createReportWriter(config) {
   const { name, allowedAgents, requiredFields, formatReport, validate, reportType } = config;
 
   async function run() {
-    // Parse input from stdin (JSON)
-    let rawInput = '';
-    for await (const chunk of process.stdin) {
-      rawInput += chunk;
-    }
-
-    let input;
-    try {
-      input = JSON.parse(rawInput);
-    } catch (e) {
-      process.stderr.write(`[${name}] ERROR: Invalid JSON input.\n${e.message}\n`);
-      process.exit(1);
-    }
-
-    // --- Enforcement 1: Hook-issued token verification ---
-    // The PreToolUse hook (Rule 5) writes a token file after verifying agent
-    // identity via Claude Code's internal hookData. We consume that token here.
-    // This cannot be spoofed because the token is written by the hook process,
-    // not by the Bash command the agent executes.
-    const errors = [];
-
-    const scriptBasename = path.basename(process.argv[1] || '');
-    const token = consumeToken(scriptBasename); // reads + deletes token atomically
-    let verifiedAgent = null;
-
-    if (!token) {
-      process.stderr.write(
-        `[${name}] BLOCKED: No valid write token found.\n` +
-          `  Expected token at: ${tokenPath(scriptBasename)}\n` +
-          `  The PreToolUse hook must approve this call first.\n` +
-          `  This script can only be called through Claude Code's agent system.\n`
-      );
-      process.exit(2);
-    }
-
-    // Validate token structure: timestamp must be a finite number, agent must be a string
-    if (typeof token.timestamp !== 'number' || !Number.isFinite(token.timestamp)) {
-      process.stderr.write(`[${name}] BLOCKED: Token has invalid or missing timestamp.\n`);
-      process.exit(2);
-    }
-    if (typeof token.agent !== 'string' || !token.agent) {
-      process.stderr.write(`[${name}] BLOCKED: Token has invalid or missing agent field.\n`);
-      process.exit(2);
-    }
-
-    // Check token freshness — prevents replay with pre-placed token files
-    // Reject expired AND future timestamps (clock skew / tampered tokens)
-    const age = Date.now() - token.timestamp;
-    if (age < 0 || age > TOKEN_MAX_AGE_MS) {
-      process.stderr.write(
-        `[${name}] BLOCKED: Write token expired (${age}ms old, max ${TOKEN_MAX_AGE_MS}ms).\n` +
-          `  Token was issued at ${new Date(token.timestamp).toISOString()}\n`
-      );
-      process.exit(2);
-    }
-
-    // Check agent in token matches allowedAgents
-    verifiedAgent = token.agent;
-    const agentMatch = allowedAgents.some(
-      (a) => normalizeAgentName(a) === normalizeAgentName(verifiedAgent)
-    );
-
-    if (!agentMatch) {
-      process.stderr.write(
-        `[${name}] BLOCKED: Token agent "${verifiedAgent}" is not authorized.\n` +
-          `  Allowed agents: ${allowedAgents.join(', ')}\n` +
-          `  Only these agents can use this writer.\n`
-      );
-      process.exit(2);
-    }
-
-    // --- Enforcement 2: Required fields ---
-    for (const field of requiredFields) {
-      if (input[field] === undefined || input[field] === null || input[field] === '') {
-        errors.push(`Missing required field: "${field}"`);
-      }
-    }
-
-    // --- Enforcement 3: Custom validation ---
-    if (validate) {
-      const extra = validate(input);
-      if (extra && extra.length > 0) {
-        errors.push(...extra);
-      }
-    }
-
-    if (errors.length > 0) {
-      process.stderr.write(
-        `[${name}] VALIDATION FAILED:\n` +
-          errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n') +
-          '\n'
-      );
-      process.exit(1);
-    }
-
-    // --- Format and write ---
-    const reportPath = input.reportPath;
-    if (typeof reportPath !== 'string' || !reportPath.trim()) {
-      process.stderr.write(`[${name}] ERROR: "reportPath" must be a non-empty string.\n`);
-      process.exit(1);
-    }
-    // Guard against path traversal — reportPath must be absolute
-    if (!path.isAbsolute(reportPath)) {
-      process.stderr.write(`[${name}] ERROR: "reportPath" must be an absolute path.\n`);
-      process.exit(1);
-    }
-    // Scope reportPath to the ticket's task folder (bound into token by hook)
-    if (token.tasksBase) {
-      const resolved = path.resolve(reportPath);
-      if (!resolved.startsWith(token.tasksBase + path.sep) && resolved !== token.tasksBase) {
-        process.stderr.write(
-          `[${name}] BLOCKED: reportPath is outside the ticket's task folder.\n` +
-            `  reportPath: ${resolved}\n` +
-            `  Allowed folder: ${token.tasksBase}/\n`
-        );
-        process.exit(2);
-      }
-    }
+    const input = await readInputFromStdin(name);
+    const token = requireVerifiedToken(name, allowedAgents);
+    requireValidInput(name, input, requiredFields, validate);
+    const reportPath = requireSafeReportPath(name, input, token);
 
     const newContent = formatReport(input);
+    requireStatusLine(name, newContent, reportType);
+    const finalContent = composeFinalContent(reportPath, newContent);
+    rejectSymlinkTarget(name, reportPath);
 
-    // Post-write validation: verify formatted output has a parseable Status line (GH-326)
-    if (reportType) {
-      const { STATUS_LINE_RE, resolveAlias } = require('../parse-report-status');
-      const statusMatch = newContent.match(STATUS_LINE_RE);
-      const hasValidStatus = statusMatch && resolveAlias(statusMatch[1].toUpperCase(), reportType);
-      if (!hasValidStatus) {
-        process.stderr.write(
-          `[${name}] VALIDATION FAILED: Formatted report has no parseable Status line.\n` +
-            `  parseReportStatus returned: ${hasValidStatus ? 'valid' : 'UNKNOWN'}\n` +
-            `  The formatReport() function must include a "Status: <VALUE>" line.\n` +
-            `  This is a bug in the report writer, not in the agent input.\n`
-        );
-        process.exit(1);
-      }
-    }
-
-    // Prepend strategy: if file exists, preserve old content with separator
-    let finalContent = newContent;
-    if (fs.existsSync(reportPath)) {
-      const oldContent = fs.readFileSync(reportPath, 'utf8');
-      const timestamp = new Date().toISOString();
-      finalContent = newContent + `\n\n---\n## Previous Run: ${timestamp}\n---\n\n` + oldContent;
-    }
-
-    // Reject symlink targets — prevents overwriting unexpected files
-    try {
-      const stat = fs.lstatSync(reportPath);
-      if (stat.isSymbolicLink()) {
-        process.stderr.write(`[${name}] BLOCKED: reportPath is a symlink — refusing to write.\n`);
-        process.exit(2);
-      }
-    } catch {
-      /* file doesn't exist yet — fine */
-    }
-
-    // Atomic write: write to tmp then rename (prevents partial reads)
+    // Atomic write via vendored safeIO (tmp + rename prevents partial reads);
+    // mode 0o666 keeps the pre-migration writeFileSync default permissions.
     const dir = path.dirname(reportPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    const tmp = `${reportPath}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, finalContent, 'utf8');
-    fs.renameSync(tmp, reportPath);
+    writeFileAtomic(reportPath, finalContent, { mode: 0o666 });
 
     // Output success info as JSON (for the calling agent to parse)
     const result = {
       success: true,
       reportPath,
       size: Buffer.byteLength(finalContent, 'utf8'),
-      agent: verifiedAgent,
+      agent: token.agent,
     };
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   }

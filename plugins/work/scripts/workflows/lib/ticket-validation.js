@@ -34,88 +34,91 @@ const UNSAFE_TICKET_RE = /\.\.|[\\:\0]/;
  * @returns {{ code: string, message: string, remediation: string[] } | null}
  */
 function validateTicketIdStructured(ticketId) {
+  return (
+    validateTicketShape(ticketId) || validateTicketChars(ticketId) || validateTicketSuffix(ticketId)
+  );
+}
+
+/** Build the structured INVALID_TICKET_ID error object. */
+function invalidTicket(message, remediation) {
+  return { code: 'INVALID_TICKET_ID', message, remediation };
+}
+
+/** Reject non-strings, empty/whitespace-only, and whitespace-padded inputs. */
+function validateTicketShape(ticketId) {
   if (typeof ticketId !== 'string') {
-    return {
-      code: 'INVALID_TICKET_ID',
-      message: `ticketId must be a non-empty string (received ${ticketId === null ? 'null' : typeof ticketId}).`,
-      remediation: [
+    return invalidTicket(
+      `ticketId must be a non-empty string (received ${ticketId === null ? 'null' : typeof ticketId}).`,
+      [
         'Pass a ticket id like "GH-219" or "PROJ-123".',
         'Hooks should resolve ticket id via workflows/lib/scripts/get-ticket-id.js before calling.',
-      ],
-    };
+      ]
+    );
   }
 
   const trimmed = ticketId.trim();
   if (trimmed === '') {
-    return {
-      code: 'INVALID_TICKET_ID',
-      message: 'ticketId must be a non-empty string (received empty/whitespace).',
-      remediation: ['Pass a ticket id like "GH-219" or "PROJ-123".'],
-    };
+    return invalidTicket('ticketId must be a non-empty string (received empty/whitespace).', [
+      'Pass a ticket id like "GH-219" or "PROJ-123".',
+    ]);
   }
 
-  // Reject whitespace-padded inputs
   if (ticketId !== trimmed) {
-    return {
-      code: 'INVALID_TICKET_ID',
-      message: `ticketId ${JSON.stringify(ticketId)} contains leading/trailing whitespace.`,
-      remediation: ['Trim the ticket id before passing it.'],
-    };
+    return invalidTicket(
+      `ticketId ${JSON.stringify(ticketId)} contains leading/trailing whitespace.`,
+      ['Trim the ticket id before passing it.']
+    );
   }
 
-  // Reject bare dot segments
+  return null;
+}
+
+/** Reject bare dot segments, unsafe characters, and leading slashes. */
+function validateTicketChars(ticketId) {
   if (ticketId === '.' || ticketId === './') {
-    return {
-      code: 'INVALID_TICKET_ID',
-      message: '"." is not a valid ticket ID.',
-      remediation: ['Use a proper ticket id like "GH-219" or "PROJ-123".'],
-    };
+    return invalidTicket('"." is not a valid ticket ID.', [
+      'Use a proper ticket id like "GH-219" or "PROJ-123".',
+    ]);
   }
 
-  // Reject unsafe characters (traversal, backslash, colon, null byte)
+  // Traversal, backslash, colon, null byte
   if (UNSAFE_TICKET_RE.test(ticketId)) {
-    return {
-      code: 'INVALID_TICKET_ID',
-      message: `ticketId ${JSON.stringify(ticketId)} contains unsafe characters (path traversal, backslash, colon, or null byte).`,
-      remediation: [
+    return invalidTicket(
+      `ticketId ${JSON.stringify(ticketId)} contains unsafe characters (path traversal, backslash, colon, or null byte).`,
+      [
         'Remove any "\\", "..", colon, or null bytes from the ticket id.',
         'Ticket ids are bare provider keys like "GH-219" or "PROJ-123" — not paths.',
-      ],
-    };
+      ]
+    );
   }
 
-  // Reject leading slash (absolute path)
+  // Leading slash (absolute path)
   if (ticketId.startsWith('/')) {
-    return {
-      code: 'INVALID_TICKET_ID',
-      message: `ticketId ${JSON.stringify(ticketId)} must not start with "/".`,
-      remediation: ['Ticket ids must not start with "/".'],
-    };
+    return invalidTicket(`ticketId ${JSON.stringify(ticketId)} must not start with "/".`, [
+      'Ticket ids must not start with "/".',
+    ]);
   }
 
-  // Reject multiple slashes
+  return null;
+}
+
+/** Reject multiple slashes and empty / dot / unsafe-char "/" suffixes. */
+function validateTicketSuffix(ticketId) {
   const slashCount = (ticketId.match(/\//g) || []).length;
   if (slashCount > 1) {
-    return {
-      code: 'INVALID_TICKET_ID',
-      message: `ticketId has ${slashCount} slashes — at most one "/" is allowed.`,
-      remediation: ['Use format like "PROJ-123/phase1" — at most one "/".'],
-    };
+    return invalidTicket(`ticketId has ${slashCount} slashes — at most one "/" is allowed.`, [
+      'Use format like "PROJ-123/phase1" — at most one "/".',
+    ]);
   }
 
-  // Reject trailing slash or dot-suffix
   if (slashCount === 1) {
     const suffix = ticketId.slice(ticketId.indexOf('/') + 1);
     if (!suffix || suffix === '.' || suffix === '..' || UNSAFE_TICKET_RE.test(suffix)) {
-      return {
-        code: 'INVALID_TICKET_ID',
-        message: `ticketId ${JSON.stringify(ticketId)} has invalid suffix after "/".`,
-        remediation: [
-          'Either remove the trailing "/" or add a valid suffix like "PROJ-123/phase1".',
-        ],
-      };
+      return invalidTicket(`ticketId ${JSON.stringify(ticketId)} has invalid suffix after "/".`, [
+        'Either remove the trailing "/" or add a valid suffix like "PROJ-123/phase1".',
+      ]);
     }
-  } // end suffix validation — rejects empty, dot, and unsafe-char suffixes
+  }
 
   return null;
 }
@@ -163,6 +166,27 @@ function sanitizeTicketId(ticketId) {
 // ─── TASKS_BASE resolution ───────────────────────────────────────────────────
 
 /**
+ * Shared TASKS_BASE lookup: the environment first, then the config module.
+ * Returns null when neither provides a value; only a missing config module
+ * is swallowed — any other config error is rethrown.
+ *
+ * @returns {string|null} Absolute path, or null when unset
+ */
+function tasksBaseFromEnvOrConfig() {
+  if (process.env.TASKS_BASE) return path.resolve(process.env.TASKS_BASE);
+  try {
+    const config = require('./config');
+    if (config && config.TASKS_BASE) return path.resolve(config.TASKS_BASE);
+  } catch (err) {
+    // Deliberate unification onto the stricter rethrow-falsy guard (legacy
+    // resolveTasksBase behavior); the WithFallback caller previously swallowed
+    // falsy thrown values, which nothing in ./config can actually produce.
+    if (!err || err.code !== 'MODULE_NOT_FOUND') throw err; // only swallow missing config
+  }
+  return null;
+}
+
+/**
  * Resolve TASKS_BASE from environment or config module.
  * Returns an absolute path (always path.resolve'd).
  *
@@ -170,13 +194,8 @@ function sanitizeTicketId(ticketId) {
  * @throws {Error} if TASKS_BASE cannot be resolved
  */
 function resolveTasksBase() {
-  if (process.env.TASKS_BASE) return path.resolve(process.env.TASKS_BASE);
-  try {
-    const config = require('./config');
-    if (config && config.TASKS_BASE) return path.resolve(config.TASKS_BASE);
-  } catch (err) {
-    if (!err || err.code !== 'MODULE_NOT_FOUND') throw err; // only swallow missing config
-  }
+  const base = tasksBaseFromEnvOrConfig();
+  if (base) return base;
   throw new Error('TASKS_BASE is not configured. Set TASKS_BASE (or WORKTREES_BASE in .envrc).');
 }
 
@@ -208,13 +227,8 @@ function resolveTasksBaseOrNull() {
  * @returns {string} Absolute path
  */
 function resolveTasksBaseWithFallback(fallback) {
-  if (process.env.TASKS_BASE) return path.resolve(process.env.TASKS_BASE);
-  try {
-    const config = require('./config');
-    if (config && config.TASKS_BASE) return path.resolve(config.TASKS_BASE);
-  } catch (err) {
-    if (err && err.code !== 'MODULE_NOT_FOUND') throw err;
-  }
+  const base = tasksBaseFromEnvOrConfig();
+  if (base) return base;
   if (fallback) return path.resolve(fallback);
   return path.join(require('os').homedir(), 'worktrees', 'tasks');
 }
@@ -230,11 +244,14 @@ function resolveTasksBaseWithFallback(fallback) {
  */
 function resolveWorktreeRoot() {
   try {
-    const { spawnSync } = require('child_process');
-    const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+    const { safeSpawnSync } = require('./safeSubprocess');
+    const r = safeSpawnSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
+    // Deliberate divergence from resolve-ticket-worktree.js `gitToplevel`:
+    // that helper maps an empty stdout to null; this one keeps the legacy
+    // contract of returning the trimmed stdout (possibly '') on status 0.
     return r.status === 0 ? r.stdout.trim() : null;
   } catch {
     return null;

@@ -14,7 +14,7 @@
  */
 
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require(path.join(__dirname, '..', 'lib', 'safeSubprocess'));
 const { makeFlag } = require(path.join(__dirname, '..', 'lib', 'cli-args'));
 
 const flag = makeFlag(process.argv.slice(2));
@@ -38,7 +38,8 @@ if (event === 'UserPromptSubmit') {
 }
 
 const dispatcher = path.join(__dirname, '..', 'hooks', 'synapsys.js');
-const result = spawnSync('node', [dispatcher, event], {
+// Default 15s deadline (safeSpawnSync) — the dispatcher is a fast local hook.
+const result = safeSpawnSync('node', [dispatcher, event], {
   input: JSON.stringify(payload),
   encoding: 'utf8',
 });

@@ -19,11 +19,24 @@ const { discoverStores, readConfig, getRepoRoot } = require(
 );
 const { buildEntries, evaluate } = require(path.join(__dirname, '..', 'lib', 'guard'));
 const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime'));
+const { parsePayload } = require(path.join(__dirname, '..', 'lib', 'hookEntrypoint'));
 
-async function readStdin() {
-  let input = '';
-  for await (const chunk of process.stdin) input += chunk;
-  return input;
+/**
+ * Strict stdin reader for this fail-closed hook. The vendored hookEntrypoint
+ * readStdin resolves '' on a stream error — fail-open semantics built for
+ * advisory hooks. Here a stdin READ ERROR means a possibly-blockable payload
+ * was lost, so it must reject into main().catch and block for safety (exit 2),
+ * preserving the pre-adoption contract. Empty/malformed stdin still allows.
+ */
+function readStdinStrict() {
+  if (process.stdin.isTTY) return Promise.resolve('');
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => chunks.push(chunk));
+    process.stdin.on('end', () => resolve(chunks.join('')));
+    process.stdin.on('error', reject);
+  });
 }
 
 /**
@@ -43,15 +56,11 @@ function collectLocks(cwd) {
 }
 
 async function main() {
-  const raw = await readStdin();
-
-  let hookData;
-  try {
-    hookData = JSON.parse(raw);
-  } catch {
-    // Can't parse payload → nothing to enforce against. Allow.
-    process.exit(0);
-  }
+  // Empty/malformed stdin parses to {} — nothing to enforce against. The
+  // empty payload normalizes to a tool call with no name, which no guard
+  // handler matches, so it falls through to allow (exit 0) below. A stdin
+  // stream ERROR is different: readStdinStrict rejects it into main().catch.
+  const hookData = parsePayload(await readStdinStrict());
 
   const rt = getRuntime(hookData);
   const evt = rt.normalizeHookPayload(hookData, { event: 'PreToolUse' });

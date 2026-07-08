@@ -11,20 +11,21 @@
  * @module lib/ticket-id
  */
 
-const { execSync } = require('node:child_process');
+const { safeExecFileSync } = require('./safeSubprocess');
 
 const TICKET_PATTERN = /([A-Z]+-\d+)/i;
 const GH_PATTERN = /GH-(\d+)/i;
 
 /**
- * Default branch reader — shells out to git in `cwd`. Injectable via the
- * `exec` option so unit tests never touch a real repository.
+ * Default branch reader — runs git in `cwd` (no shell, default 15s deadline;
+ * throws on failure like the native call). Injectable via the `exec` option
+ * so unit tests never touch a real repository.
  *
  * @param {string} cwd
  * @returns {string} current branch name (trimmed) or '' on failure
  */
 function readGitBranch(cwd) {
-  return execSync('git branch --show-current', {
+  return safeExecFileSync('git', ['branch', '--show-current'], {
     cwd,
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],

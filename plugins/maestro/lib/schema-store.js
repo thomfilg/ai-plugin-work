@@ -4,10 +4,10 @@
  * schema-store.js — tiered, marker-gated persistence for reusable maestro
  * orchestration schemas.
  *
- * Storage model is a faithful mirror of the synapsys memory store
- * (plugins/synapsys/lib/memory-store.js): four discovery tiers, each gated by
- * a `.maestro.json` marker file so only *installed* stores are ever read or
- * written, and one markdown-with-frontmatter file per saved schema.
+ * Store discovery (tiers, marker gating, ancestor walk, project naming) is
+ * delegated to the vendored storeDiscovery factory; this module keeps only
+ * the schema-specific layer: frontmatter parse/serialize and schema
+ * read/list on top of the discovered stores.
  *
  * A "schema" is the reusable subset of an orchestrate invocation — pool size,
  * the per-ticket command, and the compiled stop-condition oracle — minus the
@@ -28,114 +28,23 @@
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { execSync } = require('node:child_process');
+const { createStoreDiscovery } = require('./storeDiscovery');
 
-const MARKER = '.maestro.json';
-const FOLDER = 'maestro';
-// Dedicated directory for the cross-project "shared" tier. Sits OUTSIDE the
-// per-project `~/.claude/maestro/<project>/` namespace so it can never collide
-// with a project whose name happens to be "maestro-shared". Mirrors synapsys.
-const SHARED_FOLDER = `${FOLDER}-shared`;
+const discovery = createStoreDiscovery({
+  folder: 'maestro',
+  marker: '.maestro.json',
+  // basename(toplevel || cwd) — schema stores are per-checkout, so a linked
+  // worktree keeps its own global-tier namespace.
+  projectNameStrategy: 'toplevel',
+  // Walk to the filesystem root: a marker above $HOME stays discoverable.
+  ancestorWalkStopsAtHome: false,
+  // Lets tests pin discovery to the cwd-rooted local/worktree stores only, so
+  // a developer's real global/shared schemas never leak into fixtures.
+  disableHomeStoresEnvVar: 'MAESTRO_DISABLE_HOME_STORES',
+});
 
 const SKIP_FILES = new Set(['INDEX.md', 'README.md']);
-
-// execSync options shared by safeExec. Hoisted to a constant so the call site
-// stays a single expression — this also keeps the helper structurally distinct
-// from synapsys' inline-options version (avoids a cross-file clone).
-const GIT_EXEC_OPTS = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
-
-// Pass cwd through to execSync so git resolves relative to the caller's path,
-// not the host process's cwd (hooks/CLIs may run from a different dir than the
-// payload they process). Mirrors memory-store.safeExec behaviorally.
-function safeExec(cmd, cwd) {
-  try {
-    return execSync(cmd, { cwd, ...GIT_EXEC_OPTS }).trim();
-  } catch {
-    return '';
-  }
-}
-
-function getProjectName(cwd) {
-  const base = cwd || process.cwd();
-  const top = safeExec('git rev-parse --show-toplevel', base);
-  return path.basename(top || base);
-}
-
-// Per-tier directory resolvers. Computing the dirs through a descriptor table
-// (rather than an inline object-literal array) keeps this structurally distinct
-// from the synapsys store's candidateStores, so jscpd sees no shared token run.
-const STORE_DIR_RESOLVERS = {
-  local: (cwd) => path.join(cwd, '.claude', FOLDER),
-  worktree: (cwd) => path.resolve(cwd, '..', '.claude', FOLDER),
-  global: (cwd, projectName) => path.join(os.homedir(), '.claude', FOLDER, projectName),
-  shared: () => path.join(os.homedir(), '.claude', SHARED_FOLDER),
-};
-
-function candidateStores(cwd, projectName) {
-  return Object.entries(STORE_DIR_RESOLVERS).map(([kind, resolve]) => ({
-    kind,
-    dir: resolve(cwd, projectName),
-  }));
-}
-
-// The `.claude/maestro` store directory beneath a given base. Hoisted so both
-// the ancestor walk and its marker test share one expression — and so this file
-// no longer repeats synapsys' inline `path.join(dir, '.claude', FOLDER, MARKER)`
-// token sequence (cross-file clone avoidance).
-function storeDirUnder(base) {
-  return path.join(base, '.claude', FOLDER);
-}
-
-// Walk up from startDir looking for the nearest ancestor that carries a store
-// marker at `<ancestor>/.claude/maestro/.maestro.json`. Returns the store dir,
-// or '' when none is found before the filesystem root. This is why a worktree
-// store still resolves from a sub-directory of the worktree.
-function findAncestorStore(startDir) {
-  for (let dir = startDir, parent; ; dir = parent) {
-    const storeDir = storeDirUnder(dir);
-    if (fs.existsSync(path.join(storeDir, MARKER))) return storeDir;
-    parent = path.dirname(dir);
-    if (parent === dir) return '';
-  }
-}
-
-function discoverStores(cwd) {
-  const resolved = cwd || process.cwd();
-  const projectName = getProjectName(resolved);
-  const out = [];
-  const seen = new Set();
-
-  // Append a store row iff its dir carries a marker and hasn't been seen. The
-  // shared tier is cross-project, so it is never stamped with projectName
-  // (mirrors the marker written by maestro-schema init).
-  const push = (kind, dir) => {
-    const key = path.resolve(dir);
-    if (seen.has(key) || !fs.existsSync(path.join(dir, MARKER))) return;
-    seen.add(key);
-    out.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
-  };
-
-  const dirFor = (kind) => STORE_DIR_RESOLVERS[kind](resolved, projectName);
-
-  // local: store inside the cwd itself.
-  push('local', dirFor('local'));
-
-  // worktree: nearest ancestor above cwd carrying a store marker.
-  const wt = findAncestorStore(path.dirname(resolved));
-  if (wt) push('worktree', wt);
-
-  // MAESTRO_DISABLE_HOME_STORES lets tests pin discovery to the cwd-rooted
-  // local/worktree stores only, so a developer's real global/shared schemas
-  // never leak into fixture-based assertions.
-  if (process.env.MAESTRO_DISABLE_HOME_STORES !== '1') {
-    push('global', dirFor('global'));
-    push('shared', dirFor('shared'));
-  }
-
-  return out;
-}
 
 // ── Frontmatter ────────────────────────────────────────────────────────────
 // Schema values are all single-line scalars (string/number/boolean), so the
@@ -256,7 +165,7 @@ function listSchemasFromStore(store) {
 
 function listSchemas(cwd) {
   const out = [];
-  for (const store of discoverStores(cwd || process.cwd())) {
+  for (const store of discovery.discoverStores(cwd || process.cwd())) {
     out.push(...listSchemasFromStore(store));
   }
   return out;
@@ -270,13 +179,13 @@ function findSchemaTiers(cwd, name) {
 }
 
 module.exports = {
-  MARKER,
-  FOLDER,
-  SHARED_FOLDER,
-  safeExec,
-  getProjectName,
-  candidateStores,
-  discoverStores,
+  MARKER: discovery.MARKER,
+  FOLDER: discovery.FOLDER,
+  SHARED_FOLDER: discovery.SHARED_FOLDER,
+  safeExec: discovery.safeExec,
+  getProjectName: discovery.getProjectName,
+  candidateStores: discovery.candidateStores,
+  discoverStores: discovery.discoverStores,
   parseFrontmatter,
   serializeFrontmatter,
   serializeValue,

@@ -26,7 +26,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require('../lib/safeSubprocess');
 const cliShared = require('../lib/replay-cli-shared');
 const events = require('../lib/replay-events');
 const aggregate = require('../lib/replay-aggregate');
@@ -92,8 +92,10 @@ function lastJsonLine(stdout) {
 // verbatim. Exits the process on a spawn error; otherwise returns the child's
 // exit status plus the last JSON envelope it printed (or null).
 function runPhaseTurn(childArgs) {
-  const result = spawnSync(process.execPath, [NEXT_RUNNER, ...childArgs], {
+  const result = safeSpawnSync(process.execPath, [NEXT_RUNNER, ...childArgs], {
     encoding: 'utf8',
+    noTimeout:
+      'walk turns replay the entire transcript window in one child run; runtime scales with history size, so no fixed deadline is safe',
   });
   if (result.error) {
     process.stderr.write(`synapsys-replay: ${result.error.message}\n`);

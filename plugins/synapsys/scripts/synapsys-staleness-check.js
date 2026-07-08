@@ -26,7 +26,7 @@
 
 // nodePath is needed before bootstrap is loaded to construct the require paths below.
 const nodePath = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require(nodePath.join(__dirname, '..', 'lib', 'safeSubprocess'));
 const { fs, path, setupCli, discoverStores, listMemoriesFromStore } = require(
   nodePath.join(__dirname, '..', 'lib', 'script-bootstrap')
 );
@@ -228,7 +228,9 @@ function dispatchReconsolidate(grouped, opts) {
     // Route child stdout to stderr when --json is active so the parent's
     // JSON payload remains the only thing on stdout.
     const childStdio = opts.json ? ['inherit', process.stderr, 'inherit'] : 'inherit';
-    const result = spawnSync(process.execPath, [consolidateBin, '--profile=' + profile.name], {
+    // Default 15s deadline (safeSpawnSync); a timed-out child surfaces as a
+    // nonzero/null status and is reported via the existing warning path.
+    const result = safeSpawnSync(process.execPath, [consolidateBin, '--profile=' + profile.name], {
       stdio: childStdio,
     });
     if (result.status !== 0) {

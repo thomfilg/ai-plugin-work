@@ -16,8 +16,8 @@
 
 const fs = require('node:fs');
 const os = require('node:os');
-const { spawnSync } = require('node:child_process');
 const path = require('node:path');
+const { safeSpawnSync } = require(path.join(__dirname, '..', 'lib', 'safeSubprocess'));
 const { parseArgs } = require(path.join(__dirname, '..', 'lib', 'cli'));
 const {
   MARKER,
@@ -70,11 +70,16 @@ function ensureFsguardBuilt() {
     const arch = archMap[process.arch] || process.arch;
     const so = path.join(__dirname, 'bin', `heimdall-fsguard.linux-${arch}.so`);
     if (fs.existsSync(so)) return;
-    const r = spawnSync('bash', [path.join(__dirname, 'build-fsguard.sh')], { encoding: 'utf8' });
+    const r = safeSpawnSync('bash', [path.join(__dirname, 'build-fsguard.sh')], {
+      encoding: 'utf8',
+      noTimeout: 'cc compile of the fsguard shim can legitimately exceed the 15s default',
+    });
     if (r.status === 0 && fs.existsSync(so)) {
       console.log(`built runtime write-guard: ${so}`);
     } else {
-      console.log('note: runtime write-guard not built (no cc?); using static fail-closed fallback');
+      console.log(
+        'note: runtime write-guard not built (no cc?); using static fail-closed fallback'
+      );
     }
   } catch {
     /* non-fatal */

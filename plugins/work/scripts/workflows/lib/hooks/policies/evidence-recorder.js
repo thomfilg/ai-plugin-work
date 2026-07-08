@@ -5,7 +5,7 @@
  *
  * Provides:
  *   - loadEvidence({ tasksBase, ticketId, evidenceFile, safeTicketPath }): read evidence file
- *   - saveEvidence({ ... evidence }): atomic write via tmp+rename
+ *   - saveEvidence({ ... evidence }): atomic write via the vendored safeIO writer
  *   - recordEvidenceEntry({ toolName, toolInput }): build an evidence row from a tool call
  *   - clearBackwardEvidence({ evidence, steps, currentStep, targetStep }): clear on rewind
  *
@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { writeJsonAtomic } = require('../../safeIO');
 
 function loadEvidence({ tasksBase, ticketId, evidenceFile, safeTicketPath }) {
   const p = path.join(tasksBase, safeTicketPath(ticketId), evidenceFile);
@@ -25,22 +26,12 @@ function loadEvidence({ tasksBase, ticketId, evidenceFile, safeTicketPath }) {
 }
 
 function saveEvidence({ tasksBase, ticketId, evidenceFile, evidence, safeTicketPath }) {
-  const dir = path.join(tasksBase, safeTicketPath(ticketId));
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const target = path.join(dir, evidenceFile);
-  const tmp = `${target}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(evidence, null, 2));
-  try {
-    fs.renameSync(tmp, target);
-  } catch (err) {
-    // Windows fs.renameSync can fail when target exists — use copy+unlink as fallback
-    if (err.code === 'EEXIST' || err.code === 'EPERM') {
-      fs.copyFileSync(tmp, target);
-      fs.unlinkSync(tmp);
-    } else {
-      throw err;
-    }
-  }
+  const target = path.join(tasksBase, safeTicketPath(ticketId), evidenceFile);
+  // Vendored safeIO handles dir creation and the Windows rename-over-existing
+  // case (win32-only unlink+retry). Deliberate change: the old any-platform
+  // copyFile fallback is gone, so a pathological EPERM rename on POSIX
+  // (immutable dir) now throws instead of degrading to a non-atomic copy.
+  writeJsonAtomic(target, evidence, { mode: 0o666 });
 }
 
 /**
