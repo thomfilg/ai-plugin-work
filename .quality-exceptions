@@ -83,7 +83,6 @@ plugins/work/scripts/workflows/work/steps/implement.js
 plugins/work/scripts/workflows/work-tasks/lib/phases/draft.js
 plugins/work/scripts/workflows/check/scripts/write-qa-report.js
 plugins/work/scripts/workflows/check/hooks/check-generate-summary.js
-plugins/work/scripts/workflows/lib/request-index.js
 plugins/work/scripts/workflows/lib/hooks/policies/task-description-quality.js
 plugins/work/scripts/workflows/work/engine/inspect.js
 plugins/work/scripts/workflows/work/work-state/task-readiness.js
@@ -107,7 +106,6 @@ plugins/work/scripts/workflows/lib/allocate-output-folder.js
 plugins/work/scripts/workflows/check/scripts/write-tests-report.js
 plugins/work/scripts/listen-all.js
 plugins/work/scripts/workflows/work/hooks/enforce-review-accountability.js
-plugins/work/scripts/workflows/lib/hook-error-log.js
 plugins/work/scripts/communicate.js
 plugins/work/scripts/workflows/work/lib/artifact-archival.js
 plugins/work/scripts/workflows/work/lib/gherkin-coverage.js
