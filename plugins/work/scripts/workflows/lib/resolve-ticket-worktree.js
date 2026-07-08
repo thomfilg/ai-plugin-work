@@ -32,16 +32,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require('./safeSubprocess');
 
 /** `git rev-parse --show-toplevel` from a directory; null when not a repo. */
 function gitToplevel(cwd) {
   try {
-    const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    const opts = { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+    const r = safeSpawnSync('git', ['rev-parse', '--show-toplevel'], opts);
     return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
   } catch {
     return null;
