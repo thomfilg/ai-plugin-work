@@ -59,16 +59,26 @@ function readPayload() {
 // keep re-emitting on their cooldowns, so they stay inside the window;
 // resolved ones age out.
 const PENDING_WINDOW_MIN = parseInt(process.env.MAESTRO_PENDING_WINDOW_MIN || '90', 10);
+// Every kind that can wake the conductor also re-fires here until handled —
+// the banner is the safety net for a missed/compacted wake. Must equal
+// DEFAULT_WAKE_KINDS in scripts/lib/maestro-conduct/alerts.js (asserted by the
+// wake-kinds invariant test in scripts/__tests__/heartbeat-wake-routing.test.js).
 const PENDING_KINDS = new Set([
   'question-pending',
   'nudges-exhausted',
   'wedged',
   'dead-end',
-  'pr-broken',
+  'dead-end-probe',
   'pr-ready',
+  'pr-broken',
+  'pr-comments-stuck',
+  'comment-loop',
   'stuck-input',
+  'auth-broken',
   'spinner-hang',
   'no-progress',
+  'kill-during-ci',
+  'stop-condition-met',
 ]);
 
 function readAlertTail() {

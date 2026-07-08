@@ -138,3 +138,123 @@ test('alert wake routing: default allowlist wakes pr-broken; CONDUCT_WAKE_EVENTS
   assert.equal(a3.alerts.wakesConductor('HEARTBEAT'), true, '`all` makes every kind wake');
   assert.equal(a3.alerts.wakesConductor('anything-else'), true, '`all` is a blanket escape hatch');
 });
+
+test('lost-event kinds wake by default; log-only info lines never do', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-kinds-'));
+  const { alerts } = fresh(dir);
+
+  // The four kinds GH-680's audit found silent-but-operator-required.
+  for (const kind of ['spinner-hang', 'no-progress', 'kill-during-ci', 'stop-condition-met']) {
+    assert.equal(alerts.wakesConductor(kind), true, `${kind} must wake under the default allowlist`);
+  }
+
+  // Informational chatter routed with kind:'log-only' lands in the logfile
+  // but never on the wake channel.
+  assert.equal(alerts.wakesConductor('log-only'), false, 'log-only is never wake-eligible');
+  const stderr = captureStderr(() => alerts.log('GH-9-work NUDGE soft: test', { kind: 'log-only' }));
+  assert.equal(stderr, '', 'a log-only line writes nothing to stderr');
+  const logged = fs.readFileSync(path.join(dir, 'conduct.log'), 'utf8');
+  assert.ok(logged.includes('NUDGE soft'), 'the log-only line is still appended to the logfile');
+});
+
+test('re-wake throttle: first emission wakes, repeats inside the backoff are silent, backoff doubles, resetCount re-arms', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-throttle-'));
+  const { alerts } = fresh(dir);
+  delete process.env.PENDING_REWAKE_MIN; // default 30m
+  const payload = { session: 'GH-7-work', ticket: 'GH-7', kind: 'spinner-hang', phase: 'impl', instruction: 'check the pane' };
+
+  // 1st emission: wakes.
+  const s1 = captureStderr(() => alerts.alert(payload));
+  assert.ok(s1.length > 0, 'first emission of a key wakes');
+
+  // 2nd emission immediately after: inside the 30m window → silent on stderr,
+  // still persisted to the jsonl.
+  const s2 = captureStderr(() => alerts.alert(payload));
+  assert.equal(s2, '', 'repeat inside the backoff window must not wake');
+  const jsonl = fs.readFileSync(path.join(dir, 'alerts.jsonl'), 'utf8').trim().split('\n');
+  assert.equal(jsonl.length, 2, 'the throttled repeat is still persisted (banner re-fire intact)');
+
+  // Age the throttle entry past its window → next emission wakes again and
+  // the backoff doubles (30 → 60).
+  const throttleFile = path.join(dir, '_wake-throttle.json');
+  const map = JSON.parse(fs.readFileSync(throttleFile, 'utf8'));
+  const key = Object.keys(map)[0];
+  assert.equal(map[key].backoffMin, 30, 'initial backoff equals PENDING_REWAKE_MIN');
+  map[key].lastWakeAt = Date.now() - 31 * 60 * 1000;
+  fs.writeFileSync(throttleFile, JSON.stringify(map));
+  const s3 = captureStderr(() => alerts.alert(payload));
+  assert.ok(s3.length > 0, 'a repeat past the backoff window re-wakes');
+  const map2 = JSON.parse(fs.readFileSync(throttleFile, 'utf8'));
+  assert.equal(map2[key].backoffMin, 60, 'backoff doubles per re-wake');
+
+  // resetCount clears the throttle so a FRESH incident wakes immediately.
+  alerts.resetCount(key);
+  const map3 = JSON.parse(fs.readFileSync(throttleFile, 'utf8'));
+  assert.ok(!(key in map3), 'resetCount clears the throttle entry');
+  const s4 = captureStderr(() => alerts.alert(payload));
+  assert.ok(s4.length > 0, 'a fresh incident after reset wakes immediately');
+
+  // PENDING_REWAKE_MIN=0 disables throttling entirely.
+  process.env.PENDING_REWAKE_MIN = '0';
+  const s5 = captureStderr(() => alerts.alert(payload));
+  assert.ok(s5.length > 0, 'PENDING_REWAKE_MIN=0 wakes on every repeat');
+  delete process.env.PENDING_REWAKE_MIN;
+
+  // Backoff cap: an entry already at the cap must not exceed it.
+  const map4 = JSON.parse(fs.readFileSync(throttleFile, 'utf8'));
+  map4[key] = { lastWakeAt: Date.now() - 999 * 60 * 1000, backoffMin: 240 };
+  fs.writeFileSync(throttleFile, JSON.stringify(map4));
+  captureStderr(() => alerts.alert(payload));
+  const map5 = JSON.parse(fs.readFileSync(throttleFile, 'utf8'));
+  assert.equal(map5[key].backoffMin, 240, 'backoff is capped at PENDING_REWAKE_MAX_MIN');
+});
+
+test('new-incident guarantee: a stale throttle entry never swallows the first alert of a fresh incident', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-fresh-'));
+  const { alerts } = fresh(dir);
+  const payload = { session: 'GH-8-work', ticket: 'GH-8', kind: 'kill-during-ci', phase: 'ci', instruction: 'bootstrap next' };
+  // Simulate a leftover backoff entry from a PREVIOUS lifecycle (rotation
+  // purged the counts but a stale throttle entry survived): counts file is
+  // fresh, throttle says "in backoff".
+  const key = alerts.alertKey(payload);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, '_wake-throttle.json'),
+    JSON.stringify({ [key]: { lastWakeAt: Date.now(), backoffMin: 240 } })
+  );
+  // count===1 (fresh incident) must clear the stale entry and wake.
+  const s = captureStderr(() => alerts.alert(payload));
+  assert.ok(s.length > 0, 'first emission of a new incident wakes even with a stale throttle entry');
+});
+
+test('logFault: first occurrence wakes, repeats back off, logfile keeps every line', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-fault-'));
+  const { alerts } = fresh(dir);
+  const s1 = captureStderr(() => alerts.logFault('TICK-ERROR GH-3-work: boom', 'tick-error|GH-3-work'));
+  assert.ok(s1.length > 0, 'first fault occurrence wakes');
+  const s2 = captureStderr(() => alerts.logFault('TICK-ERROR GH-3-work: boom', 'tick-error|GH-3-work'));
+  assert.equal(s2, '', 'repeat inside the backoff window does not wake');
+  const logged = fs.readFileSync(path.join(dir, 'conduct.log'), 'utf8');
+  assert.equal(logged.split('TICK-ERROR').length - 1, 2, 'both fault lines land in the logfile');
+  // Distinct fault key is independent.
+  const s3 = captureStderr(() => alerts.logFault('TICK-ERROR GH-4-work: boom', 'tick-error|GH-4-work'));
+  assert.ok(s3.length > 0, 'a different fault key wakes independently');
+});
+
+test('wake-kinds invariant: the banner PENDING_KINDS equals alerts.DEFAULT_WAKE_KINDS', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-invariant-'));
+  const { alerts } = fresh(dir);
+  // The hook executes at require-time, so parse its source instead of loading it.
+  const hookSrc = fs.readFileSync(
+    path.resolve(__dirname, '..', '..', 'hooks', 'active-session-reminder.js'),
+    'utf8'
+  );
+  const m = hookSrc.match(/const PENDING_KINDS = new Set\(\[([\s\S]*?)\]\)/);
+  assert.ok(m, 'PENDING_KINDS Set literal found in active-session-reminder.js');
+  const pendingKinds = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+  assert.deepEqual(
+    pendingKinds,
+    [...alerts.DEFAULT_WAKE_KINDS].sort(),
+    'every kind the banner nags about must be able to wake its handler, and vice versa'
+  );
+});

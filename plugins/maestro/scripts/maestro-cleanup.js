@@ -30,6 +30,7 @@ const namespace = require('./lib/maestro-conduct/namespace');
 // MAESTRO_STATE_DIR kept as a legacy fallback ahead of the NS-derived default.
 const STATE_DIR = process.env.STATE_DIR || process.env.MAESTRO_STATE_DIR || namespace.stateDir();
 const ALERT_COUNTS = path.join(STATE_DIR, '_alert-counts.json');
+const WAKE_THROTTLE = path.join(STATE_DIR, '_wake-throttle.json');
 
 function usage(code = 1) {
   process.stderr.write(
@@ -141,11 +142,19 @@ function killAllTmuxFromMarkers(dryRun) {
 
 function wipeAllAlertCounts(dryRun) {
   if (dryRun) {
-    process.stdout.write(`(dry-run) would wipe ${ALERT_COUNTS}\n`);
+    process.stdout.write(`(dry-run) would wipe ${ALERT_COUNTS} and ${WAKE_THROTTLE}\n`);
     return 0;
   }
   // Avoid TOCTOU: try-unlink and treat ENOENT as "already gone" instead of
   // checking existence first (CodeQL js/file-system-race).
+  // The wake-throttle file mirrors the counts' lifecycle (GH-680): stale
+  // backoff entries surviving a wipe could swallow the first wake of the
+  // next incident, so both go together.
+  try {
+    fs.unlinkSync(WAKE_THROTTLE);
+  } catch (err) {
+    if (!err || err.code !== 'ENOENT') throw err;
+  }
   try {
     fs.unlinkSync(ALERT_COUNTS);
     return 1;
@@ -155,33 +164,41 @@ function wipeAllAlertCounts(dryRun) {
   }
 }
 
-function purgeAlertCountsForTicket(ticket, dryRun) {
-  let counts;
+// Purge every key matching the anchored ticket regex from a keyed JSON file.
+// Shared by the counts + wake-throttle purges (GH-680): both files key on
+// `${session}|${kind}|${sha-or-phase}` and must reset together so a
+// re-bootstrapped ticket's first alert always wakes.
+function purgeKeyedFileForTicket(file, ticket, dryRun) {
+  let map;
   try {
-    counts = JSON.parse(fs.readFileSync(ALERT_COUNTS, 'utf8'));
+    map = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
     return 0;
   }
-  // Alert keys are `${session}|${kind}|${sha-or-phase}` where session is
-  // typically `${ticket}` or `${ticket}-work` / `${ticket}-listen` etc.
-  // A substring match would purge counts for GH-10/GH-11 when cleaning GH-1,
+  // A substring match would purge keys for GH-10/GH-11 when cleaning GH-1,
   // so anchor on the ticket boundary: ticket followed by `|` (session==ticket)
   // or `-...|` (session==`${ticket}-suffix`).
   const tickRe = new RegExp(`^${escapeRegex(ticket)}(-[^|]*)?\\|`);
   let removed = 0;
-  for (const key of Object.keys(counts)) {
+  for (const key of Object.keys(map)) {
     if (tickRe.test(key)) {
-      if (!dryRun) delete counts[key];
+      if (!dryRun) delete map[key];
       removed += 1;
     }
   }
   if (!dryRun && removed > 0) {
-    fs.writeFileSync(ALERT_COUNTS, JSON.stringify(counts, null, 2));
+    fs.writeFileSync(file, JSON.stringify(map, null, 2));
   } else if (dryRun) {
     process.stdout.write(
-      `(dry-run) would purge ${removed} key(s) for ${ticket} from _alert-counts.json\n`
+      `(dry-run) would purge ${removed} key(s) for ${ticket} from ${path.basename(file)}\n`
     );
   }
+  return removed;
+}
+
+function purgeAlertCountsForTicket(ticket, dryRun) {
+  const removed = purgeKeyedFileForTicket(ALERT_COUNTS, ticket, dryRun);
+  purgeKeyedFileForTicket(WAKE_THROTTLE, ticket, dryRun);
   return removed;
 }
 

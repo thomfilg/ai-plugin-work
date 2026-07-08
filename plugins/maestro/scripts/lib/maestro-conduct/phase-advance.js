@@ -17,7 +17,8 @@ function detectPhaseAdvance(ctx, restartEligible) {
     const reset = manifest.resetTaskAttempts(ctx.ticket);
     if (reset) {
       alerts.log(
-        `${ctx.session} phase advance ${prev.phase} → ${ctx.phase} — dead-end attempts reset`
+        `${ctx.session} phase advance ${prev.phase} → ${ctx.phase} — dead-end attempts reset`,
+        { kind: 'log-only' }
       );
     }
     try {

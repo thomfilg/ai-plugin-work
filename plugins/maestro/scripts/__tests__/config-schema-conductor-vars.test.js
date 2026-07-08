@@ -1,12 +1,16 @@
 'use strict';
 
 /**
- * Task 3 (GH-680) — the three conductor-economics env vars introduced in
- * Task 1 (CONDUCT_WAKE_EVENTS, HEARTBEAT_MIN, HEARTBEAT_MAX_MIN) must be
- * declared in plugins/maestro/config-schema.json so `maestro:configure`
- * renders them with their defaults and the SessionStart unknown-key scan
- * never flags them. These tests pin that wiring against the shared
- * envConfig factory (the same loader/validator config-cli.js drives).
+ * GH-680 — the conductor-economics env vars (CONDUCT_WAKE_EVENTS,
+ * HEARTBEAT_MIN, HEARTBEAT_MAX_MIN, PENDING_REWAKE_MIN,
+ * PENDING_REWAKE_MAX_MIN) must be declared in
+ * plugins/maestro/config-schema.json so `maestro:configure` renders them with
+ * their defaults and the SessionStart unknown-key scan never flags them.
+ * These tests pin that wiring against the shared envConfig factory (the same
+ * loader/validator config-cli.js drives), and pin the schema's
+ * CONDUCT_WAKE_EVENTS default to the EXACT DEFAULT_WAKE_KINDS set in
+ * alerts.js — the schema copy is load-bearing (configure writes it into
+ * .envrc, which then overrides the code default).
  */
 
 const { test } = require('node:test');
@@ -16,27 +20,19 @@ const path = require('node:path');
 const { loadSchema, mergeSchemas } = require('../../../../factories/envConfig/schema');
 const { findUnknownKeys } = require('../../../../factories/envConfig/validate');
 const { renderPluginSections } = require('../../../../factories/envConfig/render');
+const { DEFAULT_WAKE_KINDS } = require('../lib/maestro-conduct/alerts');
 
 const SCHEMA_PATH = path.join(__dirname, '..', '..', 'config-schema.json');
 
-// Default wake allowlist mirrors ACTION_REQUIRED_KINDS in alerts.js.
-const ACTIONABLE_KINDS = [
-  'question-pending',
-  'nudges-exhausted',
-  'wedged',
-  'dead-end',
-  'dead-end-probe',
-  'pr-ready',
-  'pr-broken',
-  'pr-comments-stuck',
-  'comment-loop',
-  'stuck-input',
-  'auth-broken',
+const NEW_VARS = [
+  'CONDUCT_WAKE_EVENTS',
+  'HEARTBEAT_MIN',
+  'HEARTBEAT_MAX_MIN',
+  'PENDING_REWAKE_MIN',
+  'PENDING_REWAKE_MAX_MIN',
 ];
 
-const NEW_VARS = ['CONDUCT_WAKE_EVENTS', 'HEARTBEAT_MIN', 'HEARTBEAT_MAX_MIN'];
-
-test('config-schema declares the three conductor tuning vars with full metadata', () => {
+test('config-schema declares the conductor tuning vars with full metadata', () => {
   const schema = loadSchema(SCHEMA_PATH);
   assert.ok(schema, 'maestro config-schema.json should load');
 
@@ -52,7 +48,7 @@ test('config-schema declares the three conductor tuning vars with full metadata'
   }
 });
 
-test('config-schema defaults match the Task 1 code defaults', () => {
+test('config-schema defaults match the code defaults', () => {
   const schema = loadSchema(SCHEMA_PATH);
 
   assert.equal(schema.vars.HEARTBEAT_MIN.type, 'number');
@@ -61,17 +57,28 @@ test('config-schema defaults match the Task 1 code defaults', () => {
   assert.equal(schema.vars.HEARTBEAT_MAX_MIN.type, 'number');
   assert.equal(schema.vars.HEARTBEAT_MAX_MIN.default, '120');
 
+  assert.equal(schema.vars.PENDING_REWAKE_MIN.type, 'number');
+  assert.equal(schema.vars.PENDING_REWAKE_MIN.default, '30');
+
+  assert.equal(schema.vars.PENDING_REWAKE_MAX_MIN.type, 'number');
+  assert.equal(schema.vars.PENDING_REWAKE_MAX_MIN.default, '240');
+
   assert.equal(schema.vars.CONDUCT_WAKE_EVENTS.type, 'string');
-  const wakeDefault = schema.vars.CONDUCT_WAKE_EVENTS.default;
-  for (const kind of ACTIONABLE_KINDS) {
-    assert.ok(
-      wakeDefault.includes(kind),
-      `CONDUCT_WAKE_EVENTS default should list the actionable kind "${kind}"`
-    );
-  }
+  // EXACT set equality with alerts.js DEFAULT_WAKE_KINDS — inclusion-only
+  // checks would let a dropped kind regress silently (the schema copy is the
+  // one operators actually get via .envrc).
+  const schemaKinds = schema.vars.CONDUCT_WAKE_EVENTS.default
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+  assert.deepEqual(
+    [...schemaKinds].sort(),
+    [...DEFAULT_WAKE_KINDS].sort(),
+    'CONDUCT_WAKE_EVENTS schema default must equal alerts.js DEFAULT_WAKE_KINDS exactly'
+  );
 });
 
-test('the unknown-key scan does not flag the three new vars', () => {
+test('the unknown-key scan does not flag the new vars', () => {
   const schema = loadSchema(SCHEMA_PATH);
   const merged = mergeSchemas([schema]);
 
@@ -85,7 +92,7 @@ test('the unknown-key scan does not flag the three new vars', () => {
   }
 });
 
-test('maestro configure renders the three vars under Conductor Tuning', () => {
+test('maestro configure renders the vars under Conductor Tuning', () => {
   const schema = loadSchema(SCHEMA_PATH);
   const rendered = renderPluginSections(schema, {}).join('\n');
 

@@ -9,7 +9,7 @@ The .js daemon emits exactly these event kinds. Anything else is bookkeeping noi
 
 | Event | Shape | Emitted by | Dedup |
 |---|---|---|---|
-| `QUESTION-DETECTED` | `[<S>] QUESTION-DETECTED: …` + structured `ACTION` row | `detectors/question.js` | Per-session, fires once when prompt sits ≥`Q_WAIT_MIN` minutes |
+| `question-pending` | `ACTION {json} kind=question-pending` (there is NO separate `QUESTION-DETECTED` token — questions arrive as this ACTION row) | `detectors/question.js` | Fires once when a prompt sits ≥`Q_WAIT_MIN` minutes; re-alerts per `Q_RE_NUDGE_MIN` |
 | `ACTION … kind=…` | JSONL row in `/tmp/maestro-alerts.jsonl`, summary line in tmux `maestro-alerts` | `actions.alert` | One per kind per ticket per state, then mutes until state flips |
 | `pr-ready` | `ACTION … kind=pr-ready prNumber=N sha=…` | `detectors/pr-status.js` | Emit on first sight + state transition; re-emit same state at most every `PR_STATUS_RE_EMIT_MIN` (30m) |
 | `pr-broken` | `ACTION … kind=pr-broken failingChecks=[…]` | `detectors/pr-status.js` | Same dedup as `pr-ready` |
@@ -31,19 +31,21 @@ The .js daemon emits exactly these event kinds. Anything else is bookkeeping noi
 | `stuck-input` | `ACTION … kind=stuck-input text=…` | `runStuckInputDetector` | Text sat unsubmitted in an IDLE agent's composer ≥`STUCK_INPUT_MIN` (5m); re-emits per `STUCK_INPUT_RE_EMIT_MIN` (15m). Alert-only unless `STUCK_INPUT_AUTO_SUBMIT=1` |
 | `no-progress` | `ACTION … kind=no-progress elapsedMin=N` | `runNoProgressCheck` | Worktree unchanged ≥`NO_PROGRESS_ALERT_MIN` (45m) while the pane LOOKS active — the backstop for panes that defeat silence detection (tail -f, polling loops). Re-emits per `NO_PROGRESS_RE_EMIT_MIN` (60m) |
 | `DEAD-END-HOLD` | log-only | `actions.freeDeadEndSlot` | A question-pending dead-end with NO queued work to rotate to holds the session alive instead of killing it (one line per 30m) |
-| `TICK-ERROR` / `DAEMON-CRASH` / `CONDUCTOR-USURPED` | log-only | main loop guards | A detector threw (session skipped, others unaffected) / an exception escaped (daemon logs + keeps ticking) / the lock was force-taken by a newer conductor (this one exits) |
-| `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged ‖ …` | log-only (benign beats route non-waking) | `maybeEmitHeartbeat` (main loop) | Rate-limited between `HEARTBEAT_MIN` (default 30m) and `HEARTBEAT_MAX_MIN` (default 120m) when state is unchanged; a state-change beat still emits immediately |
+| `TICK-ERROR` / `DAEMON-CRASH` / `CONDUCTOR-USURPED` | un-kinded fault lines — these DO wake (deliberately, alongside daemon start/exit, `CONDUCTOR-EXISTS`/`CONDUCTOR-FORCED`, syncManifest/maybeFillPool failures, `ALERT-DROPPED`) | main loop guards | A detector threw (session skipped, others unaffected) / an exception escaped (daemon logs + keeps ticking) / the lock was force-taken by a newer conductor (this one exits) |
+| `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged ‖ …` | logfile + `_heartbeat.json` only — NO beat ever wakes, not even a state-change beat (state changes reach the conductor via their own kind-specific ACTION alerts) | `maybeEmitHeartbeat` (main loop) | Rate-limited between `HEARTBEAT_MIN` (default 30m) and `HEARTBEAT_MAX_MIN` (default 120m) when state is unchanged; a state-change beat is still written immediately |
 
 ## Recommended Monitor filter
 
-Use this exact regex. Anything outside it is noise:
+Use this exact regex:
 
 ```
-QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop-condition-met|wedged|WEDGED|HEARTBEAT|commit-stall|spinner-hang|stuck-input|no-progress|DEAD-END|dead-end|kill-during-ci|comment-loop|auth-broken|SLOT-FREED|POOL-FILL|DAEMON-CRASH|CONDUCTOR-USURPED|TICK-ERROR
+ACTION|TICK-ERROR|DAEMON-CRASH|CONDUCTOR-|DEAD-END-HOLD
 ```
 
-Every `ACTION` payload now carries `action_required: true` on EVERY repeat of an actionable kind (not just the first — operators tuned out `[REPEAT N]` events while agents burned dead-end strikes) and, where mechanical, a copy-paste-able `unblockCmd`. With `MAESTRO_STOP_GUARD=1` set in the conducting session, the Stop hook refuses to end a turn while unacked `action_required` alerts exist — engage or ack, never "standing by".
+The stderr wake channel is now pre-curated (GH-680): only `ACTION` lines for the 15 default wake kinds plus real faults ever reach it — so this filter is **defense-in-depth, not load-bearing**. `spinner-hang`, `no-progress`, `kill-during-ci`, and `stop-condition-met` now DO arrive as waking `ACTION` lines (they were silent between the initial GH-680 commit and this fix). There is no `QUESTION-DETECTED` or `SESSION-GONE` token — questions arrive as `ACTION {json}` with `kind=question-pending`. `HEARTBEAT` and `kind:'log-only'` info chatter (NUDGE, AUTO-RESTART announces/skips, POOL-FILL, SLOT-FREED, pr-pending, commit-stall, DEAD-END-HOLD, phase-advance, …) never hit stderr — read them in `/tmp/maestro-conduct.log` when diagnosing.
 
-`stop-condition-met` is a **positive** signal — the ticket's compiled oracle exited 0, the agent finished, its slot was freed and the next queued ticket bootstrapped. `pr-ready` is the **positive** signal — when you see it, the agent's PR is CLEAN and all checks are green; merge it (or hold per `[[never-auto-merge-pr]]`). `wedged` is the **escalation** signal — auto-restart loop hit its cap; operator must inspect. `HEARTBEAT` is the periodic forced re-read; never ignore it.
+Every `ACTION` payload now carries `action_required: true` on EVERY repeat of an actionable kind (not just the first — operators tuned out `[REPEAT N]` events while agents burned dead-end strikes) and, where mechanical, a copy-paste-able `unblockCmd`. Repeats of the same alert key re-WAKE only on the `PENDING_REWAKE_MIN` backoff (see `reference/env-vars.md`), but every repeat still lands in the jsonl + tmux pane + banner. With `MAESTRO_STOP_GUARD=1` set in the conducting session, the Stop hook refuses to end a turn while unacked `action_required` alerts exist — engage or ack, never "standing by".
 
-> **Wake filter.** Benign `HEARTBEAT` beats update the state file, logfile, and `_heartbeat.json` marker but do NOT wake the conductor model unless the fleet summary changed. The `CONDUCT_WAKE_EVENTS` allowlist (see `reference/env-vars.md`) controls which kinds wake the model; `all`/`*` restores always-wake.
+`stop-condition-met` is a **positive** signal — the ticket's compiled oracle exited 0, the agent finished, its slot was freed and the next queued ticket bootstrapped. `pr-ready` is the **positive** signal — when you see it, the agent's PR is CLEAN and all checks are green; merge it (or hold per `[[never-auto-merge-pr]]`). `wedged` is the **escalation** signal — auto-restart loop hit its cap; operator must inspect. `HEARTBEAT` is the periodic fleet summary in the logfile/`_heartbeat.json`; it never appears on the wake channel.
+
+> **Wake filter.** NO heartbeat ever wakes the conductor model — not even a state-change beat (those are written to the logfile + `_heartbeat.json` immediately, and the state change reaches the conductor via its own kind-specific ACTION alert). The `CONDUCT_WAKE_EVENTS` allowlist (see `reference/env-vars.md`) controls which kinds wake the model; a custom list REPLACES the default (fail-closed), and `all`/`*` restores always-wake.

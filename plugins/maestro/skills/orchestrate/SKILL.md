@@ -120,21 +120,21 @@ bash scripts/maestro-bootstrap.sh --skill=qc-work --allow-generic 5915
 
 ## After launch
 
-- **Real questions** from any agent surface as `[<SESSION>] QUESTION-DETECTED: …` lines. Handle them via `tmux send-keys -t <SESSION>` against the agent pane.
+- **Real questions** from any agent surface as `ACTION` alerts with `kind=question-pending`. Handle them via `tmux send-keys -t <SESSION>` against the agent pane.
 - **Silent agents** auto-restart after `SILENCE_LIMIT_SEC` (default 300s). `/work` is resumable from `.work-state.json`.
 - **Snapshot** anytime with `bash plugins/maestro/scripts/maestro-pulse.sh` (or `/pulse`).
 
 ## Daemon events & Monitor filter
 
-The full daemon event vocabulary (every emitted `kind`, its shape, emitter, and dedup rule) plus the exact Monitor filter regex live in **[`reference/event-vocabulary.md`](reference/event-vocabulary.md)** — read it on demand when wiring the Monitor or decoding an event. Key signals: `pr-ready` / `stop-condition-met` are **positive**, `wedged` is **escalation**, and benign `HEARTBEAT` beats now route non-waking (they update the state file, logfile, and `_heartbeat.json` marker without waking the conductor). With `MAESTRO_STOP_GUARD=1` the Stop hook refuses to end a turn while unacked `action_required` alerts exist — engage or ack, never "standing by".
+The full daemon event vocabulary (every emitted `kind`, its shape, emitter, and dedup rule) plus the exact Monitor filter regex live in **[`reference/event-vocabulary.md`](reference/event-vocabulary.md)** — read it on demand when wiring the Monitor or decoding an event. Key signals: `pr-ready` / `stop-condition-met` are **positive**, `wedged` is **escalation**, and `HEARTBEAT` beats never wake the conductor — none of them, state-change beats included (they update the state file, logfile, and `_heartbeat.json` marker; state changes reach the conductor via their own kind-specific ACTION alerts). With `MAESTRO_STOP_GUARD=1` the Stop hook refuses to end a turn while unacked `action_required` alerts exist — engage or ack, never "standing by".
 
 ## Env
 
-Every daemon tunable (namespace, cadence floors, wake filter, rotation gates) is documented in **[`reference/env-vars.md`](reference/env-vars.md)** — read it before tuning. The most load-bearing defaults: `HEARTBEAT_MIN`=30 / `HEARTBEAT_MAX_MIN`=120 (unchanged-state beat cadence; a state-change beat still emits immediately), `CONDUCT_WAKE_EVENTS`=the actionable allowlist (`all`/`*` restores always-wake), `SILENCE_LIMIT_SEC`=300 (auto-restart), `MAESTRO_NS` (concurrent-instance isolation), and `MAESTRO_STOP_GUARD` for the conducting session.
+Every daemon tunable (namespace, cadence floors, wake filter, rotation gates) is documented in **[`reference/env-vars.md`](reference/env-vars.md)** — read it before tuning. The most load-bearing defaults: `HEARTBEAT_MIN`=30 / `HEARTBEAT_MAX_MIN`=120 (unchanged-state beat cadence; a state-change beat is still written to the logfile/`_heartbeat.json` immediately, but no beat ever wakes the model), `CONDUCT_WAKE_EVENTS`=the 15-kind wake allowlist (custom lists replace it; `all`/`*` restores always-wake), `SILENCE_LIMIT_SEC`=300 (auto-restart), `MAESTRO_NS` (concurrent-instance isolation), and `MAESTRO_STOP_GUARD` for the conducting session.
 
 ## After launch
 
-- **Real questions** from any agent surface as `[<SESSION>] QUESTION-DETECTED: …` lines. Handle them via `tmux send-keys -t <SESSION>` against the agent pane.
+- **Real questions** from any agent surface as `ACTION` alerts with `kind=question-pending`. Handle them via `tmux send-keys -t <SESSION>` against the agent pane.
 - **Silent agents** auto-restart after `SILENCE_LIMIT_SEC` (default 300s). `/work` is resumable from `.work-state.json`.
 - **PR ready** surfaces as `pr-ready` — operator merges per `[[never-auto-merge-pr]]`.
 - **PR broken** surfaces as `pr-broken` with failing-check list — orchestrator nudges the originating agent to fix.

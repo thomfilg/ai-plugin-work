@@ -37,7 +37,8 @@ const DEAD_END_PROBE_GRACE_MIN = parseInt(process.env.DEAD_END_PROBE_GRACE_MIN |
 function holdInsteadOfRotate({ session, ticket, kind, repeatCount }) {
   if (progress.hasFreshProgress(ticket)) {
     alerts.log(
-      `${session} DEAD-END-HOLD ${kind} ×${repeatCount} — worktree changed <${progress.PROGRESS_FRESH_MIN}m ago; a progressing agent is not a dead end`
+      `${session} DEAD-END-HOLD ${kind} ×${repeatCount} — worktree changed <${progress.PROGRESS_FRESH_MIN}m ago; a progressing agent is not a dead end`,
+      { kind: 'log-only' } // no-action hold; fires per re-emit tick
     );
     return true;
   }
@@ -45,7 +46,8 @@ function holdInsteadOfRotate({ session, ticket, kind, repeatCount }) {
   const hold = state.read(ticket, 'dead-end-hold') || {};
   if (!hold.loggedAt || state.minutesSince(hold.loggedAt) >= 30) {
     alerts.log(
-      `${session} DEAD-END-HOLD question-pending ×${repeatCount} — no eligible next task, keeping session alive; operator must answer the prompt`
+      `${session} DEAD-END-HOLD question-pending ×${repeatCount} — no eligible next task, keeping session alive; operator must answer the prompt`,
+      { kind: 'log-only' } // the question-pending alerts themselves keep waking
     );
     state.write(ticket, 'dead-end-hold', { loggedAt: state.now() });
   }
@@ -97,7 +99,8 @@ function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha, killAndBoots
   const attempts = manifest.getTaskAttempts(ticket);
   if (attempts === null) {
     alerts.log(
-      `${session} DEAD-END skipped — ticket ${ticket} not in any manifest; no attempt accounting, no rotation`
+      `${session} DEAD-END skipped — ticket ${ticket} not in any manifest; no attempt accounting, no rotation`,
+      { kind: 'log-only' }
     );
     return false;
   }
@@ -153,7 +156,8 @@ function sendDeadEndProbe({ session, ticket, kind, repeatCount, sha, attempts, a
     `dead-end probe sent (strike ${strike}/${DEAD_END_MAX_ATTEMPTS}); waiting for agent reply`
   );
   alerts.log(
-    `${session} DEAD-END strike ${strike}/${DEAD_END_MAX_ATTEMPTS} — diagnostic probe sent to agent; NO kill, NO rotation. Operator should read pane reply via tmux capture-pane.`
+    `${session} DEAD-END strike ${strike}/${DEAD_END_MAX_ATTEMPTS} — diagnostic probe sent to agent; NO kill, NO rotation. Operator should read pane reply via tmux capture-pane.`,
+    { kind: 'log-only' } // the kind=dead-end-probe alert() below carries the wake
   );
   alert({
     session,
