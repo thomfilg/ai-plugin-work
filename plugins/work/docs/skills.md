@@ -38,8 +38,9 @@ Skills are user-invocable slash commands defined in `skills/*/SKILL.md`. Each sk
 |---|---|---|
 | `/follow-up` | `skills/follow-up/` | Monitor CI, address review comments |
 | `/bootstrap <TICKET...>` | `skills/bootstrap/` | Setup worktrees for multiple tickets |
-| `/orchestrate <TICKET...>` | `skills/orchestrate/` | Run /work sequentially for multiple tickets |
 | `/cleanup-worktrees` | `skills/cleanup-worktrees/` | Verify merge & remove worktrees |
+
+> Multi-ticket orchestration lives in the **maestro** plugin's `/orchestrate` skill (parallel agents, auto-restart). The work plugin's duplicate `/orchestrate` was removed.
 
 ### Jira Skills
 
