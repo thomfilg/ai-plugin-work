@@ -134,6 +134,29 @@ elsewhere (e.g. `/tmp`) and reads pass, so this also clears the old
 false positives (a script that reads a protected path and writes elsewhere, or
 running a test file that merely names a protected path).
 
+#### The rewrite shape (stable, classifier-recognizable)
+
+The rewritten command always has the same four parts, in this order:
+
+1. the stable marker `: 'heimdall-fsguard-rewrite-v1';` — a POSIX `:` no-op,
+   so prepending it never changes command semantics, and it stays stable
+   across heimdall versions;
+2. `export LD_PRELOAD='<plugin>/scripts/bin/heimdall-fsguard.linux-<arch>.so'`
+   (an existing `LD_PRELOAD` is preserved — the guard's `.so` is prepended);
+3. `export HEIMDALL_PROTECTED='<dir>:<dir>'` (plus an optional
+   `HEIMDALL_ALLOWED` export when a locked dir has allow-listed subpaths);
+4. the original command, byte-identical.
+
+The interposer only **narrows** permissions (`EACCES` on writes under the
+protected dirs) — it never widens them. External harness/auto-mode classifiers
+that flag `LD_PRELOAD` exports as bypass attempts can recognize the leading
+marker as heimdall guard output and allow-list the rewrite; that allow-listing
+is documented here, not enforced by heimdall. Operators whose harness
+classifiers still veto the rewrite can set `HEIMDALL_DISABLE_SHIM=1` to skip
+the rewrite entirely and fall back to the static fail-closed script check.
+
+#### Scope and fallback
+
 The guard is scoped **per command** to the entries still locked this session, so
 speaking an unlock phrase lifts it for that agent only — a uid-level OS boundary
 could not do that. On hosts where the shim can't run (non-Linux, non-glibc,
@@ -142,6 +165,17 @@ fail-closed check. Set `HEIMDALL_DISABLE_SHIM=1` to force that fallback. A
 prebuilt `linux-x86_64` `.so` is committed; other Linux arches build from source
 at `/heimdall:install` (rebuild manually with
 `bash plugins/heimdall/scripts/build-fsguard.sh`).
+
+### Runtime verdict parity (Claude Code vs Codex CLI)
+
+The guard engine is runtime-agnostic: both runtimes feed the same engine
+(`lib/guard/`) through the canonical tool-kind mapping in
+`lib/runtime/tools.js`, so the guard's two-direction verdict matrix — block
+writes that resolve into locked paths, allow everything else — produces the
+same verdicts under Claude Code and codex, and the exit codes agree pairwise
+for every fixture in the matrix (the Step-7 dual-runtime gate). This parity is
+pinned by `lib/__tests__/guard-codex.test.js`, which follows the dual-runtime
+fixture conventions in `docs/codex-support/`.
 
 ## Conceal & the secrets boundary
 

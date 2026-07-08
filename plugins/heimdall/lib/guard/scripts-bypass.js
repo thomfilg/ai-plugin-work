@@ -8,6 +8,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
+const { expandHomePaths, markerOnlyInForeignPaths } = require('./paths');
 
 function isTrustedScript(scriptPath, entries) {
   for (const entry of entries) {
@@ -53,6 +54,27 @@ function scriptHasWriteOps(content) {
 }
 
 /**
+ * GH-689: does the script CONTENT actually reference this entry once its path
+ * tokens are resolved? A script whose only marker hits are foreign absolute
+ * paths (e.g. the agent toolchain under ~/.claude while the lock protects
+ * <repo>/.claude) is not a bypass of THIS entry. A pattern hit with no literal
+ * marker occurrence in the home-expanded content stays fail-closed. Relative
+ * refs in script SOURCE also stay fail-closed: a script's runtime cwd is
+ * unknowable from static analysis (the invoking command or the script itself
+ * may chdir), so `.claude/x` in source must keep counting as a reference.
+ */
+function contentReferencesEntry(content, entry) {
+  const scanText = expandHomePaths(content);
+  let sawMarker = false;
+  for (const marker of entry.markers) {
+    if (!scanText.includes(marker)) continue;
+    sawMarker = true;
+    if (!markerOnlyInForeignPaths(scanText, marker, entry)) return true;
+  }
+  return !sawMarker;
+}
+
+/**
  * Inspect a command for script-driven writes to a protected dir entry.
  *
  * Fires for ANY non-trusted script the command runs whose content references
@@ -74,6 +96,7 @@ function checkScriptBypass(collapsedCmd, entry, entries) {
   } catch (err) {
     return { blocked: true, error: `Cannot read script "${found.scriptPath}": ${err.message}` };
   }
+  if (!contentReferencesEntry(content, entry)) return { blocked: false }; // GH-689
   return scriptHasWriteOps(content)
     ? { blocked: true, scriptPath: found.scriptPath }
     : { blocked: false };
