@@ -69,14 +69,37 @@ function allowedAbsPaths(lockedDirEntries) {
  * tool calls, so exporting here scopes it to THIS command while preserving cwd
  * and compound-command semantics (no nested shell). An existing LD_PRELOAD is
  * preserved (our .so is prepended).
+ *
+ * Recognizable rewrite shape (GH-689 vector 4), always in this order:
+ *   1. `SHIM_REWRITE_MARKER` (POSIX no-op, stable across versions);
+ *   2. `export LD_PRELOAD='<plugin>/scripts/bin/heimdall-fsguard.linux-<arch>.so'`;
+ *   3. `export HEIMDALL_PROTECTED='<dir:dir>'` (+ optional HEIMDALL_ALLOWED);
+ *   4. the original command, byte-identical.
+ * The interposer only NARROWS permissions (EACCES on writes under the
+ * protected dirs), never widens them. Operators whose harness classifiers
+ * still veto the rewrite can set HEIMDALL_DISABLE_SHIM=1 to fall back to the
+ * static fail-closed script check.
  */
+// Stable, classifier-recognizable prefix for the shim rewrite (GH-689 vector
+// 4): a POSIX `:` no-op, so prepending it never changes command semantics.
+// External harness/auto-mode classifiers that flag LD_PRELOAD exports as
+// bypass attempts can recognize this marker as heimdall guard output.
+const SHIM_REWRITE_MARKER = ": 'heimdall-fsguard-rewrite-v1';";
+
 function buildShimRewrite(command, lockedDirEntries, so) {
   const protectedCsv = lockedDirEntries.map((e) => e.dir).join(':');
   const allowedCsv = allowedAbsPaths(lockedDirEntries).join(':');
-  let pre = `export LD_PRELOAD=${shQuote(so)}\${LD_PRELOAD:+:$LD_PRELOAD}; `;
+  let pre = `${SHIM_REWRITE_MARKER} `;
+  pre += `export LD_PRELOAD=${shQuote(so)}\${LD_PRELOAD:+:$LD_PRELOAD}; `;
   pre += `export HEIMDALL_PROTECTED=${shQuote(protectedCsv)}; `;
   if (allowedCsv) pre += `export HEIMDALL_ALLOWED=${shQuote(allowedCsv)}; `;
   return pre + command;
 }
 
-module.exports = { shimPath, runsExternalScript, buildShimRewrite, allowedAbsPaths };
+module.exports = {
+  shimPath,
+  runsExternalScript,
+  buildShimRewrite,
+  allowedAbsPaths,
+  SHIM_REWRITE_MARKER,
+};

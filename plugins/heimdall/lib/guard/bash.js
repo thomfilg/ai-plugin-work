@@ -8,7 +8,13 @@
  * mirroring the original protect-package-json hook).
  */
 
-const { expandHomePaths, allRefsUnderAllowedPaths, markerOnlyInTempPaths } = require('./paths');
+const {
+  expandHomePaths,
+  allRefsUnderAllowedPaths,
+  markerOnlyInTempPaths,
+  markerOnlyInForeignPaths,
+  markerOnPathBoundary,
+} = require('./paths');
 const {
   normalizedVariants,
   commandGlobReferencesMarker,
@@ -193,37 +199,8 @@ function markerWriteMatch(marker, v) {
   return false;
 }
 
-/**
- * Does `marker` appear in `text` sitting on a path-like boundary? The marker is
- * regex-escaped (same escape as the cp/rsync read check above) and must be
- * preceded by start-of-string, `/`, whitespace, a quote, or `>`, and followed
- * by end-of-string, `/`, whitespace, a quote, or `.`.
- *
- * The `>` leading boundary covers no-space redirect-writes (`>ui/x`). A second
- * alternative (`=marker/`) covers `flag=path` writes such as dd's
- * `of=src/output.dat`, where the marker is preceded by `=`.
- */
-const _boundaryCache = new Map();
-function getBoundaryPattern(marker) {
-  if (_boundaryCache.has(marker)) return _boundaryCache.get(marker);
-  const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Leading boundary also accepts `>` so a no-space redirect into the protected
-  // dir (`>ui/x`) stays blocked — a genuine path-token write, fail-closed like
-  // its spaced form `> ui/x`. See GH-642.
-  //
-  // The `=${esc}/` alternative restores blocking of `flag=path` writes (dd's
-  // `of=src/output.dat`) that String.includes caught before the boundary anchor.
-  // It requires a trailing `/` so it only fires on a path INTO the protected dir
-  // — a bare assignment like `x=ui` (marker at end, no `/`) is not a path token
-  // and must stay allowed. See GH-642.
-  const pattern = new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])|=${esc}/`);
-  _boundaryCache.set(marker, pattern);
-  return pattern;
-}
-
-function markerOnPathBoundary(marker, text) {
-  return getBoundaryPattern(marker).test(text);
-}
+// GH-642 boundary anchoring (getBoundaryPattern/markerOnPathBoundary) moved to
+// ./paths so the Task-prompt and script-content lanes share it (GH-689).
 
 function markerPresent(marker, v) {
   // Markers containing `/` are already path-qualified — a raw substring match is
@@ -257,13 +234,27 @@ function markerPresent(marker, v) {
  * Fail-closed: an unrelated same-named dir may occasionally match, but the user
  * can unlock — that is safer than silently missing a write.
  */
+/**
+ * GH-689 all-variant foreign exemption: the marker hit is exonerated only when
+ * at least one variant of `v.all` contains the literal marker AND every
+ * variant containing it classifies as foreign-only. Zero literal occurrences
+ * (glob/quote-obfuscated presence) fail closed. Subsumes the GH-658 temp-path
+ * exemption (classifier clause 2) and eliminates the cd-template trailing-
+ * separator asymmetry.
+ */
+function markerForeignAcrossVariants(entry, marker, v) {
+  let sawLiteral = false;
+  for (const s of v.all) {
+    if (!s.includes(marker)) continue;
+    sawLiteral = true;
+    if (!markerOnlyInForeignPaths(s, marker, entry)) return false;
+  }
+  return sawLiteral;
+}
+
 function markerEligible(entry, marker, v) {
   if (!markerPresent(marker, v)) return false;
-  // Temp-path parity with the file-tool guard (findProtectedTarget exempts temp
-  // paths): a write whose only marker hit sits inside a scratch temp path — e.g.
-  // scaffolding `/tmp/x/.claude/fixture` — is not a write to the protected path.
-  // See GH-658.
-  if (markerOnlyInTempPaths(v.expandedCollapsed, marker)) return false;
+  if (markerForeignAcrossVariants(entry, marker, v)) return false; // GH-689
   if (!entry.isFile && allRefsUnderAllowedPaths(v.expandedCollapsed, entry)) return false;
   return true;
 }
