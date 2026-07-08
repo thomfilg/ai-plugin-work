@@ -23,39 +23,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const hookCommon = require(path.join(__dirname, '..', 'lib', 'hook-common'));
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
-
-// Read hook input from stdin
-function readHookData() {
-  try {
-    const input = fs.readFileSync(0, 'utf8');
-    return JSON.parse(input);
-  } catch {
-    process.exit(0);
-  }
-}
-
-// Guard: find this terminal's active /work session marker (recent, owned).
-// Same scoping as work-auto-advance.js: findActiveMarker filters by owning
-// session id + worktree root, so a hook firing in one agent never records
-// usage against another agent's ticket (cross-wiring).
-function findRecentMarker() {
-  const { resolvePluginConfig } = require(path.join(__dirname, '..', '..', 'lib', 'plugin-config'));
-  const { TASKS_BASE } = resolvePluginConfig(path.resolve(__dirname, '..'));
-  if (!TASKS_BASE) return null;
-
-  const { findActiveMarker } = require(path.join(__dirname, '..', 'lib', 'marker'));
-  const marker = findActiveMarker(TASKS_BASE, '.work.pid');
-  if (!marker) return null;
-
-  // Guard: marker must be recent (less than 12 hours old) to avoid stale sessions
-  const markerAge = Date.now() - new Date(marker.startedAt).getTime();
-  if (markerAge > 12 * 60 * 60 * 1000) return null;
-
-  return { marker, tasksBase: TASKS_BASE };
-}
+hookCommon.installFailOpen();
 
 /**
  * Resolve the ticket's active step name from `.work-state.json`.
@@ -123,12 +93,17 @@ function extractUsage(rawResponse, evt) {
   return typeof text === 'string' ? parseUsageBlock(text) : null;
 }
 
-function main() {
-  const hookData = readHookData();
+/** Dispatched agent type: subagent_type / agentType input field, else tool name. */
+function resolveAgentType(evt) {
+  const input = evt.toolInput || {};
+  return input.subagent_type || input.agentType || evt.rawToolName || 'unknown';
+}
 
-  const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
-  const rt = getRuntime(hookData);
-  const evt = rt.normalizeHookPayload(hookData, { event: 'PostToolUse' });
+function main() {
+  const hookData = hookCommon.readHookData();
+  if (!hookData) process.exit(0);
+
+  const { rt, evt } = hookCommon.normalizePostToolEvent(hookData);
 
   // Guard: do NOT fire inside sub-agents — the orchestrator's own Task
   // completion is the single attribution point for a dispatch.
@@ -139,22 +114,16 @@ function main() {
   // not be recorded.
   if (evt.toolKind !== 'agent') process.exit(0);
 
-  const usage = extractUsage(hookData && hookData.tool_response, evt);
+  const usage = extractUsage(hookData.tool_response, evt);
   if (!usage) process.exit(0);
 
-  const { appendUsage } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
-
-  const found = findRecentMarker();
+  const found = hookCommon.findRecentWorkMarker();
   if (!found || !found.marker.ticket) process.exit(0);
 
-  const agentType =
-    (evt.toolInput && (evt.toolInput.subagent_type || evt.toolInput.agentType)) ||
-    evt.rawToolName ||
-    'unknown';
-
+  const { appendUsage } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
   appendUsage(found.marker.ticket, {
     step: readStateStep(found.tasksBase, found.marker.ticket),
-    agentType,
+    agentType: resolveAgentType(evt),
     totalTokens: usage.totalTokens,
     toolUses: usage.toolUses,
     durationMs: usage.durationMs,

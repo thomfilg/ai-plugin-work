@@ -223,49 +223,9 @@ function buildEnforcementRow(entry) {
   };
 }
 
-/**
- * Coerce a captured `<usage>` field to a non-negative-safe number.
- * Any non-numeric / missing value yields `0` (NaN → 0) so the report never
- * propagates `NaN`. Never throws.
- * @param {string|number|undefined} value
- * @returns {number}
- */
-function coerceUsageNumber(value) {
-  const n = Number(value);
-  return Number.isNaN(n) ? 0 : n;
-}
-
-/**
- * Parse a `<usage>` block out of a Task() result string into a numeric record.
- *
- * GH-311 — Task 1, R1 (capture total_tokens/tool_uses/duration_ms), R7/C6
- * (graceful degradation, numeric coercion, no throw).
- *
- * Returns `{ totalTokens, toolUses, durationMs }` with each field coerced via
- * `Number(...)` (NaN → 0) when a `<usage>...</usage>` block is present, and
- * `null` when no such block exists or `text` is not a string. Missing
- * individual fields inside the block coerce to `0`; the function never throws.
- *
- * @param {string} text — raw Task() result string.
- * @returns {{totalTokens: number, toolUses: number, durationMs: number} | null}
- */
-function parseUsageBlock(text) {
-  if (typeof text !== 'string') return null;
-  const block = text.match(/<usage>([\s\S]*?)<\/usage>/);
-  if (!block) return null;
-
-  const body = block[1];
-  const field = (name) => {
-    const m = body.match(new RegExp(`${name}\\s*:\\s*([^\\n\\r]*)`));
-    return m ? m[1].trim() : undefined;
-  };
-
-  return {
-    totalTokens: coerceUsageNumber(field('total_tokens')),
-    toolUses: coerceUsageNumber(field('tool_uses')),
-    durationMs: coerceUsageNumber(field('duration_ms')),
-  };
-}
+// Pure `<usage>`-block parsing lives in usage-capture.js; re-exported below so
+// callers keep a single import surface (GH-311).
+const { coerceUsageNumber, parseUsageBlock } = require('./usage-capture');
 
 /**
  * Append a usage-capture record to `.work-actions.json`.
@@ -301,6 +261,36 @@ function appendUsage(ticketId, record) {
 }
 
 /**
+ * Fold one legacy step-transition row into its step's accumulator bucket
+ * (start/end timestamps, command/block/retry counts).
+ */
+function accumulateStepEntry(stepMap, action) {
+  if (!stepMap.has(action.step)) {
+    stepMap.set(action.step, {
+      startTime: null,
+      endTime: null,
+      commands: 0,
+      blocks: 0,
+      retries: 0,
+    });
+  }
+  const entry = stepMap.get(action.step);
+  const ts = new Date(action.timestamp).getTime();
+
+  if (action.what === 'step started') {
+    entry.startTime = ts;
+  } else if (action.what === 'step completed') {
+    entry.endTime = ts;
+  } else if (action.what.startsWith('BLOCKED:')) {
+    entry.blocks++;
+  } else if (action.what === 'step reset') {
+    entry.retries++;
+  } else if (!['workflow started', 'step deferred', 'step skipped'].includes(action.what)) {
+    entry.commands++;
+  }
+}
+
+/**
  * Compute per-step durations, bottleneck, block/retry counts from an actions array.
  * @param {Array<{step: string, timestamp: string, what: string, meta?: object}>} actions
  * @returns {{steps: Array, totalDuration: string, bottleneck: string, bottleneckDuration: string, actionCount: number}}
@@ -325,30 +315,7 @@ function analyzeActions(actions) {
     // below. Non-legacy rows are also excluded from the totalDuration boundary
     // computation (see legacyActions filter below).
     if (isNonLegacyRow(action)) continue;
-
-    if (!stepMap.has(action.step)) {
-      stepMap.set(action.step, {
-        startTime: null,
-        endTime: null,
-        commands: 0,
-        blocks: 0,
-        retries: 0,
-      });
-    }
-    const entry = stepMap.get(action.step);
-    const ts = new Date(action.timestamp).getTime();
-
-    if (action.what === 'step started') {
-      entry.startTime = ts;
-    } else if (action.what === 'step completed') {
-      entry.endTime = ts;
-    } else if (action.what.startsWith('BLOCKED:')) {
-      entry.blocks++;
-    } else if (action.what === 'step reset') {
-      entry.retries++;
-    } else if (!['workflow started', 'step deferred', 'step skipped'].includes(action.what)) {
-      entry.commands++;
-    }
+    accumulateStepEntry(stepMap, action);
   }
 
   const steps = [];

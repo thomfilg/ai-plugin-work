@@ -11,22 +11,13 @@
  * Fail-open: Any error → exit 0 silently.
  */
 
-const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { installFailOpen, readHookData, normalizePostToolEvent, findRecentWorkMarker } = require(
+  path.join(__dirname, '..', 'lib', 'hook-common')
+);
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
-
-// Read hook input from stdin
-function readHookData() {
-  try {
-    const input = fs.readFileSync(0, 'utf8');
-    return JSON.parse(input);
-  } catch {
-    process.exit(0);
-  }
-}
+installFailOpen();
 
 // Bridge runtime identity to the work-next child (and any libs reading env):
 // codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a runtime
@@ -36,26 +27,6 @@ function bridgeRuntimeEnv(rt, evt) {
   if (!process.env.AGENT_SESSION_ID && evt.sessionId) {
     process.env.AGENT_SESSION_ID = evt.sessionId;
   }
-}
-
-// Guard: find this terminal's active /work session marker (recent, owned).
-function findRecentMarker() {
-  const { resolvePluginConfig } = require(path.join(__dirname, '..', '..', 'lib', 'plugin-config'));
-  const { TASKS_BASE } = resolvePluginConfig(path.resolve(__dirname, '..'));
-  if (!TASKS_BASE) process.exit(0);
-
-  // Find THIS terminal's .work.pid marker. findActiveMarker scopes by owning
-  // session id + worktree root, so a hook firing in one agent never advances
-  // another agent's workflow (cross-wiring).
-  const { findActiveMarker } = require(path.join(__dirname, '..', 'lib', 'marker'));
-  const marker = findActiveMarker(TASKS_BASE, '.work.pid');
-  if (!marker) return null;
-
-  // Guard: marker must be recent (less than 12 hours old) to avoid stale sessions
-  const markerAge = Date.now() - new Date(marker.startedAt).getTime();
-  if (markerAge > 12 * 60 * 60 * 1000) return null;
-
-  return marker;
 }
 
 // Call work-next.js. Test seam: an absolute path override lets tests stub
@@ -104,20 +75,19 @@ function emitInstruction(rt, instruction) {
 
 function main() {
   const hookData = readHookData();
+  if (!hookData) process.exit(0);
 
-  const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
-  const rt = getRuntime(hookData);
-  const evt = rt.normalizeHookPayload(hookData, { event: 'PostToolUse' });
+  const { rt, evt } = normalizePostToolEvent(hookData);
 
   // Guard: do NOT fire inside sub-agents (would advance state while agent is working)
   if (rt.isSubagentContext(evt)) process.exit(0);
 
   bridgeRuntimeEnv(rt, evt);
 
-  const marker = findRecentMarker();
-  if (!marker) process.exit(0);
+  const found = findRecentWorkMarker();
+  if (!found) process.exit(0);
 
-  const instruction = runWorkNext(marker);
+  const instruction = runWorkNext(found.marker);
   emitInstruction(rt, instruction);
 
   process.exit(0);
