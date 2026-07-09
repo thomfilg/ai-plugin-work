@@ -40,6 +40,7 @@ const fleetEmpty = require('./lib/maestro-conduct/fleet-empty');
 const progress = require('./lib/maestro-conduct/progress');
 const runners = require('./lib/maestro-conduct/detector-runners');
 const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
+const activeMarker = require('./lib/maestro-conduct/active-marker');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -269,6 +270,13 @@ function tickSession(session) {
 
 function tick() {
   const sessions = tmux.listSessions();
+  // Refresh the status-bar marker from the live session list (self-heals as the
+  // fleet comes up; derives its prefix, no TICKET_PREFIX env dependency).
+  try {
+    activeMarker.writeActiveMarker(sessions);
+  } catch (e) {
+    alerts.log(`writeActiveMarker failed: ${e.message}`);
+  }
   // Reconcile manifest task statuses against live tmux at the top of each tick.
   // Cheap (≤ N file reads, only writes on drift) and gives the operator a live
   // view of pool occupancy without polling tmux.
@@ -327,26 +335,8 @@ function handlePrComments(ctx, cHit) {
 // so a second daemon in the SAME namespace is detected instead of both driving
 // (and racing on) the same agents. One-shot ticks don't lock — the conflict is
 // specific to two persistent daemons.
-// Record which Claude session launched this orchestration + its ticket prefix,
-// so the status bar (maestro-statusline.js) can show this fleet's live tmux
-// sessions ONLY in the owning session — no manifest needed, no global pin.
-function writeActiveMarker() {
-  try {
-    const session = process.env.CLAUDE_CODE_SESSION_ID;
-    const prefix = process.env.TICKET_PREFIX;
-    if (!session || !prefix) return;
-    const osMod = require('os');
-    const p = require('path');
-    const dir = p.join(osMod.homedir(), '.cache', 'maestro', 'active');
-    require('fs').mkdirSync(dir, { recursive: true });
-    require('fs').writeFileSync(
-      p.join(dir, `${session}.json`),
-      JSON.stringify({ session, prefix, repo: process.env.REPO_NAME || '' })
-    );
-  } catch {
-    /* best effort — the status bar is advisory */
-  }
-}
+// Status-bar active-marker writer lives in ./lib/maestro-conduct/active-marker
+// (derives the fleet prefix from live sessions; written every tick).
 
 // Last-resort visibility: any error that escapes the per-session guards must
 // land in the log file, not vanish on a detached stderr. The daemon keeps
@@ -372,7 +362,6 @@ function main() {
   }
   const nsLabel = singletonGuard.acquireOrExit();
   installCrashHandlers();
-  writeActiveMarker();
   alerts.log(`orchestrate daemon starting, tick=${TICK_SEC}s namespace="${nsLabel}"`);
   const guardedTick = () => {
     // MAESTRO_FORCE=1 lets a new conductor STEAL the lock without killing the

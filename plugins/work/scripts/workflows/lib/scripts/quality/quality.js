@@ -61,6 +61,9 @@ const VENDORED_DIRS = [
   'plugins/work/scripts/workflows/lib/runtime',
   'plugins/work/scripts/workflows/lib/safeIO',
   'plugins/work/scripts/workflows/lib/safeSubprocess',
+  // factories/statusline-host → per-plugin statusline installer lib/
+  'plugins/maestro/skills/install/scripts/lib',
+  'plugins/work/scripts/workflows/lib/statusline/host',
 ];
 
 function isVendoredFile(absFile, repoRoot) {
