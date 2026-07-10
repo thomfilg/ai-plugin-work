@@ -11,18 +11,30 @@
  * Edge-triggered on the previous tick's -work session count. null on daemon
  * start: an unknown→0 transition is not an edge (a daemon restarted onto an
  * already-empty fleet stays quiet).
+ *
+ * Debounced to 2 consecutive empty ticks (GH-698): tmux listings flap for a
+ * single tick under load or during session rotation — a live fleet was
+ * observed "vanishing" for one tick and returning the next, billing a fault
+ * wake for nothing. A real server death stays empty and still alerts, one
+ * tick later.
  */
 const alerts = require('./alerts');
 
 let lastWorkSessionCount = null;
+let pendingVanish = null; // { from } — armed on the first empty tick
 
 function checkFleetEmpty(sessions, restartEligible) {
   const workCount = sessions.filter((s) => restartEligible(s)).length;
-  if (lastWorkSessionCount > 0 && workCount === 0) {
+  if (workCount > 0) {
+    pendingVanish = null;
+  } else if (pendingVanish) {
     alerts.logFault(
-      `FLEET-EMPTY — ${lastWorkSessionCount} work session(s) vanished since last tick; if no rotation alert preceded this, the tmux server may have died`,
+      `FLEET-EMPTY — ${pendingVanish.from} work session(s) vanished and stayed gone for 2 ticks; if no rotation alert preceded this, the tmux server may have died`,
       'fleet-empty'
     );
+    pendingVanish = null; // fire once per vanish incident
+  } else if (lastWorkSessionCount > 0) {
+    pendingVanish = { from: lastWorkSessionCount };
   }
   lastWorkSessionCount = workCount;
 }
