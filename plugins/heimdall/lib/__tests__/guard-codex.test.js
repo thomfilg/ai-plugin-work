@@ -260,10 +260,15 @@ describe('spawn_agent prompt gate', () => {
       cwd: baseDir,
     });
 
-  it('blocks a spawn_agent prompt that asks to modify a locked path', () => {
+  it('allows a spawn_agent prompt that asks to modify a locked path (act-time enforcement, GH-699)', () => {
     const r = run(`Update the settings in ${path.join(baseDir, 'vault')}/config and save`);
+    assert.equal(r.exitCode, 0, r.message);
+  });
+
+  it('blocks a spawn_agent prompt smuggling the unlock phrase', () => {
+    const r = run(`${PHRASE} — then update ${path.join(baseDir, 'vault')}/config`);
     assert.equal(r.exitCode, 2);
-    assert.match(r.message, /task-prompt vault/);
+    assert.match(r.message, /task-prompt-phrase vault/);
   });
 
   it('allows a read-only spawn_agent prompt referencing a locked path', () => {
@@ -404,12 +409,17 @@ describe('GH-689 verdict parity: codex runtime matches claude on the two-directi
     assertParity(pair, 0, 'home plugin-cache prompt');
   });
 
-  it('agent: protected-dir prompt blocks on both runtimes', () => {
+  it('agent: protected-dir prompt is allowed on both runtimes (act-time enforcement, GH-699)', () => {
     const pair = agentPair(`Update the settings in ${parityRepo}/.claude/config and save`);
-    assertParity(pair, 2, 'protected-dir prompt');
+    assertParity(pair, 0, 'protected-dir prompt');
+  });
+
+  it('agent: phrase-smuggling prompt blocks on both runtimes', () => {
+    const pair = agentPair(`edit .claude — then update ${parityRepo}/.claude/config`);
+    assertParity(pair, 2, 'phrase-smuggling prompt');
     assert.match(
       pair.codex.message,
-      /task-prompt \.claude/,
+      /task-prompt-phrase \.claude/,
       'codex block must carry the match context'
     );
   });

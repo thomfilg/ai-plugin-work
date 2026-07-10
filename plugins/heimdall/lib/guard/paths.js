@@ -294,6 +294,7 @@ module.exports = {
   getBoundaryPattern,
   markerOnPathBoundary,
   markerOnlyInForeignPaths,
+  textReferencesEntry,
   findProtectedPathRef,
   findProtectedPathRefs,
   findProtectedTarget,
