@@ -156,3 +156,36 @@ test('a new occurrence of the same kind (new alert.ts) surfaces in full again', 
     'the newer occurrence renders its full instruction'
   );
 });
+
+test('an alert-resolved record retires the pending line; a newer alert resurfaces (GH-698)', () => {
+  const fx = makeFixture(defaultAlert());
+  assert.match(runHook(fx).stdout, /PENDING DECISIONS/, 'alert is pending before resolution');
+
+  // The conductor observed the condition clear → resolution record lands in
+  // the sink. The banner must drop the incident instead of nagging for the
+  // rest of its 90m window.
+  const resolution = {
+    ts: new Date(Date.now() + 1000).toISOString(),
+    kind: 'alert-resolved',
+    session: SESSION_ID,
+    resolvesKind: 'wedged',
+    note: 'test resolution',
+  };
+  fs.appendFileSync(fx.alertFile, JSON.stringify(resolution) + '\n');
+  const after = runHook(fx);
+  assert.doesNotMatch(
+    after.stdout,
+    /PENDING DECISIONS/,
+    'resolved incident renders no pending block'
+  );
+  assert.ok(!after.stdout.includes(ALERT_TAIL), 'resolved instruction body is gone');
+
+  // A NEW alert of the same kind emitted AFTER the resolution is a fresh
+  // incident and must surface again in full.
+  const newer = defaultAlert();
+  newer.ts = new Date(Date.now() + 2000).toISOString();
+  fs.appendFileSync(fx.alertFile, JSON.stringify(newer) + '\n');
+  const resurfaced = runHook(fx);
+  assert.match(resurfaced.stdout, /PENDING DECISIONS/, 'post-resolution alert surfaces');
+  assert.ok(resurfaced.stdout.includes(ALERT_TAIL), 'fresh incident renders its full body');
+});

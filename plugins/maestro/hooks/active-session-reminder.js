@@ -79,6 +79,7 @@ const PENDING_KINDS = new Set([
   'no-progress',
   'kill-during-ci',
   'stop-condition-met',
+  'commit-stall',
 ]);
 
 function readAlertTail() {
@@ -95,14 +96,8 @@ function readAlertTail() {
   }
 }
 
-function parsePendingAlert(line, cutoff) {
-  if (!line.trim()) return null;
-  let a;
-  try {
-    a = JSON.parse(line);
-  } catch {
-    return null;
-  }
+/** The parsed record, iff it is an in-window alert of a pending kind. */
+function pendingAlertFrom(a, cutoff) {
   if (!a || !PENDING_KINDS.has(a.kind)) return null;
   const ts = Date.parse(a.ts || '');
   if (!ts || ts < cutoff) return null;
@@ -174,15 +169,56 @@ function renderPendingLine(a, seen) {
   return `    ⚑ [REPEAT ${seen}] ${id} ${a.kind}: ${instr.slice(0, SHOWN_HEAD)}`;
 }
 
+/** Track the newest alert-resolved ts per session|kind (GH-698). */
+function noteResolutionRecord(resolved, r) {
+  if (!r || r.kind !== 'alert-resolved' || !r.resolvesKind) return false;
+  const ts = Date.parse(r.ts || '');
+  if (ts) {
+    const k = `${r.session || r.ticket}|${r.resolvesKind}`;
+    if (!resolved.has(k) || ts > resolved.get(k)) resolved.set(k, ts);
+  }
+  return true;
+}
+
+/** Drop pending alerts whose newest occurrence predates a resolution record. */
+function dropResolved(latest, resolved) {
+  for (const [k, a] of latest) {
+    const rts = resolved.get(k);
+    if (rts && Date.parse(a.ts || '') <= rts) latest.delete(k);
+  }
+}
+
+/**
+ * Scan the alert tail into the newest pending alert per session|kind. The
+ * alert-resolved records (GH-698) mean the conductor observed the condition
+ * clear (composer emptied, prompt answered) — they retire the incident so the
+ * banner stops nagging about a decision already handled; a resolved
+ * stuck-input used to re-fire for its full 90m window.
+ */
+function collectAlertRecords(raw, cutoff) {
+  const latest = new Map(); // session|kind → newest alert wins
+  const resolved = new Map(); // session|kind → newest alert-resolved ts
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let r;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (noteResolutionRecord(resolved, r)) continue;
+    const a = pendingAlertFrom(r, cutoff);
+    if (a) latest.set(`${a.session || a.ticket}|${a.kind}`, a);
+  }
+  dropResolved(latest, resolved);
+  return latest;
+}
+
 function pendingDecisionLines() {
   const raw = readAlertTail();
   if (!raw) return [];
   const cutoff = Date.now() - PENDING_WINDOW_MIN * 60 * 1000;
-  const latest = new Map(); // session|kind → newest alert wins
-  for (const line of raw.split('\n')) {
-    const a = parsePendingAlert(line, cutoff);
-    if (a) latest.set(`${a.session || a.ticket}|${a.kind}`, a);
-  }
+  const latest = collectAlertRecords(raw, cutoff);
   if (!latest.size) return [];
 
   const markerPath = shownMarkerPath(currentSessionId());
