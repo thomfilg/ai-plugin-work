@@ -53,6 +53,7 @@ const EXPECTED_MASTER_FILES = {
   'factories/hookEntrypoint': ['hookEntrypoint.js', 'index.js', 'logHookError.js'],
   'factories/safeSubprocess': ['index.js', 'safeSubprocess.js'],
   'factories/pathSafe': ['index.js', 'pathSafe.js'],
+  'factories/statusline-host': ['statusline-host.js'],
 };
 
 const RUNTIME_SET = VENDOR_SETS.find((set) => set.master === 'factories/runtime');
@@ -123,6 +124,10 @@ describe('VENDOR_SETS table shape', () => {
       'plugins/heimdall/lib/safeSubprocess',
     ],
     'factories/pathSafe': ['plugins/heimdall/lib/pathSafe'],
+    'factories/statusline-host': [
+      'plugins/maestro/skills/install/scripts/lib',
+      'plugins/work/scripts/workflows/lib/statusline/host',
+    ],
   };
 
   for (const [master, vendorDirs] of Object.entries(EXPECTED_VENDOR_DIRS)) {
