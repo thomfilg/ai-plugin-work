@@ -220,16 +220,47 @@ function main() {
   logBumpPlan({ range, touched, allPlugins, pluginsToBump, skippedPlugins });
 
   const allTargets = [...ALWAYS_BUMP, ...pluginsToBump];
+  const writtenPaths = [];
   for (const file of allTargets) {
     const filePath = path.join(ROOT, file.path);
     const content = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     const old = file.get(content);
     file.set(content, newVersion);
     fs.writeFileSync(filePath, JSON.stringify(content, null, 2) + '\n');
+    writtenPaths.push(filePath);
     console.log(`  ${file.label}: ${old} → ${newVersion}`);
   }
 
+  formatManifests(writtenPaths);
   console.log(`\nBumped ${current} → ${newVersion}`);
+}
+
+// Re-format the rewritten manifests with the REPO-PINNED biome so the emitted
+// JSON is byte-identical to what CI's format gate (`biome format`) expects.
+// JSON.stringify(…, null, 2) expands every array onto multiple lines, but biome
+// collapses short arrays under its lineWidth — so without this step a bump
+// produces manifests CI flags as unformatted, and the next hand-format re-
+// collapses them, churning the `keywords`/`typesVersions` arrays on every
+// release. Using the pinned binary (never `npx biome`, which fetches an
+// unrelated squatted package when node_modules is absent) keeps the generator
+// in lockstep with CI and the pre-commit hook. Best-effort: a missing binary
+// warns rather than failing the bump, and the pre-commit/CI gates still catch
+// any drift.
+function formatManifests(paths) {
+  if (paths.length === 0) return;
+  const biome = path.join(ROOT, 'node_modules', '.bin', 'biome');
+  if (!fs.existsSync(biome)) {
+    console.warn(
+      `  ⚠ pinned biome not found at node_modules/.bin/biome — skipping manifest format.\n` +
+        `    Run 'pnpm install' so bumped manifests match the CI format gate.`
+    );
+    return;
+  }
+  try {
+    execFileSync(biome, ['format', '--write', ...paths], { stdio: 'inherit' });
+  } catch (err) {
+    console.warn(`  ⚠ biome format of bumped manifests failed: ${err.message}`);
+  }
 }
 
 main();

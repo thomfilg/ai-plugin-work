@@ -1,6 +1,32 @@
-#!/bin/sh
-# Pre-commit hook: format staged JS/JSON files with biome
-# Install: git config core.hooksPath scripts/hooks
+#!/usr/bin/env bash
+# Pre-commit hook: format staged JS/JSON files with the REPO-PINNED biome.
+# Install: git config core.hooksPath plugins/work/scripts/hooks
+#
+# Runs under bash (not /bin/sh): the partial-stage guard reads a NUL-delimited
+# list with `read -d ''`, which is a bash builtin option — under dash it errors
+# "Illegal option -d" and the guard silently no-ops.
+#
+# CRITICAL — use the workspace-pinned @biomejs/biome, never `npx biome`.
+# `npx biome` resolves the BARE name `biome` from the registry whenever
+# node_modules is absent (a fresh clone, the release-bump bot, or any commit
+# made without a prior `pnpm install`) and fetches an UNRELATED squatted
+# `biome@0.3.x` package. That wrong tool formats JSON differently — it does not
+# collapse short arrays the way CI's pinned @biomejs/biome@2.x does — so a
+# commit formatted by the hook could still be rejected by CI's format gate.
+# Combined with `bump-version.js` writing manifests via JSON.stringify (which
+# expands every array multi-line), that mismatch made the plugin manifests
+# churn between multi-line and single-line `keywords`/`typesVersions` arrays on
+# every release bump. This hook now resolves the pinned binary explicitly and
+# FAILS LOUDLY when it is missing — it never formats with an unpinned tool, and
+# never lets unformatted JSON ship. Bypass the whole hook with SKIP_PRECOMMIT=1.
+
+if [ "${SKIP_PRECOMMIT:-}" = "1" ]; then
+  echo "[pre-commit] skipped (SKIP_PRECOMMIT=1)"
+  exit 0
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+BIOME="$REPO_ROOT/node_modules/.bin/biome"
 
 # Collect staged JS/JSON files (NUL-delimited for safe filename handling)
 STAGED_FILE=$(mktemp)
@@ -23,13 +49,29 @@ if [ -n "$PARTIAL" ]; then
   exit 1
 fi
 
-# Format staged files in place (NUL-delimited)
-if ! xargs -0 npx biome format --write <"$STAGED_FILE"; then
+# Refuse to format with anything but the pinned biome. Failing here blocks the
+# commit with a clear remedy instead of silently using the wrong `npx biome`.
+if [ ! -x "$BIOME" ]; then
+  echo "pre-commit: pinned biome not found at node_modules/.bin/biome."
+  echo "Run 'pnpm install' first — refusing to format with an unpinned 'npx biome'."
+  exit 1
+fi
+
+# Format staged files in place (NUL-delimited) with the pinned biome.
+if ! xargs -0 "$BIOME" format --write <"$STAGED_FILE"; then
   echo "pre-commit: biome format failed — commit blocked"
   exit 1
 fi
 
 # Re-stage formatted files (NUL-delimited)
 xargs -0 git add <"$STAGED_FILE"
+
+# Belt-and-suspenders: verify the staged snapshot is byte-clean per the pinned
+# biome, so a commit can NEVER carry formatting CI's format gate would reject.
+if ! xargs -0 "$BIOME" format <"$STAGED_FILE" >/dev/null 2>&1; then
+  echo "pre-commit: staged files still not biome-clean after format — commit blocked."
+  echo "This should not happen; run 'node_modules/.bin/biome format --write' on the listed files."
+  exit 1
+fi
 
 exit 0
