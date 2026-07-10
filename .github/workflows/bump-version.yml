@@ -28,6 +28,19 @@ jobs:
         with:
           node-version: 20
 
+      # Install deps so bump-version.js can re-format the rewritten manifests
+      # with the REPO-PINNED biome. Without node_modules the bump would push
+      # JSON.stringify's multi-line arrays straight to main — which CI's format
+      # gate then rejects on the next PR — the manifest-format churn (#704).
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --ignore-scripts
+
       - name: Determine bump type from commit message
         id: bump-type
         # Conventional Commits → semver:
@@ -58,6 +71,13 @@ jobs:
           # push range. Workspace + marketplace manifests bump unconditionally.
           BUMP_RANGE: ${{ github.event.before }}..${{ github.sha }}
         run: node plugins/work/scripts/workflows/lib/scripts/bump-version.js ${{ steps.bump-type.outputs.type }}
+
+      # The SAME format gate CI runs on PRs (`biome format .`), here as a hard
+      # gate BEFORE the release commit — so a mis-formatted manifest can never
+      # be pushed to main. bump-version.js already formats what it writes; this
+      # fails the workflow if anything is still unformatted (#704).
+      - name: Verify formatting (biome)
+        run: pnpm format:check
 
       - name: Commit and push
         run: |
