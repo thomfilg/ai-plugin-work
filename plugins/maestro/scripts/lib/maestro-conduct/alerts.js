@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const tmux = require('./tmux');
 const namespace = require('./namespace');
+const throttle = require('./rewake-throttle');
 
 const ALERT_FILE = namespace.alertFile();
 const ALERT_SESSION = namespace.alertSession();
@@ -85,6 +86,9 @@ const ACTION_REQUIRED_KINDS = new Set([
 //     holds its pool slot forever.
 //   kill-during-ci / stop-condition-met — slot-rotation outcomes carrying the
 //     bootstrap-next instruction; silent = the pool quietly drains.
+//   commit-stall — a multi-hour no-commit stall used to be a log line + a
+//     heartbeat flag only; an 8h stall ran to term with the operator never
+//     woken (GH-698). High-threshold crossings alert via the main loop.
 // Must stay in sync with PENDING_KINDS in hooks/active-session-reminder.js
 // (asserted by wake-kinds-invariant in __tests__/heartbeat-wake-routing.test.js)
 // and with the CONDUCT_WAKE_EVENTS default in config-schema.json.
@@ -94,6 +98,7 @@ const DEFAULT_WAKE_KINDS = new Set([
   'no-progress',
   'kill-during-ci',
   'stop-condition-met',
+  'commit-stall',
 ]);
 
 // Kind for informational log lines that must never wake the conductor model
@@ -138,90 +143,21 @@ function wakesConductor(kind) {
   return all || kinds.has(kind);
 }
 
-// ── Re-wake throttle (GH-680 12h-no-compact budget) ─────────────────────────
-// Every conductor wake permanently grows the transcript, so repeats of the
-// SAME pending alert must not each cost a model turn: the first emission of a
-// key wakes immediately; repeats re-wake only after an exponential backoff
-// (PENDING_REWAKE_MIN, doubling per re-wake, capped at PENDING_REWAKE_MAX_MIN).
-// Nothing is lost: every repeat still lands in the jsonl + tmux pane + banner
-// re-fire, and each wake's UserPromptSubmit banner re-surfaces ALL pending
-// alerts — the throttle only bounds how often an UNHANDLED alert re-bills
-// the context window. PENDING_REWAKE_MIN=0 or CONDUCT_WAKE_EVENTS=all
-// restores wake-on-every-repeat.
-const THROTTLE_FILE = path.join(STATE_DIR, '_wake-throttle.json');
-function rewakeMinutes() {
-  const n = parseInt(process.env.PENDING_REWAKE_MIN || '30', 10);
-  return Number.isFinite(n) && n >= 0 ? n : 30;
-}
-function rewakeMaxMinutes() {
-  const n = parseInt(process.env.PENDING_REWAKE_MAX_MIN || '240', 10);
-  return Number.isFinite(n) && n > 0 ? n : 240;
-}
-function loadThrottle() {
-  try {
-    const obj = JSON.parse(fs.readFileSync(THROTTLE_FILE, 'utf8'));
-    return obj && typeof obj === 'object' ? obj : {};
-  } catch {
-    return {};
-  }
-}
-function saveThrottle(map) {
-  try {
-    // Hygiene: drop entries idle for 2× the max backoff — keys rotate with
-    // sha/phase so stale ones would otherwise accumulate forever.
-    const horizon = 2 * rewakeMaxMinutes() * 60 * 1000;
-    const now = Date.now();
-    for (const k of Object.keys(map)) {
-      if (!map[k] || now - (map[k].lastWakeAt || 0) > horizon) delete map[k];
-    }
-    fs.mkdirSync(STATE_DIR, { recursive: true });
-    // tmp+rename so a torn read can never wipe sibling backoff state.
-    const tmp = `${THROTTLE_FILE}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(map));
-    fs.renameSync(tmp, THROTTLE_FILE);
-  } catch {}
-}
-
-/**
- * Decide whether this emission of `key` may hit the wake channel, and record
- * the wake when it does. First emission always wakes; subsequent ones wake
- * only after the current backoff window, which doubles on every re-wake.
- * Fail-open: any state error allows the wake (losing a wake is worse than
- * paying one).
- *
- * @param {string} key alertKey(obj)
- * @returns {boolean} true when this emission should wake
- */
-function rewakeGate(key) {
-  const baseMin = rewakeMinutes();
-  if (baseMin === 0) return true; // throttle disabled
-  const { all } = parseWakeEvents();
-  if (all) return true; // firehose mode: operator asked for everything
-  try {
-    const map = loadThrottle();
-    const now = Date.now();
-    const entry = map[key];
-    if (entry && now - entry.lastWakeAt < entry.backoffMin * 60 * 1000) {
-      return false; // still inside the backoff window — logged, not woken
-    }
-    const nextBackoff = entry ? Math.min(entry.backoffMin * 2, rewakeMaxMinutes()) : baseMin;
-    map[key] = { lastWakeAt: now, backoffMin: nextBackoff };
-    saveThrottle(map);
-    return true;
-  } catch {
-    return true;
-  }
+// ── Re-wake throttle (GH-680, tiered per GH-698) ────────────────────────────
+// Persistence + tier mechanics live in rewake-throttle.js. This wrapper maps
+// an alert kind to its tier: BLOCKING (ACTION_REQUIRED_KINDS — the agent is
+// idle-waiting on the operator) re-wakes on a flat BLOCKING_REWAKE_MIN
+// cadence; everything else backs off exponentially per PENDING_REWAKE_MIN.
+function rewakeGate(key, kind) {
+  return throttle.rewakeGate(key, {
+    blocking: kind !== undefined && ACTION_REQUIRED_KINDS.has(kind),
+    firehose: parseWakeEvents().all,
+  });
 }
 
 /** Clear the throttle entry for a key so a fresh incident re-wakes immediately. */
 function resetThrottle(key) {
-  try {
-    const map = loadThrottle();
-    if (key in map) {
-      delete map[key];
-      saveThrottle(map);
-    }
-  } catch {}
+  throttle.resetThrottle(key);
 }
 
 /**
@@ -327,15 +263,52 @@ function alert(obj) {
   // allowlist AND this key must clear the re-wake throttle. Repeats inside
   // the backoff window are logged (jsonl + tmux + logfile) but do not bill a
   // conductor turn — the banner re-fire keeps them visible until handled.
-  const throttled = wakesConductor(obj.kind) && !rewakeGate(key);
+  const throttled = wakesConductor(obj.kind) && !rewakeGate(key, obj.kind);
   log(`ACTION ${JSON.stringify(payload)}`, { kind: obj.kind, noWake: throttled });
   return { count };
+}
+
+/**
+ * Retire every pending alert of (session-or-ticket, kind): purge the persisted
+ * repeat counts and throttle entries for ALL sha/phase variants of the key,
+ * and append an `alert-resolved` record to the alert file so the banner stops
+ * re-surfacing the incident (GH-698: a resolved stuck-input kept re-firing as
+ * a PENDING DECISION for its full 90m window while the agent worked on).
+ *
+ * No-op (returns false, writes nothing) when nothing was pending — callers may
+ * invoke this every tick on the "condition absent" path without spamming the
+ * sink. Never wakes: resolution is good news.
+ *
+ * @param {string} sessionOrTicket
+ * @param {string} kind the alert kind being resolved (e.g. 'stuck-input')
+ * @param {string} [note] short human-readable cause ("composer cleared")
+ * @returns {boolean} true when a pending incident was actually retired
+ */
+function resolve(sessionOrTicket, kind, note) {
+  if (!sessionOrTicket || !kind) return false;
+  const prefix = `${namespace.flattenKey(sessionOrTicket)}|${kind}|`;
+  const countsCleared = throttle.purgeKeysWithPrefix(loadCounts, saveCounts, prefix);
+  const throttleCleared = throttle.purgePrefix(prefix);
+  if (!countsCleared && !throttleCleared) return false;
+  const record = {
+    ts: new Date().toISOString(),
+    kind: 'alert-resolved',
+    session: sessionOrTicket,
+    resolvesKind: kind,
+    ...(note ? { note } : {}),
+  };
+  try {
+    fs.appendFileSync(ALERT_FILE, JSON.stringify(record) + '\n');
+  } catch {}
+  log(`${sessionOrTicket} RESOLVED ${kind}${note ? ` (${note})` : ''}`, { kind: KIND_LOG_ONLY });
+  return true;
 }
 
 module.exports = {
   alert,
   log,
   logFault,
+  resolve,
   wakesConductor,
   resetCount,
   alertKey,

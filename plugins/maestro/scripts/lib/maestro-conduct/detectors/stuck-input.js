@@ -24,6 +24,7 @@
  */
 
 const state = require('../state');
+const paneBusy = require('../pane-busy');
 const { LIVE_SPINNER_RE, isCodexPaneDialect } = require('../live-spinner');
 
 // Minutes the same composer text must persist before the detector hits.
@@ -45,25 +46,38 @@ function composerText(pane) {
   return null;
 }
 
+/**
+ * Mid-turn: a live spinner in the capture OR a live tool subprocess under the
+ * pane. Spinner frames scroll out of the capture while subagents run, but the
+ * subprocess signal survives — GH-698: a stuck-input alert fired for queued
+ * text the SAME tick another detector logged "agent working quietly".
+ */
+function agentMidTurn(session, pane) {
+  return LIVE_SPINNER_RE.test(pane) || paneBusy.paneHasLiveSubprocess(session);
+}
+
 function detect({ session, pane, dialect }) {
   // Codex dialects: composer glyph unknown (TUI) or absent entirely (exec
   // stream pane) — "unsupported", never a stuck-input verdict (WP-09).
   if (isCodexPaneDialect(dialect)) return { hit: false, capability: 'unsupported' };
   if (!session || !pane) return { hit: false };
-  // A live spinner means the agent is mid-turn — queued text is expected to
-  // sit until the turn ends. Only an IDLE pane with stuck text is anomalous.
-  if (LIVE_SPINNER_RE.test(pane)) {
-    return { hit: false };
-  }
   const text = composerText(pane);
   const prev = state.read(session, 'stuck-input');
   if (!text) {
-    if (prev) state.clear(session, 'stuck-input');
+    if (prev) {
+      // Composer emptied — the queued text was submitted or cleared. `cleared`
+      // lets the runner retire any pending stuck-input alert (GH-698).
+      state.clear(session, 'stuck-input');
+      return { hit: false, cleared: true };
+    }
     return { hit: false };
   }
-  const now = state.now();
-  if (!prev || prev.text !== text) {
-    state.write(session, 'stuck-input', { text, firstSeenAt: now });
+  // Mid-turn (or new/changed text): queued text is expected to sit until the
+  // turn ends. Restart the idle clock so only post-busy idle time counts
+  // toward STUCK_INPUT_MIN — an idle pane with the SAME stuck text is the
+  // only anomalous state.
+  if (agentMidTurn(session, pane) || !prev || prev.text !== text) {
+    state.write(session, 'stuck-input', { text, firstSeenAt: state.now() });
     return { hit: false };
   }
   const mins = state.minutesSince(prev.firstSeenAt);

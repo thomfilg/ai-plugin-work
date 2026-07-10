@@ -98,7 +98,10 @@ function runSpinnerDetector(ctx) {
   // helper share a ticket but have different pane buffers; sharing the
   // marker would let one clear the other's cooldown.
   if (!sHit.hit) {
-    if (state.read(ctx.session, 'spinner')) state.clear(ctx.session, 'spinner');
+    if (state.read(ctx.session, 'spinner')) {
+      state.clear(ctx.session, 'spinner');
+      alerts.resolve(ctx.session, 'spinner-hang', 'spinner cleared');
+    }
     return false;
   }
   // A spinner with a CHANGING worktree is a long-running tool doing real work
@@ -205,7 +208,15 @@ function runSilenceDetector(ctx, { restartEligible }) {
 function runStuckInputDetector(ctx, { restartEligible }) {
   if (!restartEligible(ctx.session)) return;
   const hit = stuckInputDetector.detect(ctx);
-  if (!hit.hit) return;
+  if (!hit.hit) {
+    if (hit.cleared) {
+      // Composer emptied — the queued text was submitted or cleared. Retire the
+      // pending alert so banners stop resurfacing a resolved incident (GH-698).
+      state.clear(ctx.session, 'stuck-input-alert');
+      alerts.resolve(ctx.session, 'stuck-input', 'composer cleared');
+    }
+    return;
+  }
   const marker = state.read(ctx.session, 'stuck-input-alert') || {};
   if (marker.lastAt && state.minutesSince(marker.lastAt) < STUCK_INPUT_RE_EMIT_MIN) return;
   state.write(ctx.session, 'stuck-input-alert', { lastAt: state.now() });
@@ -242,7 +253,10 @@ function runAuthBrokenDetector(ctx, { restartEligible }) {
   if (!restartEligible(ctx.session)) return;
   const hit = authBrokenDetector.detect(ctx);
   if (!hit.hit) {
-    if (state.read(ctx.session, 'auth-broken')) state.clear(ctx.session, 'auth-broken');
+    if (state.read(ctx.session, 'auth-broken')) {
+      state.clear(ctx.session, 'auth-broken');
+      alerts.resolve(ctx.session, 'auth-broken', 'credential failure no longer visible');
+    }
     return;
   }
   const marker = state.read(ctx.session, 'auth-broken') || {};
@@ -275,7 +289,10 @@ function noProgressExempt(ctx, prog) {
 function runNoProgressCheck(ctx, prog, { restartEligible }) {
   if (!restartEligible(ctx.session)) return;
   if (prog.changed) {
-    state.clear(ctx.ticket, 'no-progress');
+    if (state.read(ctx.ticket, 'no-progress')) {
+      state.clear(ctx.ticket, 'no-progress');
+      alerts.resolve(ctx.session, 'no-progress', 'worktree progressing again');
+    }
     return;
   }
   if (noProgressExempt(ctx, prog)) return;

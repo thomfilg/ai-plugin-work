@@ -37,6 +37,7 @@ const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
 const questionHandler = require('./lib/maestro-conduct/question-handler');
 const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
 const fleetEmpty = require('./lib/maestro-conduct/fleet-empty');
+const commitStallRunner = require('./lib/maestro-conduct/commit-stall-runner');
 const progress = require('./lib/maestro-conduct/progress');
 const runners = require('./lib/maestro-conduct/detector-runners');
 const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
@@ -155,18 +156,6 @@ function runPhaseStallDetector(ctx) {
   if (pHit.hit) runners.handlePhaseStall(ctx, pHit, { maybeEscalateToDeadEnd });
 }
 
-function runCommitStallDetector(ctx) {
-  // Helpers can't commit; only -work meaningfully stalls on commits.
-  if (!restartEligible(ctx.session)) return;
-  // detector handles its own dedup + marker — only "hits" on threshold crossings.
-  const cHit = DETECTORS.commitStall.detect(ctx);
-  if (!cHit.hit) return;
-  alerts.log(
-    `${ctx.session} commit-stall ${cHit.mins}m in phase=${ctx.phase} (threshold=${cHit.threshold}m)`,
-    { kind: 'log-only' } // info per conduct SKILL — surfaces in log + heartbeat flags
-  );
-}
-
 function runPrCommentsDetector(ctx) {
   if (!restartEligible(ctx.session)) return;
   const cHit = DETECTORS.prComments.detect(ctx);
@@ -215,7 +204,8 @@ function runPhaseDetectors(ctx) {
     return;
   if (detectorsToRun.includes('spinner') && runners.runSpinnerDetector(ctx)) return;
   if (detectorsToRun.includes('phaseStall')) runPhaseStallDetector(ctx);
-  if (detectorsToRun.includes('commitStall')) runCommitStallDetector(ctx);
+  if (detectorsToRun.includes('commitStall'))
+    commitStallRunner.runCommitStallDetector(ctx, { restartEligible });
   if (detectorsToRun.includes('prComments')) runPrCommentsDetector(ctx);
   if (detectorsToRun.includes('prStatus')) runPrStatusDetector(ctx);
   // Phase-based rotation runs after all detectors so it sees the freshest
@@ -249,9 +239,11 @@ function tickSession(session) {
   // the re-wake throttle every cycle and wake per flap.
   const absent = (state.read(ctx.session, 'question-absent') || { ticks: 0 }).ticks + 1;
   if (absent >= 3) {
-    alerts.resetCount(
-      alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
-    );
+    // resolve() supersedes the old exact-key resetCount: it purges counts +
+    // throttle across ALL phase variants of the key and appends an
+    // alert-resolved record so the banner drops the answered prompt (GH-698).
+    // No-op when nothing was pending, so calling it every tick is free.
+    alerts.resolve(ctx.session, 'question-pending', 'prompt no longer visible');
   }
   state.write(ctx.session, 'question-absent', { ticks: absent });
 
