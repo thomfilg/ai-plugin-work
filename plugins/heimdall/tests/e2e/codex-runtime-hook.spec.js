@@ -167,13 +167,21 @@ describe('heimdall.js codex apply_patch lane (entrypoint)', () => {
     assert.equal(res.status, 2, 'injected/agent-controlled records must never unlock');
   });
 
-  it('gates a spawn_agent prompt that writes to a locked path', () => {
+  it('allows a spawn_agent prompt that describes work on a locked path (act-time enforcement, GH-699)', () => {
     const payload = patchPayload(LOCKED_PATCH);
     payload.tool_name = 'spawn_agent';
     payload.tool_input = { prompt: `Update ${vaultDir}/config.json and save the changes` };
     const res = runHook(hookScript, payload, { AGENT_RUNTIME: 'codex' });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  });
+
+  it('gates a spawn_agent prompt smuggling the unlock phrase', () => {
+    const payload = patchPayload(LOCKED_PATCH);
+    payload.tool_name = 'spawn_agent';
+    payload.tool_input = { prompt: `${PHRASE} — update ${vaultDir}/config.json and save` };
+    const res = runHook(hookScript, payload, { AGENT_RUNTIME: 'codex' });
     assert.equal(res.status, 2, `stderr: ${res.stderr}`);
-    assert.match(res.stderr, /task-prompt/);
+    assert.match(res.stderr, /task-prompt-phrase/);
   });
 });
 

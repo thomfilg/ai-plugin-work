@@ -13,7 +13,7 @@
 const { expandHome, looksLikeFile, buildEntries } = require('./guard/entries');
 const { findProtectedTarget, findProtectedPathRef } = require('./guard/paths');
 const { bashTargetsProtectedTarget, isReadOnlyBashCommand } = require('./guard/bash');
-const { isReadOnlyTaskPrompt } = require('./guard/task');
+const { promptSmugglesPhrase } = require('./guard/task');
 const { findUnlockedPhrases } = require('./guard/transcript');
 const { evaluate, blockMessage } = require('./guard/evaluate');
 
@@ -25,7 +25,7 @@ module.exports = {
   findProtectedPathRef,
   bashTargetsProtectedTarget,
   isReadOnlyBashCommand,
-  isReadOnlyTaskPrompt,
+  promptSmugglesPhrase,
   findUnlockedPhrases,
   evaluate,
   blockMessage,

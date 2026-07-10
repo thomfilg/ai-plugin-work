@@ -20,6 +20,7 @@ const {
   commandGlobReferencesMarker,
   commandGlobReferencesPath,
 } = require('./shell-normalize');
+const { structuredEntryMatch, VERDICT } = require('./bash-structure');
 
 // Generic write-op templates; `MARKER` is replaced per protected marker.
 const BASH_WRITE_TEMPLATES = [
@@ -269,10 +270,13 @@ function absolutePathWrite(entry, v, dirPresent) {
   );
 }
 
-function entryWriteMatch(entry, v) {
-  const dirPresent =
-    v.all.some((s) => s.includes(entry.dir)) ||
-    v.all.some((s) => commandGlobReferencesPath(s, entry.dir));
+/**
+ * Legacy fail-closed matcher: write-shaped template + marker/dir co-occurrence
+ * anywhere in the command. Retained VERBATIM as the fallback for command
+ * variants the structured scanner cannot parse (GH-699) — exotic input keeps
+ * the pre-structure posture.
+ */
+function legacyEntryWriteMatch(entry, v, dirPresent) {
   if (absolutePathWrite(entry, v, dirPresent)) return 'absolute-path';
   for (const marker of entry.markers) {
     if (!markerEligible(entry, marker, v)) continue;
@@ -281,21 +285,47 @@ function entryWriteMatch(entry, v) {
   return null;
 }
 
+/**
+ * GH-699 reference-vs-mutation scoping: run the structured operand analysis
+ * over every obfuscation-normalized variant (any variant blocking blocks —
+ * GH-655 fail-closed across variants). Variants the scanner cannot parse fall
+ * back to the legacy template matcher, so only affirmatively-parsed commands
+ * can be newly allowed.
+ */
+function entryWriteMatch(entry, v, ctx) {
+  const dirPresent =
+    v.all.some((s) => s.includes(entry.dir)) ||
+    v.all.some((s) => commandGlobReferencesPath(s, entry.dir));
+  // Cheap screen: a command that never names the entry (dir, boundary-anchored
+  // marker, or glob onto either) cannot target it — skip both matchers.
+  const referenced = dirPresent || entry.markers.some((marker) => markerPresent(marker, v));
+  if (!referenced) return null;
+
+  let sawUnparseable = false;
+  for (const s of v.all) {
+    const r = structuredEntryMatch(s, entry, ctx);
+    if (r.verdict === VERDICT.BLOCK) return 'marker';
+    if (r.verdict === VERDICT.UNPARSEABLE) sawUnparseable = true;
+  }
+  if (!sawUnparseable) return null;
+  return legacyEntryWriteMatch(entry, v, dirPresent);
+}
+
 /** Every protected target the command writes to: [{ entry, matchType }, ...]. */
-function bashTargets(command, entries) {
+function bashTargets(command, entries, ctx) {
   if (!command) return [];
   const v = commandVariants(command);
   const out = [];
   for (const entry of entries) {
-    const matchType = entryWriteMatch(entry, v);
+    const matchType = entryWriteMatch(entry, v, ctx);
     if (matchType) out.push({ entry, matchType });
   }
   return out;
 }
 
 /** First protected target the command writes to, or null. */
-function bashTargetsProtectedTarget(command, entries) {
-  return bashTargets(command, entries)[0] || null;
+function bashTargetsProtectedTarget(command, entries, ctx) {
+  return bashTargets(command, entries, ctx)[0] || null;
 }
 
 module.exports = {

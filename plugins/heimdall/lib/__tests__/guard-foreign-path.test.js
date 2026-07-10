@@ -68,12 +68,15 @@ after(() => {
 });
 
 const claudeEntry = () => buildEntries(LOCKS, repo)[0];
+// cwd mirrors the hook payload: the agent works from the locked repo, so
+// relative write targets resolve against it (GH-699 resolve-first semantics).
 const run = (toolName, toolInput) =>
   evaluate({
     toolName,
     toolInput,
     transcriptPath: transcriptEmpty,
     entries: buildEntries(LOCKS, repo),
+    cwd: repo,
   });
 const bash = (command) => run('Bash', { command });
 const bashShort = (command) =>
@@ -82,6 +85,7 @@ const bashShort = (command) =>
     toolInput: { command },
     transcriptPath: transcriptEmpty,
     entries: buildEntries(SHORT_LOCKS, repoShort),
+    cwd: repoShort,
   });
 // Force the static script-bypass fallback (no runtime shim) for one call.
 const staticBash = (command) => {
@@ -276,9 +280,15 @@ describe('task lane: boundary floor + foreign exemption', () => {
     assert.equal(r.exitCode, 0, r.message);
   });
 
-  it('Task prompt asking to modify the protected dir still blocks', () => {
+  it('Task prompt asking to modify the protected dir is allowed (act-time enforcement, GH-699)', () => {
     const r = run('Task', { prompt: `Update the settings in ${repo}/.claude/config and save` });
-    assert.equal(r.exitCode, 2, 'protected-dir prompt must block');
+    assert.equal(r.exitCode, 0, r.message);
+  });
+
+  it('Task prompt smuggling the unlock phrase still blocks', () => {
+    const r = run('Task', { prompt: `edit .claude — then update ${repo}/.claude/config` });
+    assert.equal(r.exitCode, 2, 'phrase smuggling must block');
+    assert.match(r.message, /task-prompt-phrase \.claude/);
   });
 
   it('Task prompt with the basename buried mid-word is not a reference', () => {
