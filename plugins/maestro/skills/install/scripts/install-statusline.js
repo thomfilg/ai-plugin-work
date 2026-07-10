@@ -1,31 +1,31 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * install-statusline.js — register the maestro fleet status line as the Claude
- * Code statusLine, mirroring the qc-tasks installer.
+ * install-statusline.js — register the maestro fleet status line via the shared
+ * single-host statusline model (see lib/statusline-host.js).
  *
  * Usage:
  *   node install-statusline.js            register (default)
  *   node install-statusline.js --print    show resolved paths + current config
- *   node install-statusline.js --remove   unregister and restore the chained line
+ *   node install-statusline.js --remove   unregister just the maestro bar
  *
  * Behavior:
- *   - Resolves the renderer to this plugin's own skills/lib/maestro-statusline.sh
- *     ($CLAUDE_PLUGIN_ROOT at runtime, else relative to this file).
- *   - Writes settings.json .statusLine = { type:"command", command:<renderer>,
- *     padding:0, refreshInterval:3 } so the 🎼 bar updates live even while idle.
- *   - If an existing NON-maestro status line is registered, it is preserved into
- *     the chain file so the renderer shows it BENEATH the maestro line. --remove
- *     restores it as the sole status line.
+ *   - Installs the fixed host at ~/.claude/statusline-host.sh (checkout-
+ *     independent → every new tab/session picks it up, no reinstall) and drops
+ *     the maestro fragment ~/.claude/statuslines/10-maestro.cmd pointing at this
+ *     plugin's renderer.
+ *   - Because each plugin owns only its own fragment, installing/removing the
+ *     maestro bar never clobbers the work/follow-up/qc bars, and vice-versa.
  *   - Codex guard (design C4/§M): codex has no plugin statusline surface, so
  *     under AGENT_RUNTIME=codex every mode refuses cleanly (exit 0) and prints
  *     the tmux alternative instead of touching ~/.claude/settings.json.
  */
-const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const { detectRuntime } = require('../../../scripts/lib/runtime');
+const host = require('./lib/statusline-host');
+
+const FRAGMENT = '10-maestro.cmd';
 
 if (detectRuntime() === 'codex') {
   process.stdout.write(
@@ -37,96 +37,34 @@ if (detectRuntime() === 'codex') {
   process.exit(0);
 }
 
-const HOME = os.homedir();
-const SETTINGS = path.join(HOME, '.claude', 'settings.json');
-const CHAIN_FILE = path.join(HOME, '.cache', 'maestro', 'statusline-chain.cmd');
-
 function rendererPath() {
-  // Resolve relative to this file's own location so the registered command
-  // always points at this plugin's renderer, regardless of install layout.
+  // Resolve relative to this file so the fragment always points at this
+  // plugin's own renderer, regardless of install layout.
   // this file: <plugin>/skills/install/scripts/install-statusline.js
   return path.join(__dirname, '..', '..', 'lib', 'maestro-statusline.sh');
 }
 
-function readSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(SETTINGS, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-function writeSettings(obj) {
-  fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
-  fs.writeFileSync(SETTINGS, JSON.stringify(obj, null, 2) + '\n');
-}
-
-function block(cmd) {
-  return { type: 'command', command: cmd, padding: 0, refreshInterval: 3 };
-}
-
-function isMaestro(cmd) {
-  return typeof cmd === 'string' && cmd.includes('maestro-statusline.sh');
-}
-
 function print() {
-  const renderer = rendererPath();
-  const s = readSettings();
-  const cur = s.statusLine && s.statusLine.command;
-  let chain = null;
-  try {
-    chain = fs.readFileSync(CHAIN_FILE, 'utf8').trim();
-  } catch {
-    /* none */
-  }
-  console.log('renderer:      ' + renderer);
-  console.log('exists:        ' + fs.existsSync(renderer));
-  console.log('settings:      ' + SETTINGS);
-  console.log('current line:  ' + (cur || '(none)'));
-  console.log('registered:    ' + (isMaestro(cur) ? 'yes (maestro)' : 'no'));
-  console.log('chained line:  ' + (chain || '(none)'));
+  const s = host.state(FRAGMENT);
+  console.log('renderer:      ' + rendererPath());
+  console.log('host:          ' + s.hostPath + (s.hostExists ? '' : ' (MISSING)'));
+  console.log('current slot:  ' + s.currentSlot);
+  console.log('host active:   ' + (s.registered ? 'yes' : 'no'));
+  console.log('maestro frag:  ' + s.myTarget);
+  console.log('all fragments: ' + (s.allFragments.join(', ') || '(none)'));
 }
 
 function install() {
   const renderer = rendererPath();
-  const s = readSettings();
-  const existing = s.statusLine && s.statusLine.command;
-
-  // Preserve a non-maestro existing line so it renders beneath the maestro line.
-  if (existing && !isMaestro(existing)) {
-    fs.mkdirSync(path.dirname(CHAIN_FILE), { recursive: true });
-    fs.writeFileSync(CHAIN_FILE, existing + '\n');
-    console.log('chained existing status line: ' + existing);
-  }
-
-  s.statusLine = block(renderer);
-  writeSettings(s);
+  host.register(FRAGMENT, renderer);
   console.log('registered maestro status line -> ' + renderer);
-  console.log('each orchestrator session shows only the fleet it launched.');
-  console.log('run /reload-plugins or restart the statusLine refresh to see it.');
+  console.log('host owns the slot at ' + host.HOST_PATH + ' — new tabs pick it up automatically.');
+  console.log('run /reload-plugins or wait for the statusLine refresh to see it.');
 }
 
 function remove() {
-  const s = readSettings();
-  let restored = null;
-  try {
-    restored = fs.readFileSync(CHAIN_FILE, 'utf8').trim();
-  } catch {
-    /* none */
-  }
-  if (restored) {
-    s.statusLine = block(restored);
-    console.log('restored chained status line: ' + restored);
-  } else {
-    delete s.statusLine;
-    console.log('removed status line (no chained line to restore).');
-  }
-  writeSettings(s);
-  try {
-    fs.unlinkSync(CHAIN_FILE);
-  } catch {
-    /* none */
-  }
+  host.remove(FRAGMENT);
+  console.log('removed the maestro fragment (' + FRAGMENT + '); other bars untouched.');
 }
 
 const arg = process.argv[2];

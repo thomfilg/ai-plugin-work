@@ -51,19 +51,25 @@ Line format (one segment per actively-running follow-up in this worktree):
 🔄 follow-up #<pr> · <step> · <status · N/40 · ✅ ╎ 🔴 ╎ 💬>
 ```
 
-It is scoped to the session sitting in the PR's worktree, and **chains** any
-previously-registered status line (e.g. the maestro bar) beneath it.
+It is scoped to the session sitting in the PR's worktree, and registers through the
+**shared statusline host** (`~/.claude/statusline-host.sh`) that owns Claude Code's
+single statusLine slot and renders every bar (maestro 🎼, work ⚙, follow-up 🔄, qc 🔬).
+Installing only drops the follow-up **fragment** — it never clobbers the other bars,
+and the fixed host path means new tabs/sessions pick it up with no reinstall.
 
 ## Commands
 
 - **Install:** `node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up/statusline/install-followup-statusline.js"`
 - **Show resolved paths + current config:** `... install-followup-statusline.js --print`
-- **Remove (restore the chained line):** `... install-followup-statusline.js --remove`
+- **Remove (drop just the follow-up bar):** `... install-followup-statusline.js --remove`
 
 After installing, run `/reload-plugins` (or wait for the next refresh tick).
 
 ## How it fits together
 
+- **Host:** `~/.claude/statusline-host.sh` — the single registered statusLine; renders
+  every fragment under `~/.claude/statuslines/*.cmd` in filename order.
+- **Fragment:** `~/.claude/statuslines/30-followup.cmd` — one line, the path to this
+  plugin's renderer. Owned solely by the follow-up installer.
 - **Renderer:** `scripts/workflows/follow-up/statusline/followup-statusline.sh` → `followup-statusline.js`.
 - **Data source:** the plugin's existing `<TASKS_BASE>/<ticket>/.follow-up-state.json` + `.follow-up-orchestrator.pid` (no files created by the bar).
-- **Chain file:** `~/.cache/followup/statusline-chain.cmd` holds the prior status line command; the renderer runs it beneath the follow-up line.

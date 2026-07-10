@@ -44,20 +44,26 @@ topics disappear):
 🎼 <topic> <done>/<total>✓ ▶<active>(<ids>) ⏳<pending> ✅<pr-ready> ⚠<pr-broken>
 ```
 
-It **chains** any previously-registered status line (e.g. the qc calibration bar)
-beneath the maestro line, so installing this does not lose your existing one.
+It registers through the **shared statusline host** (`~/.claude/statusline-host.sh`),
+which owns Claude Code's single statusLine slot at a fixed, checkout-independent
+path and renders every registered bar (maestro 🎼, work ⚙, follow-up 🔄, qc 🔬).
+Installing only drops the maestro **fragment** — it never clobbers the other bars,
+and because the slot points at the fixed host, every new tab/session picks it up
+with no reinstall.
 
 ## Commands
 
 - **Install:** `node "$CLAUDE_PLUGIN_ROOT/skills/install/scripts/install-statusline.js"`
 - **Show resolved paths + current config:** `... install-statusline.js --print`
-- **Remove (restore the chained line):** `... install-statusline.js --remove`
+- **Remove (drop just the maestro bar):** `... install-statusline.js --remove`
 
 After installing, run `/reload-plugins` (or just wait for the next refresh tick).
 
 ## How it fits together
 
+- **Host:** `~/.claude/statusline-host.sh` — the single registered statusLine; renders
+  every fragment under `~/.claude/statuslines/*.cmd` in filename order.
+- **Fragment:** `~/.claude/statuslines/10-maestro.cmd` — one line, the path to this
+  plugin's renderer. Owned solely by the maestro installer.
 - **Renderer:** `skills/lib/maestro-statusline.sh` → calls `maestro-statusline.js`.
 - **Data source:** `~/.cache/maestro/sessions/*.json` (manifests) + `/tmp/maestro-alerts.jsonl`.
-- **Chain file:** `~/.cache/maestro/statusline-chain.cmd` holds the prior status
-  line command; the renderer appends its output beneath the maestro line.

@@ -75,7 +75,16 @@ describe('work-hook — dual runtime', () => {
   });
 
   function runHook(stdin, env = {}) {
-    const merged = { ...process.env, CLAUDE_PLUGIN_ROOT: fakeRoot, ...env };
+    // Disable the update-available banner so the plan stdout stays byte-identical
+    // to the fixture regardless of what version is published (the banner is
+    // prepended once per session when a newer version exists — a time-bomb for
+    // this assertion). WORK_DISABLE_UPDATE_CHECK is the documented opt-out.
+    const merged = {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: fakeRoot,
+      WORK_DISABLE_UPDATE_CHECK: '1',
+      ...env,
+    };
     for (const key of [
       'AGENT_RUNTIME',
       'AGENT_SESSION_ID',

@@ -3,21 +3,19 @@
 /**
  * install-work-statusline.js — register/remove the /work status bar.
  *
- *   (no args)   register work-statusline.sh as the Claude Code statusLine,
- *               preserving any existing bar (e.g. the follow-up bar) into the
- *               chain file so it renders BENEATH the work line
- *   --print     show resolved renderer path + current/chained config
- *   --remove    unregister and restore the chained bar
+ *   (no args)   register the work bar as a fragment under the shared host
+ *   --print     show resolved renderer path + current/host config
+ *   --remove    remove only the work fragment (other bars untouched)
  *
- * All settings.json / chain plumbing (and the codex guard) lives in the shared
+ * All host + settings.json plumbing (and the codex guard) lives in the shared
  * lib/statusline/install-statusline.js. Renderer path resolves from __dirname
  * (never process.env.CLAUDE_PLUGIN_ROOT).
  *
- * Install order for the full stack: maestro → follow-up → work, so the work bar
- * is outermost and chains follow-up (which chains maestro).
+ * Fragment order (filename sort) stacks the bars: maestro (10) → work (20) →
+ * follow-up (30) → qc (40), all rendered by the one host — no install-order
+ * dependency, no clobbering.
  */
 const path = require('path');
-const os = require('os');
 
 const { runStatuslineInstaller } = require('../../lib/statusline/install-statusline');
 
@@ -25,8 +23,7 @@ runStatuslineInstaller({
   mode: process.argv[2],
   label: 'work',
   renderer: path.join(__dirname, 'work-statusline.sh'),
-  rendererName: 'work-statusline.sh',
-  chainFile: path.join(os.homedir(), '.cache', 'work', 'statusline-chain.cmd'),
+  fragment: '20-work.cmd',
   codexNote:
     'On codex, /statusline configures built-in fields only and /status prints session\n' +
     'info — neither renders /work state. Watch it from the CLI instead:\n' +

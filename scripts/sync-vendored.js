@@ -77,6 +77,13 @@ const VENDOR_SETS = [
     master: 'factories/pathSafe',
     vendorDirs: ['plugins/heimdall/lib/pathSafe'],
   },
+  {
+    master: 'factories/statusline-host',
+    vendorDirs: [
+      'plugins/maestro/skills/install/scripts/lib',
+      'plugins/work/scripts/workflows/lib/statusline/host',
+    ],
+  },
 ];
 
 const BANNER_PREFIX = '// GENERATED — edit ';

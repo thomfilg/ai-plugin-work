@@ -73,21 +73,50 @@ describe('install-followup-statusline runtime guard', () => {
     assert.equal(fs.existsSync(settingsPath(home)), false);
   });
 
-  it('claude: registers the renderer exactly as before', async () => {
+  const hostPath = (home) => path.join(home, '.claude', 'statusline-host.sh');
+  const fragPath = (home, name) => path.join(home, '.claude', 'statuslines', name);
+
+  it('claude: installs the shared host and drops the follow-up fragment', async () => {
     const home = freshHome();
     const { code, stdout } = await runInstaller([], { home, runtime: 'claude' });
     assert.equal(code, 0, stdout);
-    assert.equal(stdout, `follow-up status bar registered -> ${RENDERER}\n`);
+    assert.match(stdout, /^follow-up status bar registered -> /);
+    // The single slot is the fixed host, not the renderer itself.
     const settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8'));
     assert.deepEqual(settings.statusLine, {
       type: 'command',
-      command: RENDERER,
+      command: hostPath(home),
       padding: 0,
       refreshInterval: 3,
     });
+    assert.equal(fs.existsSync(hostPath(home)), true);
+    assert.ok(fs.statSync(hostPath(home)).mode & 0o111, 'host is executable');
+    assert.equal(fs.readFileSync(fragPath(home, '30-followup.cmd'), 'utf8').trim(), RENDERER);
   });
 
-  it('claude: --remove restores a chained bar', async () => {
+  it('claude: --remove drops only the follow-up fragment, leaving other bars', async () => {
+    const home = freshHome();
+    await runInstaller([], { home, runtime: 'claude' });
+    fs.writeFileSync(fragPath(home, '10-maestro.cmd'), '/some/maestro.sh\n');
+    const { code, stdout } = await runInstaller(['--remove'], { home, runtime: 'claude' });
+    assert.equal(code, 0, stdout);
+    assert.match(stdout, /follow-up status bar removed/);
+    assert.equal(fs.existsSync(fragPath(home, '30-followup.cmd')), false);
+    assert.equal(fs.existsSync(fragPath(home, '10-maestro.cmd')), true);
+    const settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8'));
+    assert.equal(settings.statusLine.command, hostPath(home));
+  });
+
+  it('claude: --remove of the last fragment unregisters the host slot', async () => {
+    const home = freshHome();
+    await runInstaller([], { home, runtime: 'claude' });
+    const { code } = await runInstaller(['--remove'], { home, runtime: 'claude' });
+    assert.equal(code, 0);
+    const settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8'));
+    assert.equal(settings.statusLine, undefined);
+  });
+
+  it('claude: migrates a pre-existing non-host bar into a fragment (loses nothing)', async () => {
     const home = freshHome();
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(
@@ -95,10 +124,12 @@ describe('install-followup-statusline runtime guard', () => {
       `${JSON.stringify({ statusLine: { type: 'command', command: '/some/other-bar.sh' } })}\n`
     );
     await runInstaller([], { home, runtime: 'claude' });
-    const { code, stdout } = await runInstaller(['--remove'], { home, runtime: 'claude' });
-    assert.equal(code, 0, stdout);
-    assert.equal(stdout, 'follow-up status bar removed — restored /some/other-bar.sh\n');
     const settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8'));
-    assert.equal(settings.statusLine.command, '/some/other-bar.sh');
+    assert.equal(settings.statusLine.command, hostPath(home));
+    assert.equal(
+      fs.readFileSync(fragPath(home, '50-preexisting.cmd'), 'utf8').trim(),
+      '/some/other-bar.sh'
+    );
+    assert.equal(fs.existsSync(fragPath(home, '30-followup.cmd')), true);
   });
 });

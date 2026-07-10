@@ -56,26 +56,29 @@ Line format (one segment for the run owned by this session):
   **green** ≤ budget · **yellow** ≤ 2× budget · **red** > 2× budget.
 
 **Follow-up hand-off.** While the run is on the `follow_up` step the work line
-goes empty so the chained 🔄 follow-up bar is the only line shown; when the run
-advances to `ci` the work bar returns. The two are mutually exclusive by
-design, so installing both is safe.
+goes empty so the 🔄 follow-up bar is the only line shown; when the run advances
+to `ci` the work bar returns. The two are mutually exclusive by design, so
+installing both is safe.
 
 ## Commands
 
 - **Install:** `node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/statusline/install-work-statusline.js"`
 - **Show resolved paths + current config:** `... install-work-statusline.js --print`
-- **Remove (restore the chained line):** `... install-work-statusline.js --remove`
+- **Remove (drop just the work bar):** `... install-work-statusline.js --remove`
 
 After installing, run `/reload-plugins` (or wait for the next refresh tick).
 
-For the full stack, install **maestro → follow-up → work** in that order, so the
-work bar is outermost and chains follow-up (which chains maestro).
+Install any subset of **maestro → work → follow-up → qc** in any order — the
+shared host renders whatever is registered, stacked by fragment name (10/20/30/40).
 
 ## How it fits together
 
+- **Host:** `~/.claude/statusline-host.sh` — the single registered statusLine; renders
+  every fragment under `~/.claude/statuslines/*.cmd` in filename order.
+- **Fragment:** `~/.claude/statuslines/20-work.cmd` — one line, the path to this
+  plugin's renderer. Owned solely by the work installer.
 - **Renderer:** `scripts/workflows/work/statusline/work-statusline.sh` → `work-statusline.js`.
 - **Data source:** the engine's existing `<TASKS_BASE>/<ticket>/.work-state.json` + `.work.pid` (no files created by the bar).
-- **Chain file:** `~/.cache/work/statusline-chain.cmd` holds the prior status line command; the renderer runs it beneath the work line.
 
 ## Codex
 

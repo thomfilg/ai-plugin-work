@@ -10,6 +10,13 @@
 set -u
 set -o pipefail
 
+# Deterministic tests: suppress the "update available" banner suite-wide. The
+# banner prepends to hook stdout once per session when the published version is
+# newer than the checked-in plugin.json, which breaks byte-identical hook-output
+# assertions the moment a release is published (version skew). The dedicated
+# banner test re-enables it per-leg via `delete env.WORK_DISABLE_UPDATE_CHECK`.
+export WORK_DISABLE_UPDATE_CHECK=1
+
 SKIP_FILE=".test-skip"
 
 cleanup_test_artifacts() {

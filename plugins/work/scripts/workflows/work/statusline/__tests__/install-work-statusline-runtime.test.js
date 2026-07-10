@@ -64,38 +64,35 @@ describe('install-work-statusline runtime guard', () => {
     assert.equal(fs.existsSync(settingsPath(home)), false);
   });
 
-  it('claude: registers the renderer', async () => {
+  const hostPath = (home) => path.join(home, '.claude', 'statusline-host.sh');
+  const fragPath = (home, name) => path.join(home, '.claude', 'statuslines', name);
+
+  it('claude: installs the shared host and drops the work fragment', async () => {
     const home = freshHome();
     const { code, stdout } = await runInstaller([], { home, runtime: 'claude' });
     assert.equal(code, 0, stdout);
-    assert.equal(stdout, `work status bar registered -> ${RENDERER}\n`);
+    assert.match(stdout, /^work status bar registered -> /);
     const settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8'));
     assert.deepEqual(settings.statusLine, {
       type: 'command',
-      command: RENDERER,
+      command: hostPath(home),
       padding: 0,
       refreshInterval: 3,
     });
+    assert.equal(fs.existsSync(hostPath(home)), true);
+    assert.equal(fs.readFileSync(fragPath(home, '20-work.cmd'), 'utf8').trim(), RENDERER);
   });
 
-  it('claude: chains an existing (e.g. follow-up) bar, --remove restores it', async () => {
+  it('claude: co-exists with a sibling bar; --remove drops only the work fragment', async () => {
     const home = freshHome();
-    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    fs.writeFileSync(
-      settingsPath(home),
-      `${JSON.stringify({ statusLine: { type: 'command', command: '/some/followup-statusline.sh' } })}\n`
-    );
     await runInstaller([], { home, runtime: 'claude' });
-    // chained the prior bar
-    const chained = fs.readFileSync(
-      path.join(home, '.cache', 'work', 'statusline-chain.cmd'),
-      'utf8'
-    );
-    assert.equal(chained.trim(), '/some/followup-statusline.sh');
-    // --remove restores it as the sole bar
+    // A sibling bar (e.g. follow-up) registered its own fragment.
+    fs.writeFileSync(fragPath(home, '30-followup.cmd'), '/some/followup-statusline.sh\n');
     const { stdout } = await runInstaller(['--remove'], { home, runtime: 'claude' });
-    assert.equal(stdout, 'work status bar removed — restored /some/followup-statusline.sh\n');
+    assert.match(stdout, /work status bar removed/);
+    assert.equal(fs.existsSync(fragPath(home, '20-work.cmd')), false);
+    assert.equal(fs.existsSync(fragPath(home, '30-followup.cmd')), true);
     const settings = JSON.parse(fs.readFileSync(settingsPath(home), 'utf8'));
-    assert.equal(settings.statusLine.command, '/some/followup-statusline.sh');
+    assert.equal(settings.statusLine.command, hostPath(home));
   });
 });
