@@ -10,9 +10,9 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { findProtectedPathRefs, findProtectedTarget, resolvePathSafe } = require('./paths');
+const { findProtectedTarget, resolvePathSafe } = require('./paths');
 const { isReadOnlyBashCommand, bashTargets } = require('./bash');
-const { isReadOnlyTaskPrompt } = require('./task');
+const { promptSmugglesPhrase } = require('./task');
 const { findUnlockedPhrases, isEntryUnlocked } = require('./transcript');
 const { checkScriptBypass } = require('./scripts-bypass');
 const { shimPath, runsExternalScript, buildShimRewrite } = require('./fsguard');
@@ -141,17 +141,22 @@ function evaluateWrite(toolInput, entries, unlocked, ctx) {
 }
 
 function evaluateTask(toolInput, entries, unlocked, ctx) {
-  const combined = JSON.stringify(toolInput).slice(0, 20000);
-  const refs = findProtectedPathRefs(combined, entries);
-  if (refs.length === 0 || isReadOnlyTaskPrompt(combined)) return ALLOW;
-  // Block on the first referenced entry that is still locked — an unlocked
-  // entry must not green-light a prompt that also touches other locked ones.
-  for (const entry of refs) {
-    if (!isEntryUnlocked(entry, unlocked)) {
+  // GH-699: prose references to protected paths are ALLOWED — the subagent's
+  // own tool calls run under this same hook at act time on both runtimes, so
+  // blocking the description of work adds no protection over blocking the
+  // work itself. The only dispatch-time hazard is unlock-phrase smuggling
+  // (the prompt lands as a user-type record in the subagent transcript):
+  // scanned over the FULL input — no truncation, or padding past a slice
+  // boundary would hide the phrase. An entry the user has genuinely unlocked
+  // may be forwarded — that is the sanctioned delegate-an-unlocked-edit flow.
+  const combined = JSON.stringify(toolInput);
+  for (const entry of entries) {
+    if (isEntryUnlocked(entry, unlocked)) continue;
+    if (promptSmugglesPhrase(combined, entry.unlockPhrase)) {
       return block(
-        `Task prompt references protected path (${path.basename(entry.dir)})`,
+        `Task prompt contains the unlock phrase for a locked path (${path.basename(entry.dir)}) — only the user may type it`,
         entry,
-        'task-prompt ' + path.basename(entry.dir),
+        'task-prompt-phrase ' + path.basename(entry.dir),
         ctx
       );
     }
@@ -198,7 +203,7 @@ function evaluateBash(toolInput, entries, unlocked, ctx) {
 
   // Block on the first targeted entry still locked — a compound command may
   // write to several protected paths; one unlocked entry must not allow the rest.
-  for (const { entry, matchType } of bashTargets(command, entries)) {
+  for (const { entry, matchType } of bashTargets(command, entries, ctx)) {
     if (isEntryUnlocked(entry, unlocked)) continue;
     const matchContext =
       (matchType === 'absolute-path' ? 'bash-absolute-path-write ' : 'bash-write ') +
