@@ -15,11 +15,17 @@
 
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { transitionStep } = require(path.join(__dirname, '..', 'transition-step'));
+const { computeGateInputHashes, compareGateInputHashes } = require(
+  path.join(__dirname, '..', '..', 'lib', 'gate-input-hashes')
+);
 
 function makeStepRegistry() {
   const STEPS = {
@@ -57,7 +63,7 @@ function makeStepRegistry() {
   return { STEPS, ALL_STEPS, STEP_TRANSITIONS };
 }
 
-function makeDeps({ initialWs, savedRef }) {
+function makeDeps({ initialWs, savedRef, tasksBase }) {
   const { STEPS, ALL_STEPS, STEP_TRANSITIONS } = makeStepRegistry();
   return {
     tp: {
@@ -79,7 +85,7 @@ function makeDeps({ initialWs, savedRef }) {
       savedRef.ws = ws;
     },
     getCurrentStep: (ws) => ws.currentStep,
-    TASKS_BASE: '/tmp/tasks-gate-fingerprint',
+    TASKS_BASE: tasksBase || '/tmp/tasks-gate-fingerprint',
     softSteps: new Set(),
     commandMap: [],
     getHeadSha: () => null,
@@ -165,5 +171,97 @@ describe('transition-step gateFingerprints (GH-398 Task 7)', () => {
       0,
       `non-gate transition must not add fingerprints, got ${JSON.stringify(fps)}`
     );
+  });
+});
+
+describe('gateFingerprint input content hashes (GH-419)', () => {
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-fp-inputs-'));
+  after(() => {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  const sha256 = (content) => crypto.createHash('sha256').update(content).digest('hex');
+
+  function writeTicketFiles(ticket, files) {
+    const dir = path.join(tmpBase, ticket);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      fs.writeFileSync(path.join(dir, name), content);
+    }
+    return dir;
+  }
+
+  it('records sha256 of spec.md + gherkin.feature on spec_gate -> tasks', () => {
+    writeTicketFiles('TEST-710', {
+      'spec.md': 'spec body\n',
+      'gherkin.feature': 'Feature: x\n',
+    });
+    const savedRef = { ws: null };
+    const initialWs = makeInitialWs('spec_gate');
+    const deps = makeDeps({ initialWs, savedRef, tasksBase: tmpBase });
+
+    const result = transitionStep('TEST-710', 'tasks', deps);
+    assert.ok(result && result.success, `expected success, got ${JSON.stringify(result)}`);
+    const fp = savedRef.ws.gateFingerprints.spec_gate;
+    assert.ok(fp, 'fingerprint for spec_gate must exist');
+    assert.deepEqual(fp.inputs, {
+      'spec.md': sha256('spec body\n'),
+      'gherkin.feature': sha256('Feature: x\n'),
+    });
+  });
+
+  it('hashes missing input files as null without throwing (tasks_gate)', () => {
+    writeTicketFiles('TEST-711', { 'tasks.md': '- [ ] task 1\n' });
+    const savedRef = { ws: null };
+    const initialWs = makeInitialWs('tasks_gate');
+    const deps = makeDeps({ initialWs, savedRef, tasksBase: tmpBase });
+
+    const result = transitionStep('TEST-711', 'implement', deps);
+    assert.ok(result && result.success, `expected success, got ${JSON.stringify(result)}`);
+    const fp = savedRef.ws.gateFingerprints.tasks_gate;
+    assert.ok(fp, 'fingerprint for tasks_gate must exist');
+    assert.deepEqual(fp.inputs, {
+      'tasks.md': sha256('- [ ] task 1\n'),
+      'gherkin.feature': null,
+    });
+  });
+
+  it('records empty inputs for gates with no mapped input files (brief_gate)', () => {
+    const savedRef = { ws: null };
+    const initialWs = makeInitialWs('brief_gate');
+    const deps = makeDeps({ initialWs, savedRef, tasksBase: tmpBase });
+
+    const result = transitionStep('TEST-712', 'spec', deps);
+    assert.ok(result && result.success);
+    const fp = savedRef.ws.gateFingerprints.brief_gate;
+    assert.ok(fp, 'fingerprint for brief_gate must exist');
+    assert.deepEqual(fp.inputs, {}, 'unmapped gate must record empty inputs');
+  });
+
+  it('computeGateInputHashes returns null hashes when the tasks dir is missing', () => {
+    const res = computeGateInputHashes('spec_gate', path.join(tmpBase, 'no-such-dir'));
+    assert.deepEqual(res, { 'spec.md': null, 'gherkin.feature': null });
+  });
+
+  it('compareGateInputHashes reports match when hashes are identical', () => {
+    const recorded = { 'spec.md': 'aaa', 'gherkin.feature': 'bbb' };
+    const current = { 'spec.md': 'aaa', 'gherkin.feature': 'bbb' };
+    assert.deepEqual(compareGateInputHashes(recorded, current), { match: true, drifted: [] });
+  });
+
+  it('compareGateInputHashes detects drift per file', () => {
+    const recorded = { 'spec.md': 'aaa', 'gherkin.feature': 'bbb' };
+    const current = { 'spec.md': 'aaa', 'gherkin.feature': 'CHANGED' };
+    assert.deepEqual(compareGateInputHashes(recorded, current), {
+      match: false,
+      drifted: ['gherkin.feature'],
+    });
+  });
+
+  it('compareGateInputHashes treats legacy fingerprints without inputs as non-match, no throw', () => {
+    const current = { 'spec.md': 'aaa', 'gherkin.feature': 'bbb' };
+    const res = compareGateInputHashes(undefined, current);
+    assert.equal(res.match, false);
+    assert.deepEqual(res.drifted, ['gherkin.feature', 'spec.md']);
   });
 });
