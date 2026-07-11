@@ -115,7 +115,7 @@ Every entry under `## Open Questions` in the generated brief is emitted as a str
 
 Between the `brief` step and the `spec` step, the workflow runs a `brief_gate` check over the brief's Open Questions:
 
-- Unresolved questions with `scope: cross-ticket` or `scope: architectural` **block** the transition from brief to spec. The planner emits a `RUN` action that prompts you interactively via `AskUserQuestion`; your answer is written back into the brief as a `Resolution:` line and the question is flipped to `resolved: true`. The gate re-runs until no blocking questions remain.
+- Unresolved questions with `scope: cross-ticket` or `scope: architectural` **block** the transition from brief to spec. The planner emits a `RUN` action that prompts you interactively via `AskUserQuestion`; your answer is written back into the brief as a `Resolution:` line and the question is flipped to `resolved: true`. The gate re-runs until no blocking questions remain. When more than 4 blocking questions exist, the gate presents them in batches of at most 4 (the AskUserQuestion per-call cap) and answers persist per batch, so an interrupted session resumes at the first unanswered batch.
 - Unresolved questions with `scope: local` **do not block** the gate. They are clarifications that do not affect sibling tickets or architecture, so they can carry forward into spec and be resolved in context.
 
 If a question was mis-classified at emission time, you can downgrade it to `local` with a written justification (or upgrade it) by editing the brief directly before re-running the gate.

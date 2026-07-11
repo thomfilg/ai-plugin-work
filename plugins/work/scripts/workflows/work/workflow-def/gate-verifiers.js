@@ -40,8 +40,12 @@ function verifyBootstrap(deps, ticketId) {
 /**
  * GH-215: Helper for STEPS.brief_gate verify. Returns true iff brief.md
  * exists for `ticketId` AND openQuestions.findBlocking(parse(brief)) is
- * empty. Fail-closed on any read/parse error — we never claim verified
- * unless we can prove it.
+ * empty AND (GH-543) every `## Out of scope (sibling-owned)` entry has a
+ * recorded sibling-gap decision — fail-closed consistency with
+ * steps/brief-gate.js, which stays RUN while gaps are undecided. Legacy
+ * briefs without that section yield zero unresolved gaps, so nothing
+ * retroactively blocks. Fail-closed on any read/parse error — we never
+ * claim verified unless we can prove it.
  * @param {GateDeps} deps
  */
 function verifyBriefGate(deps, ticketId) {
@@ -49,9 +53,13 @@ function verifyBriefGate(deps, ticketId) {
     const briefPath = path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId), 'brief.md');
     if (!fs.existsSync(briefPath)) return false;
     const openQuestions = require(path.join(deps.workRoot, 'lib', 'open-questions'));
+    const { findUnresolvedSiblingGaps } = require(
+      path.join(deps.workRoot, '..', 'lib', 'brief-sibling-gaps')
+    );
     const markdown = fs.readFileSync(briefPath, 'utf-8');
     const blocking = openQuestions.findBlocking(openQuestions.parse(markdown));
-    return Array.isArray(blocking) && blocking.length === 0;
+    if (!Array.isArray(blocking) || blocking.length !== 0) return false;
+    return findUnresolvedSiblingGaps(markdown).unresolved.length === 0;
   } catch {
     return false;
   }

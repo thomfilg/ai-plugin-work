@@ -1,11 +1,11 @@
 /**
- * Brief-gate step enrichment.
+ * Brief-gate step enrichment — INJECTOR ONLY (GH-543).
  *
- * When there are cross-ticket/user questions → returns a blocked instruction
- * that forces the orchestrator to stop and ask the user directly.
- * The agent CANNOT answer cross-ticket questions on its own.
- *
- * When there are only local questions → auto-passes (resolved during spec).
+ * Owns Gate 0 (related-tickets manifest validation) and Gate A (sibling-gap
+ * question injection into `askUserQuestionPayload`). Question DELIVERY —
+ * local/user routing, the blocked instruction, and batching to the
+ * AskUserQuestion 4-question cap — lives in ./question-router.js, which
+ * registers after this injector (see ./index.js).
  */
 
 'use strict';
@@ -64,43 +64,6 @@ function buildRelatedTicketsBlocker(ticket, tasksDir, pathMod, fs, providerConfi
   };
 }
 
-/**
- * Blocked instruction for cross-ticket/user questions (GH-543 file
- * transport): answers travel via a consume-once JSON envelope file, so
- * quotes/backticks/newlines in an answer can never break (or execute on) a
- * shell command line the way the old inline '<JSON_MAP>' argv did.
- */
-function buildUserQuestionsBlocker(userQs, localQs, briefPath, ctx) {
-  const { tasksDir, workDir, path: pathMod } = ctx;
-  const answersPath = pathMod.join(tasksDir, '.brief-gate-answers.json');
-  const applyCliPath = pathMod.join(workDir, 'scripts', 'apply-brief-gate-answers.js');
-  return {
-    type: 'work_instruction',
-    action: 'blocked',
-    reason: 'brief_gate requires user input for cross-ticket questions',
-    userQuestions: userQs.map((q, i) => ({
-      index: i + 1,
-      question: q.questionText,
-      rationale: q.rationale || '',
-      scope: q.scope,
-      // Envelope routing keys (GH-543). Questions from producers that
-      // predate tagging default to the open-question lane.
-      kind: q.kind || 'open-question',
-      applyKey: q.applyKey || q.questionText,
-      ...(Array.isArray(q.options) ? { options: q.options } : {}),
-    })),
-    localQuestions: localQs.map((q) => q.questionText),
-    applyCommand: `node "${applyCliPath}" "${briefPath}"`,
-    hint:
-      `Ask the userQuestions, then Write the answers to ${answersPath} as a JSON envelope ` +
-      `routed by each question's kind: {"openQuestions": {"<applyKey>": "<answer>", ...}, ` +
-      `"siblingGaps": [{"surface": "<applyKey>", "decision": "implement-here|wait-for-sibling"}, ...], ` +
-      `"discrepancies": [{"claim": "<applyKey>", "decision": "<answer>"}, ...]}. ` +
-      'Then run the applyCommand (it persists every kind into brief.md and consumes the ' +
-      'answers file on full apply) and re-run work-next.js after.',
-  };
-}
-
 module.exports = function registerBriefGate(register) {
   register('brief_gate', (entry, ctx) => {
     const { tasksDir, ticket, workDir, path, fs } = ctx;
@@ -125,46 +88,8 @@ module.exports = function registerBriefGate(register) {
     }
 
     // Gate A — surface unresolved sibling-gap entries from the brief as
-    // user-scoped questions BEFORE the open-question routing below decides
-    // whether to block.
+    // user-scoped questions BEFORE the question-router (registered after
+    // this injector) decides whether to block.
     _injectSiblingGapQuestions(entry, ctx);
-
-    if (!entry.askUserQuestionPayload) return;
-
-    const questions = entry.askUserQuestionPayload.questions || [];
-    if (questions.length === 0) return;
-
-    const localQs = questions.filter((q) => q.scope === 'local');
-    const userQs = questions.filter((q) => q.scope !== 'local');
-    const briefGatePath = path.join(workDir, 'steps', 'brief-gate.js');
-    const briefPath = path.join(tasksDir, 'brief.md');
-
-    // Only local questions — non-blocking, resolved during spec phase
-    if (userQs.length === 0) {
-      const lines = ['## brief_gate: Local Questions (non-blocking)\n'];
-      lines.push(
-        'These questions will be answered by the spec-writer when it analyzes the codebase.'
-      );
-      lines.push('No action needed — the gate passes automatically.\n');
-      localQs.forEach((q, i) => {
-        lines.push(`${i + 1}. "${q.questionText}" → deferred to spec`);
-      });
-      entry.agentPrompt = lines.join('\n');
-      return;
-    }
-
-    // Cross-ticket/user questions — MUST ask the user, not delegate to agent
-    // Override the delegate type to force a blocked instruction
-    entry.agentType = 'Bash';
-    entry.agentPrompt = 'echo "brief_gate: waiting for user answers"';
-
-    // Store the questions and paths for the orchestrator to use
-    entry._briefGateUserQuestions = userQs;
-    entry._briefGateLocalQuestions = localQs;
-    entry._briefGatePath = briefGatePath;
-    entry._briefPath = briefPath;
-
-    // Return a blocked instruction instead — the orchestrator must ask the user
-    entry._overrideInstruction = buildUserQuestionsBlocker(userQs, localQs, briefPath, ctx);
   });
 };

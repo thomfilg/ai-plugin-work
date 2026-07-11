@@ -83,10 +83,25 @@ const BRIEF_BLOCKING = [
   '',
 ].join('\n');
 
-function runBriefGate() {
+// GH-543: 5 blocking questions — one over the AskUserQuestion 4-cap.
+const BRIEF_BLOCKING_FIVE = [
+  '# Brief',
+  '',
+  '## Open Questions',
+  '',
+  ...[1, 2, 3, 4, 5].flatMap((i) => [
+    `- **Question:** Which backend should service ${i} adopt?`,
+    '  - `scope: architectural`',
+    '  - `rationale: affects all downstream services`',
+    '  - `resolved: false`',
+    '',
+  ]),
+].join('\n');
+
+function runBriefGate(brief = BRIEF_BLOCKING) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qgate-rt-'));
   createdDirs.push(dir);
-  fs.writeFileSync(path.join(dir, 'brief.md'), BRIEF_BLOCKING, 'utf8');
+  fs.writeFileSync(path.join(dir, 'brief.md'), brief, 'utf8');
   const { add, entries } = makeAdd();
   briefGateStep(add, { hasBrief: true }, { STEPS, ticket: 'TEST-1', tasksDir: dir, path });
   return entries[0];
@@ -101,6 +116,22 @@ describe('brief-gate question site', () => {
       entry.agentPrompt,
       'Use AskUserQuestion to resolve 1 unresolved open question(s) in brief.md, then call applyBriefResolutions() to persist the answers.'
     );
+  });
+
+  it('claude: >4-question prompt gains the batching suffix (GH-543)', () => {
+    pin('claude');
+    const entry = runBriefGate(BRIEF_BLOCKING_FIVE);
+    assert.equal(
+      entry.agentPrompt,
+      'Use AskUserQuestion to resolve 5 unresolved open question(s) in brief.md (in batches of at most 4), then call applyBriefResolutions() to persist the answers.'
+    );
+  });
+
+  it('codex exec: parked notice stays terminal even with the batching suffix (GH-543)', () => {
+    pin('codex', 'exec');
+    const entry = runBriefGate(BRIEF_BLOCKING_FIVE);
+    assert.ok(entry.agentPrompt.endsWith(PARKED_NOTICE));
+    assert.match(entry.agentPrompt, /\(in batches of at most 4\)/);
   });
 
   it('codex interactive: plain-chat numbered-options prose, no parked notice', () => {
