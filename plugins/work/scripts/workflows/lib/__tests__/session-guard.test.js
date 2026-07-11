@@ -11,7 +11,9 @@ const assert = require('node:assert/strict');
 const { spawnHook } = require('./_helpers/run-hook');
 
 const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'session-guard.js');
-const SESSION_DIR = path.join(require('os').tmpdir(), 'session-guard-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) —
+// never write directly into the shared os.tmpdir() (insecure-temporary-file).
+const SESSION_DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'session-guard-test-'));
 const TEST_TICKET = 'TEST-999';
 const TEST_WORKFLOW = '/work';
 
