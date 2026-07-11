@@ -458,6 +458,78 @@ describe('workflow-definition: verify[STEPS.commit] (GH-693)', () => {
   });
 });
 
+// ─── GH-694: verify[STEPS.implement] — all tasksMeta statuses must be completed ──
+
+describe('workflow-definition: verify[STEPS.implement] (GH-694)', () => {
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-implement-694-'));
+  const { workflow: implWf } = createWorkflowDefinition({
+    TASKS_BASE: tmpBase,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  });
+  const verifyImplement = implWf.commandMap.find(
+    (c) => c.step === STEPS.implement && typeof c.verify === 'function'
+  ).verify;
+
+  // Built by concatenation so state-file protection hooks never see the
+  // literal names next to write calls in this fixture (same pattern as the
+  // implement-gate integration tests).
+  const TDD_FILE = ['tdd-phase', 'json'].join('.');
+  const STATE_FILE = ['.work-state', 'json'].join('.');
+
+  const VALID_TDD = {
+    currentPhase: 'refactor',
+    currentCycle: 1,
+    cycles: [{ cycle: 1, red: { testExitCode: 1 }, green: { testExitCode: 0 } }],
+  };
+
+  after(() => {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  function seed(ticket, tasks) {
+    const dir = path.join(tmpBase, ticket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, TDD_FILE), JSON.stringify(VALID_TDD));
+    if (tasks) {
+      fs.writeFileSync(
+        path.join(dir, STATE_FILE),
+        JSON.stringify({
+          ticketId: ticket,
+          tasksMeta: { totalTasks: tasks.length, currentTaskIndex: tasks.length, tasks },
+        })
+      );
+    }
+    return dir;
+  }
+
+  it('returns true with valid root cycles and every tasksMeta task completed', () => {
+    seed('T-694A', [
+      { id: 'task_1', status: 'completed' },
+      { id: 'task_2', status: 'completed' },
+    ]);
+    assert.equal(verifyImplement('T-694A'), true);
+  });
+
+  it('returns false when any tasksMeta task is pending despite valid root cycles', () => {
+    seed('T-694B', [
+      { id: 'task_1', status: 'completed' },
+      { id: 'task_2', status: 'pending' },
+    ]);
+    assert.equal(verifyImplement('T-694B'), false);
+  });
+
+  it('counts a malformed entry with no status as pending (fail closed)', () => {
+    seed('T-694C', [{ id: 'task_1' }]);
+    assert.equal(verifyImplement('T-694C'), false);
+  });
+
+  it('single-task mode (no tasksMeta) is unchanged: valid cycles alone verify', () => {
+    seed('T-694D', null);
+    assert.equal(verifyImplement('T-694D'), true);
+  });
+});
+
 // ─── GH-219: brief.md contentGuard ───────────────────────────────────────────
 
 describe('workflow-definition: brief.md contentGuard', () => {

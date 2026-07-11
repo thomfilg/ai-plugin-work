@@ -41,6 +41,10 @@ const { detectRedLoadFailure, extractLoadFailureSnippet } = require('../lib/red-
 // GREEN_EMPTY_MSG), armed per-Type by the SAME gateContractFor().rcdEmptyTrap
 // flag the recorder's --docs-exempt path honors (active-task.js).
 const { isEmptyTestOutput } = require('./record-helpers');
+// GH-694 — the recorder's exact tests-only "declared test files actually
+// changed" rule (GH-528), shared via the extracted module so the gate and
+// task-next.js can never drift (unification invariant).
+const { detectChangedTestFilesInScope } = require('../lib/changed-test-files');
 const { gateContractFor } = require(
   path.join(__dirname, '..', '..', '..', '..', 'skills', 'split-in-tasks', 'lib', 'task-types')
 );
@@ -208,6 +212,38 @@ function gateEmptyOutputRejection(p) {
 }
 
 /**
+ * GH-694 rejection: a Type=tests-only GREEN whose in-scope test files are all
+ * byte-identical to HEAD proves nothing — the GH-689 gate recorded GREEN by
+ * re-running an untouched pre-existing suite while the task's actual
+ * deliverable never existed. NOT a planner defect: the rejection flows into
+ * the existing dispatch-retry and the developer fixes it by writing the
+ * declared tests. Audited as `tdd-green-tests-only-unchanged-rejected`.
+ */
+function gateTestsOnlyUnchangedRejection(p) {
+  appendGateAudit(p.tasksBase, p.ticketId, {
+    origin: 'workflow',
+    task: p.taskNum || null,
+    phase: 'green',
+    action: 'tdd-green-tests-only-unchanged-rejected',
+    allow: false,
+    reason: 'tests-only-no-changed-test-files',
+    outputPath: null,
+    meta: { testCommand: p.cmd, taskType: p.taskType || null, capturedByGate: true },
+  });
+  return {
+    rejected: true,
+    kind: 'tests-only-unchanged',
+    reason:
+      'Type=tests-only GREEN requires at least one declared in-scope ' +
+      '*.test.* / *.spec.* file modified vs HEAD — running an unchanged ' +
+      `pre-existing suite is not evidence (task ${p.taskNum}). Write the ` +
+      'tests the task declares, then re-run. Note: committing the test ' +
+      'files mid-implement also empties this diff (detection is vs HEAD, ' +
+      'recorder parity per GH-528).',
+  };
+}
+
+/**
  * Atomically persist prebuilt GREEN-augmented evidence (built by the gate's
  * `buildGreenEvidence`). Defensively rejects a timed-out run — a hang is not
  * a pass — mirroring the recorder-side W5 policy. Applies the recorder's
@@ -218,9 +254,16 @@ function gateEmptyOutputRejection(p) {
  * mechanical-refactor, unknown → fail closed) refuses a zero-output exit-0
  * GREEN instead of recording it.
  *
+ * GH-694: tests-only GREENs additionally require a changed in-scope test
+ * file (the recorder's GH-528 rule, via the SAME shared function). On
+ * success the changed set is stamped as `green.testsOnlyChangedFiles`
+ * (audit-only field — validateTddEvidenceForType deliberately does NOT
+ * check it, so pre-change gate evidence keeps validating).
+ *
  * @param {object} p - { tasksBase, ticketId, taskNum, evidencePath, evidence,
- *                       cmd, output?, taskType?, timedOut?, timeoutMs? }
- * @returns {{ written: true } | { rejected: true, kind: 'hang'|'empty-output', reason: string, plannerDefect: true }}
+ *                       cmd, output?, taskType?, workingDir?, scope?,
+ *                       timedOut?, timeoutMs? }
+ * @returns {{ written: true } | { rejected: true, kind: 'hang'|'empty-output'|'tests-only-unchanged', reason: string, plannerDefect?: true }}
  */
 function writeGateGreen(p) {
   if (p.timedOut) {
@@ -229,6 +272,16 @@ function writeGateGreen(p) {
   const contract = gateContractFor(p.taskType);
   if (contract.rcdEmptyTrap && isEmptyTestOutput(String(p.output ?? ''), '')) {
     return gateEmptyOutputRejection(p);
+  }
+  if (contract.kind === 'tests-only') {
+    const changedTestFiles = detectChangedTestFilesInScope(p.workingDir, p.scope);
+    if (changedTestFiles.length === 0) {
+      return gateTestsOnlyUnchangedRejection(p);
+    }
+    const greenCycle = Array.isArray(p.evidence?.cycles)
+      ? p.evidence.cycles.find((c) => c && c.green)
+      : null;
+    if (greenCycle) greenCycle.green.testsOnlyChangedFiles = changedTestFiles;
   }
   writeStateAtomic(p.evidencePath, p.evidence);
   return { written: true };
