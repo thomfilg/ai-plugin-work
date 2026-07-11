@@ -6,11 +6,10 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { TASK_REVIEW_PHASES } = require('../../task-review-phase-registry');
+const { writePhaseContext } = require('../../../lib/write-phase-context');
 
 let taskReviewGate;
 try {
@@ -64,21 +63,12 @@ function computeDiff(ctx) {
 }
 
 function writeContext(ctx, diff, files) {
-  const p = path.join(ctx.tasksDir, 'task-review-context.json');
-  const payload = {
+  writePhaseContext(ctx.tasksDir, 'task-review-context.json', files, {
     ticket: ctx.ticket,
     base: diff.base,
     head: diff.head,
     fallback: !!diff.fallback,
-    fileCount: files.length,
-    files,
-    capturedAt: new Date().toISOString(),
-  };
-  try {
-    fs.writeFileSync(p, JSON.stringify(payload, null, 2));
-  } catch {
-    /* hook-gated; non-fatal */
-  }
+  });
 }
 
 function validate(ctx) {

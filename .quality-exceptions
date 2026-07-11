@@ -119,7 +119,6 @@ plugins/work/scripts/workflows/check/scripts/write-completion-report.js
 plugins/work/scripts/workflows/work-ci/lib/phases/wait_merge.js
 plugins/work/scripts/workflows/work-completion-checker/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/work-task-review/lib/phases/kind_checks.js
-plugins/work/scripts/workflows/work-task-review/lib/phases/diff_audit.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/shared.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/work-ci/lib/phases/rerun_check.js

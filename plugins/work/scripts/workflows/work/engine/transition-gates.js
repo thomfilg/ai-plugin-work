@@ -192,7 +192,7 @@ function gateCommitsAhead(baseBranch) {
 function commitEvidenceGate(ctx) {
   const { currentStep, targetStep, isForward, deps } = ctx;
   const gated = currentStep === deps.STEPS.commit || currentStep === deps.STEPS.task_review;
-  if (!isForward || !gated || currentStep === targetStep) return null;
+  if (!isForward || !gated) return null;
   const baseBranch = resolveGateBase();
   let count;
   try {

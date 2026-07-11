@@ -122,15 +122,15 @@ function computeTaskDiff(tasksDir, ticketId) {
       return { base: rawContent, head: 'HEAD' };
     }
     process.stderr.write(
-      `task-review-gate: SHA ${rawContent.slice(0, 8)}... is not an ancestor of HEAD for ${ticketId}, falling back to base branch\n`
+      `task-review-gate: SHA ${rawContent.slice(0, 8)}... is not an ancestor of HEAD for ${ticketId}, checking commits ahead of base\n`
     );
   } else if (rawContent) {
     process.stderr.write(
-      `task-review-gate: Invalid SHA format in ${LAST_COMMIT_SHA_FILE} for ${ticketId}, falling back to base branch\n`
+      `task-review-gate: Invalid SHA format in ${LAST_COMMIT_SHA_FILE} for ${ticketId}, checking commits ahead of base\n`
     );
   } else {
     process.stderr.write(
-      `task-review-gate: No ${LAST_COMMIT_SHA_FILE} found for ${ticketId}, falling back to base branch\n`
+      `task-review-gate: No ${LAST_COMMIT_SHA_FILE} found for ${ticketId}, checking commits ahead of base\n`
     );
   }
 
