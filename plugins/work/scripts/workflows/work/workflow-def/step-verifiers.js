@@ -114,9 +114,33 @@ function checkTddException(state, workRoot) {
 }
 
 /**
+ * GH-694: in multi-task mode, implement is only proven when EVERY tasksMeta
+ * task has status 'completed' — the hook-side evidence path previously never
+ * read tasksMeta, so implement could verify with unsatisfied tasks (the
+ * GH-689 task_4 dangle). Statuses only, no per-task evidence re-walk:
+ * evidence was already validated at advance time by the ONE shared validator
+ * (re-validating here risks the echo-4552 infinite-retry class). Malformed or
+ * missing-status entries count as pending (fail closed); a missing/unreadable
+ * .work-state.json or absent tasksMeta is single-task mode — unchanged.
+ */
+function tasksMetaAllCompleted(deps, ticketId) {
+  let tasks;
+  try {
+    const ws = JSON.parse(
+      fs.readFileSync(path.join(ticketDir(deps, ticketId), '.work-state.json'), 'utf-8')
+    );
+    tasks = ws?.tasksMeta?.tasks;
+  } catch {
+    return true; // single-task mode / no state file — today's behavior
+  }
+  if (!Array.isArray(tasks)) return true;
+  return tasks.every((t) => t && t.status === 'completed');
+}
+
+/**
  * tasks step gating is orchestrator-controlled via DEFER/RUN plan actions.
  * Implement is proven if tdd-phase.json has at least one cycle with red +
- * green evidence.
+ * green evidence AND (GH-694) every tasksMeta task is completed.
  * @param {StepDeps} deps
  */
 function verifyImplement(deps, ticketId) {
@@ -124,11 +148,18 @@ function verifyImplement(deps, ticketId) {
     const state = JSON.parse(
       fs.readFileSync(path.join(ticketDir(deps, ticketId), 'tdd-phase.json'), 'utf-8')
     );
+    let tddProven;
     const exception = checkTddException(state, deps.workRoot);
-    if (exception !== null) return exception;
-    if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
-    // At least one cycle must have both red and green evidence
-    return state.cycles.some((c) => c.red && c.green);
+    if (exception !== null) {
+      tddProven = exception;
+    } else if (!Array.isArray(state.cycles) || state.cycles.length === 0) {
+      tddProven = false;
+    } else {
+      // At least one cycle must have both red and green evidence
+      tddProven = state.cycles.some((c) => c.red && c.green);
+    }
+    if (!tddProven) return false;
+    return tasksMetaAllCompleted(deps, ticketId);
   } catch {
     return false;
   }
