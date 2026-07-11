@@ -16,6 +16,7 @@ const path = require('path');
 const { parseReportStatus } = require(
   path.join(__dirname, '..', '..', 'lib', 'parse-report-status')
 );
+const { phaseLedgerBlocked } = require(path.join(__dirname, '..', 'lib', 'phase-ledger'));
 
 // Report-type mapping for the parse-report-status fallback (echo-5219: reviewer
 // agents emit prose verdicts like "## Overall Assessment: ✅ Well-Implemented"
@@ -272,6 +273,19 @@ function inspect(ticket, providerConfig, suffix, deps) {
   s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
   s.hasGherkin = fileExists(path.join(s.tasksDir, 'gherkin.feature'));
   s.hasTasks = fileExists(path.join(s.tasksDir, 'tasks.md'));
+
+  // GH-696: inner phase-ledger resume signals for the plan matrix — a step
+  // whose artifact exists but whose *-phase.json is non-terminal needs its
+  // writer agent re-dispatched (the runner resumes from the recorded phase).
+  const briefLedger = phaseLedgerBlocked(s.tasksDir, 'brief');
+  const specLedger = phaseLedgerBlocked(s.tasksDir, 'spec');
+  const tasksLedger = phaseLedgerBlocked(s.tasksDir, 'tasks');
+  s.briefPhaseMidFlight = briefLedger.blocked;
+  s.briefPhase = briefLedger.currentPhase;
+  s.specPhaseMidFlight = specLedger.blocked;
+  s.specPhase = specLedger.currentPhase;
+  s.tasksPhaseMidFlight = tasksLedger.blocked;
+  s.tasksPhase = tasksLedger.currentPhase;
 
   // Dev session
   s.hasDevSession = run(`tmux has-session -t "${ticket}-dev" 2>/dev/null && echo yes`) === 'yes';

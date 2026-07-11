@@ -153,14 +153,27 @@ function normalizeHookPayload(raw, opts = {}) {
 
 /**
  * Whether the event fired inside a subagent. Claude: transcript under
- * /subagents/ or CLAUDE_CURRENT_AGENT set. Codex: payload agent identity
- * (agent_id/agent_type present when inside a subagent — ground truth §2.5.1).
+ * /subagents/, raw payload agent identity, or CLAUDE_CURRENT_AGENT set.
+ * Codex: payload agent identity (agent_id/agent_type present when inside a
+ * subagent — ground truth §2.5.1).
+ *
+ * GH-696: the claude leg reads the RAW payload (evt.native), NOT the
+ * env-folded evt.agent.type — resolveAgent folds in CLAUDE_AGENT_TYPE/
+ * CLAUDE_CURRENT_AGENT, which can leak via tmux global env and would
+ * permanently mute auto-advance in a main session.
  */
 function isSubagentContext(evt) {
   if (!evt || typeof evt !== 'object') return false;
   if (evt.runtime === 'codex') return Boolean(evt.agent && (evt.agent.id || evt.agent.type));
+  return isClaudeSubagentContext(evt);
+}
+
+/** Claude leg of isSubagentContext — see the GH-696 note above. */
+function isClaudeSubagentContext(evt) {
+  const native = asObject(evt.native) || {};
   return (
     (typeof evt.transcriptPath === 'string' && evt.transcriptPath.includes('/subagents/')) ||
+    Boolean(str(native.agent_type) || str(native.agent_id)) ||
     Boolean(process.env.CLAUDE_CURRENT_AGENT)
   );
 }

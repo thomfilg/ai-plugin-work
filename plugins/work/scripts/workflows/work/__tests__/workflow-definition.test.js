@@ -280,6 +280,22 @@ describe('workflow-definition: verify[STEPS.brief_gate]', () => {
       fs.rmdirSync(briefPath);
     }
   });
+
+  // GH-696: the gate must not satisfy while the brief runner's inner ledger
+  // is mid-flight, even when brief.md itself validates.
+  it('returns false while brief-phase.json is mid-flight, true once terminal (GH-696)', () => {
+    writeBrief('# Brief\n\nNo open questions.\n');
+    const ledgerPath = path.join(ticketDir, 'brief-phase.json');
+    try {
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'draft' }), 'utf-8');
+      const verify = getBriefGateVerify();
+      assert.equal(verify(ticketId), false);
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'done' }), 'utf-8');
+      assert.equal(verify(ticketId), true);
+    } finally {
+      fs.rmSync(ledgerPath, { force: true });
+    }
+  });
 });
 
 // ─── GH-211 Task 6: task_review verify entry + softSteps ─────────────────────
@@ -843,6 +859,23 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
     );
     const verify = getSpecGateVerify();
     assert.equal(verify(ticketId), false);
+  });
+
+  // GH-696: spec_gate satisfiedAt landed ~3s into the in-flight spec agent's
+  // timeline on GH-689 — the gate must wait for the inner ledger's terminal.
+  it('returns false while spec-phase.json is mid-flight, true once terminal (GH-696)', () => {
+    writeSpec('# Spec\n');
+    writeGherkin('<!-- gherkin-skip: fixture -->\nFeature: F\n');
+    const ledgerPath = path.join(ticketDir, 'spec-phase.json');
+    try {
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'surface_audit' }), 'utf-8');
+      const verify = getSpecGateVerify();
+      assert.equal(verify(ticketId), false);
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'done' }), 'utf-8');
+      assert.equal(verify(ticketId), true);
+    } finally {
+      fs.rmSync(ledgerPath, { force: true });
+    }
   });
 });
 

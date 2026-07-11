@@ -3,9 +3,11 @@
  * Generates the technical specification from the brief and codebase analysis.
  *
  * Decision matrix:
- *   1. hasSpec=true                                        → DEFER (artifact already present)
- *   2. hasSpec=false, brief.md on disk OR hasBrief=false   → RUN with briefRef path in prompt
- *   3. hasSpec=false, brief.md NOT on disk AND hasBrief=true → RUN without briefRef
+ *   1. hasSpec=true, ledger terminal/absent               → DEFER (artifact already present)
+ *   2. hasSpec=true, ledger mid-flight                    → RUN  (GH-696: re-dispatch the
+ *      spec-writer — spec-next.js resumes from the recorded phase)
+ *   3. hasSpec=false, brief.md on disk OR hasBrief=false   → RUN with briefRef path in prompt
+ *   4. hasSpec=false, brief.md NOT on disk AND hasBrief=true → RUN without briefRef
  *
  * @param {Function} add
  * @param {object} s
@@ -16,8 +18,19 @@ module.exports = function specStep(add, s, ctx) {
   const briefPath = path.join(tasksDir, 'brief.md');
   const specPath = path.join(tasksDir, 'spec.md');
 
-  if (s?.hasSpec) {
+  if (s?.hasSpec && !s.specPhaseMidFlight) {
     add(STEPS.spec, 'DEFER', null, 'spec.md already exists');
+  } else if (s?.hasSpec && s.specPhaseMidFlight) {
+    add(
+      STEPS.spec,
+      'RUN',
+      'Task(spec-writer)',
+      `spec.md exists but spec-phase.json is mid-flight at "${s.specPhase}" — resume the spec runner`,
+      {
+        agentType: 'spec-writer',
+        agentPrompt: `Resume the technical specification for ticket ${t}: spec.md exists at ${specPath} but the inner phase ledger spec-phase.json is at "${s.specPhase}" (not "done").\n\n**Run \`node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-spec/spec-next.js ${t}\` and follow its instructions** — it resumes from the recorded phase and drives the remaining phases (… → validate → memorize → kind_checks → done). Do NOT edit spec-phase.json directly.${getDocsPrompt('READ_DOCS_ON_SPEC')}`,
+      }
+    );
   } else {
     const briefRef =
       fileExists(briefPath) || !s?.hasBrief ? `\n\nRead the product brief at: ${briefPath}` : '';

@@ -50,8 +50,14 @@ function verifyBootstrap(deps, ticketId) {
  */
 function verifyBriefGate(deps, ticketId) {
   try {
-    const briefPath = path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId), 'brief.md');
+    const ticketDir = path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId));
+    const briefPath = path.join(ticketDir, 'brief.md');
     if (!fs.existsSync(briefPath)) return false;
+    // GH-696: never satisfy the gate while the brief runner's inner ledger is
+    // mid-flight — the artifact window must only close after the runner's
+    // validate/memorize phases ran. Absent ledger keeps today's behavior.
+    const { phaseLedgerBlocked } = require(path.join(deps.workRoot, 'lib', 'phase-ledger'));
+    if (phaseLedgerBlocked(ticketDir, 'brief').blocked) return false;
     const openQuestions = require(path.join(deps.workRoot, 'lib', 'open-questions'));
     const { findUnresolvedSiblingGaps } = require(
       path.join(deps.workRoot, '..', 'lib', 'brief-sibling-gaps')
@@ -80,6 +86,11 @@ function verifySpecGate(deps, ticketId) {
     const ticketDir = path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId));
     const specPath = path.join(ticketDir, 'spec.md');
     if (!fs.existsSync(specPath)) return false; // fail-closed — missing spec blocks the gate
+    // GH-696: spec_gate satisfiedAt landed ~3s into the in-flight spec agent's
+    // timeline on GH-689 — refuse while spec-phase.json is non-terminal so the
+    // validate/memorize/kind_checks phases always run before the window closes.
+    const { phaseLedgerBlocked } = require(path.join(deps.workRoot, 'lib', 'phase-ledger'));
+    if (phaseLedgerBlocked(ticketDir, 'spec').blocked) return false;
     const gherkinPath = path.join(ticketDir, 'gherkin.feature');
     let gherkinContent;
     try {

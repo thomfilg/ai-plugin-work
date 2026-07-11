@@ -126,4 +126,32 @@ describe('brief step (GH-253)', () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0].action, 'RUN');
   });
+
+  // GH-696: brief.md present but brief-phase.json mid-flight → re-dispatch the
+  // brief-writer with a resume-oriented prompt (the deadlock-free repair route
+  // for the ledger-blocked verifier — never a bare DEFER).
+  it('RUNs the brief-writer in resume mode when brief exists but the ledger is mid-flight (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    briefStep(
+      add,
+      makeState({ hasBrief: true, briefPhaseMidFlight: true, briefPhase: 'draft' }),
+      makeCtx()
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.brief);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.agentType, 'brief-writer');
+    assert.match(entry.agentPrompt, /brief-phase\.json/);
+    assert.match(entry.agentPrompt, /"draft"/);
+    assert.match(entry.agentPrompt, /brief-next\.js/);
+    assert.match(entry.agentPrompt, /resume/i);
+  });
+
+  it('DEFERs when brief exists and the ledger flag is explicitly false (GH-696 regression)', () => {
+    const { add, entries } = makeAdd();
+    briefStep(add, makeState({ hasBrief: true, briefPhaseMidFlight: false }), makeCtx());
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'DEFER');
+  });
 });

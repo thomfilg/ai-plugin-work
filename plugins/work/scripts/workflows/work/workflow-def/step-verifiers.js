@@ -24,6 +24,18 @@ function ticketDir(deps, ticketId) {
   return path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId));
 }
 
+/**
+ * GH-696: a step whose inner phase driver is still mid-flight (or whose
+ * ledger is corrupt) must not verify, even when the artifact file exists —
+ * on GH-689 the brief step advanced while brief-phase.json sat at `draft`.
+ * Absent ledger = legacy/pre-phase-driver ticket → not blocked (today's
+ * behavior). The plan matrix's RUN-resume branch is the repair route.
+ */
+function ledgerClear(deps, ticketId, step) {
+  const { phaseLedgerBlocked } = require(path.join(deps.workRoot, 'lib', 'phase-ledger'));
+  return !phaseLedgerBlocked(ticketDir(deps, ticketId), step).blocked;
+}
+
 /** @param {StepDeps} deps */
 function verifyTicket(deps, ticketId) {
   // Ticket is proven if the work state file exists and is active for this ticket
@@ -42,7 +54,10 @@ function verifyTicket(deps, ticketId) {
 /** @param {StepDeps} deps */
 function verifyBrief(deps, ticketId) {
   try {
-    return fs.existsSync(path.join(ticketDir(deps, ticketId), 'brief.md'));
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'brief.md')) &&
+      ledgerClear(deps, ticketId, 'brief')
+    );
   } catch {
     return false;
   }
@@ -55,7 +70,10 @@ function verifyBrief(deps, ticketId) {
  */
 function verifySpec(deps, ticketId) {
   try {
-    return fs.existsSync(path.join(ticketDir(deps, ticketId), 'spec.md'));
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'spec.md')) &&
+      ledgerClear(deps, ticketId, 'spec')
+    );
   } catch {
     return false;
   }
@@ -65,7 +83,10 @@ function verifySpec(deps, ticketId) {
 function verifyTasks(deps, ticketId) {
   // verify remains active -- used by evidence checks
   try {
-    return fs.existsSync(path.join(ticketDir(deps, ticketId), 'tasks.md'));
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'tasks.md')) &&
+      ledgerClear(deps, ticketId, 'tasks')
+    );
   } catch {
     return false;
   } // fail-safe: assume tasks not generated
