@@ -42,42 +42,40 @@ function guardAnnounceState(session) {
 }
 
 /**
- * Idempotent init path: an existing session for the ticket is reused, only
- * refreshing cwd and backfilling owner metadata on legacy/unstamped sessions.
- *
- * The "already active / reusing" banner is gated on guard transitions (GH-540):
- * it prints only when the announce-state fingerprint changed since the last
- * print. An unchanged tick is silent unless `showGuard` opts back in.
+ * Refresh mutable metadata on a reused session in place. Updates cwd when it
+ * changed (same ticket, different directory) and backfills owner metadata on
+ * legacy/unstamped sessions:
+ *   - owning Claude session id, so the Stop hook can scope the lock to this
+ *     terminal (prevents cross-terminal lock bleed when two sessions share
+ *     one cwd);
+ *   - owning git worktree root, so the Stop hook can scope the lock to this
+ *     checkout (prevents bleed across sibling ticket worktrees).
+ * Returns true when anything was mutated (i.e. the session needs persisting).
  */
-function refreshExistingSession(ticketId, existing, ownerSessionId, worktreeRoot, showGuard) {
-  // Update cwd if it changed (same ticket, different directory)
+function refreshSessionMetadata(existing, ownerSessionId, worktreeRoot) {
   const currentCwd = process.cwd();
   let dirty = false;
   if (existing.cwd !== currentCwd) {
     existing.cwd = currentCwd;
     dirty = true;
   }
-  // Backfill owning Claude session id on a legacy/unstamped session so the
-  // Stop hook can scope the lock to this terminal (prevents cross-terminal
-  // lock bleed when two sessions share one cwd).
   if (!existing.ownerSessionId && ownerSessionId) {
     existing.ownerSessionId = ownerSessionId;
     dirty = true;
   }
-  // Backfill the owning worktree root so the Stop hook can scope the lock to
-  // this checkout (prevents bleed across sibling ticket worktrees).
   if (!existing.worktreeRoot && worktreeRoot) {
     existing.worktreeRoot = worktreeRoot;
     dirty = true;
   }
-  const announceState = guardAnnounceState(existing);
-  const announceChanged = existing.announcedState !== announceState;
-  if (announceChanged) {
-    existing.announcedState = announceState;
-  }
-  if (dirty || announceChanged) {
-    writeSessionAtomic(ticketId, existing);
-  }
+  return dirty;
+}
+
+/**
+ * Print the reuse banner for an existing session, gated on guard transitions
+ * (GH-540): a metadata refresh or a changed announce fingerprint prints; an
+ * unchanged tick is silent unless `showGuard` opts back in.
+ */
+function printReuseBanner(ticketId, existing, dirty, announceChanged, showGuard) {
   if (dirty) {
     process.stderr.write(`Session guard for ${ticketId} updated (cwd/owner).\n`);
   } else if (announceChanged) {
@@ -89,6 +87,27 @@ function refreshExistingSession(ticketId, existing, ownerSessionId, worktreeRoot
       `Session guard active for ${ticketId} (${existing.workflow}) since ${existing.startTime}. Reusing existing session.\n`
     );
   }
+}
+
+/**
+ * Idempotent init path: an existing session for the ticket is reused, only
+ * refreshing cwd and backfilling owner metadata on legacy/unstamped sessions.
+ *
+ * The "already active / reusing" banner is gated on guard transitions (GH-540):
+ * it prints only when the announce-state fingerprint changed since the last
+ * print. An unchanged tick is silent unless `showGuard` opts back in.
+ */
+function refreshExistingSession(ticketId, existing, ownerSessionId, worktreeRoot, showGuard) {
+  const dirty = refreshSessionMetadata(existing, ownerSessionId, worktreeRoot);
+  const announceState = guardAnnounceState(existing);
+  const announceChanged = existing.announcedState !== announceState;
+  if (announceChanged) {
+    existing.announcedState = announceState;
+  }
+  if (dirty || announceChanged) {
+    writeSessionAtomic(ticketId, existing);
+  }
+  printReuseBanner(ticketId, existing, dirty, announceChanged, showGuard);
   process.exit(0);
 }
 
