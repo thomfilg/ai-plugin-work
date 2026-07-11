@@ -11,7 +11,9 @@ const assert = require('node:assert/strict');
 const { spawnHook } = require('./_helpers/run-hook');
 
 const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'session-guard.js');
-const SESSION_DIR = path.join(require('os').tmpdir(), 'session-guard-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) —
+// never write directly into the shared os.tmpdir() (insecure-temporary-file).
+const SESSION_DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'session-guard-test-'));
 const TEST_TICKET = 'TEST-999';
 const TEST_WORKFLOW = '/work';
 
@@ -163,6 +165,74 @@ describe('session-guard', () => {
       const r = await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
       assert.equal(r.code, 0);
       assert.ok(r.stderr.length > 0, 'should produce stderr output');
+    });
+  });
+
+  // ─── CLI: init — reuse banner gated on guard transitions (GH-540) ───
+
+  describe('CLI: init — guard banner prints on transitions only', () => {
+    it('first init prints the claim banner', async () => {
+      const r = await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      assert.equal(r.code, 0);
+      assert.ok(
+        r.stderr.includes(`Session guard active for ${TEST_TICKET}`),
+        'first claim should print the guard banner'
+      );
+    });
+
+    it('persists the announce-state fingerprint in the guard file', async () => {
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      const session = readSession(TEST_TICKET);
+      assert.equal(typeof session.announcedState, 'string');
+      assert.ok(session.announcedState.includes(TEST_TICKET), 'fingerprint should encode ticket');
+    });
+
+    it('repeat init with unchanged state is silent', async () => {
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      const r = await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      assert.equal(r.code, 0);
+      assert.equal(r.stderr.trim(), '', 'unchanged reuse tick should print nothing');
+    });
+
+    it('prints again when the guard state changes (cwd moved)', async () => {
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      // Simulate the guard having been claimed from another directory.
+      const session = readSession(TEST_TICKET);
+      session.cwd = '/some/other/directory';
+      fs.writeFileSync(sessionFilePath(TEST_TICKET), JSON.stringify(session));
+
+      const r = await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      assert.equal(r.code, 0);
+      assert.ok(
+        r.stderr.includes(`Session guard for ${TEST_TICKET} updated`),
+        'state change should print the update banner'
+      );
+    });
+
+    it('announces once for a legacy guard file (no fingerprint), then goes silent', async () => {
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      const session = readSession(TEST_TICKET);
+      delete session.announcedState;
+      fs.writeFileSync(sessionFilePath(TEST_TICKET), JSON.stringify(session));
+
+      const first = await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      assert.ok(
+        first.stderr.includes('already active'),
+        'legacy guard file should announce reuse once'
+      );
+      const second = await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      assert.equal(second.stderr.trim(), '', 'follow-up tick should be silent');
+    });
+
+    it('--show-guard prints the guard status even when state is unchanged', async () => {
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW]); // now silent
+      const r = await runCli(['init', TEST_TICKET, TEST_WORKFLOW, '--show-guard']);
+      assert.equal(r.code, 0);
+      assert.ok(
+        r.stderr.includes(`Session guard active for ${TEST_TICKET}`),
+        '--show-guard should print the guard status on demand'
+      );
     });
   });
 

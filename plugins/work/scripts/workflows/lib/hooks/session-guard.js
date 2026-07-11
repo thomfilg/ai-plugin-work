@@ -9,7 +9,10 @@
  * 3. Blocking premature session stops via Stop hook
  *
  * CLI subcommands (called by orchestrator):
- *   init <ticketId> <workflow>   — Create session with passphrase
+ *   init <ticketId> <workflow> [--show-guard]
+ *                                — Create session with passphrase; reuse ticks
+ *                                  are silent unless the guard state changed
+ *                                  (--show-guard prints the status on demand)
  *   reveal <ticketId>            — Reveal passphrase (sets revealed=true)
  *   complete <ticketId>          — Remove session file (cleanup)
  *   finish <ticketId>            — Atomic teardown: reveal + complete
@@ -83,26 +86,30 @@ async function runHookMode(hookType) {
 }
 
 function runCli(args) {
-  switch (args[0]) {
+  // GH-540: reuse ticks are silent by default; `--show-guard` opts back into
+  // printing the guard status even when the announce-state is unchanged.
+  const showGuard = args.includes('--show-guard');
+  const positional = args.filter((arg) => arg !== '--show-guard');
+  switch (positional[0]) {
     case 'init':
-      commands.cmdInit(args[1], args[2]);
+      commands.cmdInit(positional[1], positional[2], { showGuard });
       break;
     case 'reveal':
-      commands.cmdReveal(args[1]);
+      commands.cmdReveal(positional[1]);
       break;
     case 'complete':
-      commands.cmdComplete(args[1], args[2]);
+      commands.cmdComplete(positional[1], positional[2]);
       break;
     case 'finish':
-      commands.cmdFinish(args[1]);
+      commands.cmdFinish(positional[1]);
       break;
     case 'status':
-      commands.cmdStatus(args[1]);
+      commands.cmdStatus(positional[1]);
       break;
     default:
       process.stderr.write(
         'Usage: session-guard.js <init|reveal|complete|finish|status> [args]\n' +
-          '  init <ticketId> <workflow>  — Start session guard\n' +
+          '  init <ticketId> <workflow> [--show-guard]  — Start session guard\n' +
           '  reveal <ticketId>           — Reveal passphrase\n' +
           '  complete <ticketId> [wf]    — Clear session (optional workflow filter)\n' +
           '  finish <ticketId>           — Reveal + complete (atomic teardown)\n' +
