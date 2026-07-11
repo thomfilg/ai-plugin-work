@@ -46,8 +46,8 @@ process.on('unhandledRejection', (err) => {
   process.exit(didBlock ? 2 : 0);
 });
 
-// Agent detection for report file protection
-const { isRunningInAgent, normalizeAgentName } = require(
+// Agent detection for report file protection + GH-695 dispatched-agent gate
+const { isRunningInAgent, isDispatchedAgentContext, normalizeAgentName } = require(
   path.join(__dirname, '..', 'agent-detection')
 );
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
@@ -144,6 +144,7 @@ const {
   workSteps: WORK_STEPS,
   getTicketId: () => getTicketId(),
   isRunningInAgent,
+  isDispatchedAgentContext, // GH-695: terminal bypasses reject dispatched agents
   normalizeAgentName,
   hookFilename: __filename,
 });
@@ -289,14 +290,13 @@ function exitBlocked(message) {
 function runPreBlockingRules(toolName, toolInput, hookData, ticketId) {
   const cmd = String(toolInput?.command || '');
 
-  // Rule 3: Block direct writes to workflow state files (+ terminal-step bypasses)
-  const rule3 = checkStateFileRule(toolName, toolInput, ticketId);
+  // Rule 3: block state-file writes; hookData → terminal bypasses reject dispatched agents (GH-695)
+  const rule3 = checkStateFileRule(toolName, toolInput, ticketId, hookData);
   if (rule3.blocked) exitBlocked(rule3.message);
 
-  // Rule 3b: Block unsafe sub-commands on state scripts invoked via node (GH-89)
-  // Fail-open when no ticket context — nothing to protect without a workflow.
+  // Rule 3b (GH-89): unsafe state-script sub-commands. Fail-open without a ticket context.
   if (toolName === 'Bash' && ticketId) {
-    const rule3b = checkUnsafeSubcommands(cmd.trim(), ticketId);
+    const rule3b = checkUnsafeSubcommands(cmd.trim(), ticketId, hookData);
     if (rule3b) exitBlocked(rule3b.message);
   }
 

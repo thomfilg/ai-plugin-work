@@ -352,6 +352,60 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
 }
 
 /**
+ * GH-695: True when the current hook context belongs to ANY dispatched
+ * (sub)agent, regardless of which one — alias-agnostic, no allowlist to
+ * maintain. Used by the terminal state-script bypasses, which are
+ * orchestrator-only: a dispatched agent must report BLOCKED instead of
+ * finishing the workflow itself.
+ *
+ * Signals (any one suffices):
+ *   - hookData.agent_type set (any value — set by Claude Code inside a subagent)
+ *   - CLAUDE_CURRENT_AGENT env var set (any value)
+ *   - transcriptPath contains '/subagents/' (subagent transcript location)
+ *   - structural markers (attributionAgent / isSidechain) in the first 10
+ *     transcript lines, via the existing readInitialMarkers helper
+ *
+ * Fail direction: read/parse errors → false (fail-open at the hook). Failing
+ * closed here would deadlock the terminal step with no in-band repair; the
+ * completeWork script-side precondition is the backstop.
+ *
+ * @param {string} [transcriptPath] - Path to the session transcript
+ * @param {object} [hookData] - Hook payload from Claude Code
+ * @returns {boolean} true when this context is a dispatched agent
+ */
+function isDispatchedAgentContext(transcriptPath, hookData) {
+  if (hookData?.agent_type) {
+    debugLog('dispatchedContext', `agent_type=${hookData.agent_type}`);
+    return true;
+  }
+  if (process.env.CLAUDE_CURRENT_AGENT) {
+    debugLog('dispatchedContext', `CLAUDE_CURRENT_AGENT=${process.env.CLAUDE_CURRENT_AGENT}`);
+    return true;
+  }
+  if (!transcriptPath) return false;
+  if (String(transcriptPath).includes('/subagents/')) {
+    debugLog('dispatchedContext', 'transcript path contains /subagents/');
+    return true;
+  }
+  try {
+    if (!fs.existsSync(transcriptPath)) return false;
+    const content = fs.readFileSync(transcriptPath, 'utf8');
+    const lines = content.trim().split('\n');
+    const { attributionAgent, isSidechain } = readInitialMarkers(lines.slice(0, 10));
+    if (attributionAgent || isSidechain === true) {
+      debugLog(
+        'dispatchedContext',
+        attributionAgent ? `attributionAgent=${attributionAgent}` : 'isSidechain marker'
+      );
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Word-boundary match of any agent alias name within sidechain prompt text.
  * Boundaries avoid incidental substring hits (e.g. "qa" inside "quality").
  */
@@ -375,5 +429,6 @@ module.exports = {
   isRunningInAgent,
   isSubagentFromTranscript,
   isSubagentFromInitialPrompt,
+  isDispatchedAgentContext,
   normalizeAgentName,
 };

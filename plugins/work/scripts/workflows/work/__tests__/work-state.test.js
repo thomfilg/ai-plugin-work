@@ -13,6 +13,7 @@ const fs = require('fs');
 const os = require('os');
 
 const HOOK_PATH = path.join(__dirname, '..', 'work-state.js');
+const { ALL_STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 const TEMP_TASKS_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'work-state-test-'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -58,6 +59,19 @@ function cleanupTempWorkState(ticket) {
   try {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {}
+}
+
+// GH-695: completeWork validates step preconditions — tests exercising a
+// SUCCESSFUL `complete` must first bring the state to the genuine terminal
+// shape (every non-complete step already completed, as the legit flow does).
+function markStepsTerminal(ticket) {
+  const statePath = path.join(TEMP_TASKS_BASE, ticket, '.work-state.json');
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+  state.stepStatus = state.stepStatus || {};
+  for (const step of ALL_STEPS) {
+    if (step !== 'complete') state.stepStatus[step] = 'completed';
+  }
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 }
 
 // ─── Global Cleanup ─────────────────────────────────────────────────────────
@@ -267,6 +281,7 @@ describe('work-state.js', () => {
 
     it('should mark all steps completed and set completedTime', async () => {
       await runWorkState(['init', TICKET_OK]);
+      markStepsTerminal(TICKET_OK); // GH-695: complete validates preconditions
       const { result, code } = await runWorkState(['complete', TICKET_OK]);
 
       assert.equal(code, 0);
@@ -793,6 +808,7 @@ describe('work-state.js', () => {
       // Advance both tasks to completed
       await runWorkState(['task-advance', TICKET_DONE]);
       await runWorkState(['task-advance', TICKET_DONE]);
+      markStepsTerminal(TICKET_DONE); // GH-695: complete validates preconditions
 
       const { result, code } = await runWorkState(['complete', TICKET_DONE]);
       assert.equal(code, 0, 'Should exit with code 0 when all tasks completed');
@@ -802,6 +818,7 @@ describe('work-state.js', () => {
     it('should succeed when no tasksMeta exists (backward compat)', async () => {
       // Init state without task tracking
       await runWorkState(['init', TICKET_NO_META]);
+      markStepsTerminal(TICKET_NO_META); // GH-695: complete validates preconditions
 
       const { result, code } = await runWorkState(['complete', TICKET_NO_META]);
       assert.equal(code, 0, 'Should exit with code 0 when no tasksMeta exists');
@@ -831,10 +848,16 @@ describe('work-state.js', () => {
     function seedTicket(ticket, tasks, opts = {}) {
       const dir = path.join(TEMP_TASKS_BASE, ticket);
       fs.mkdirSync(dir, { recursive: true });
+      // GH-695: seed a genuine terminal step shape so `complete` exercises the
+      // checkpoint auto-close path, not the new step-status precondition.
+      const stepStatus = {};
+      for (const step of ALL_STEPS) {
+        if (step !== 'complete') stepStatus[step] = 'completed';
+      }
       const state = {
         ticketId: ticket,
         status: 'in_progress',
-        stepStatus: {},
+        stepStatus,
         tasksMeta: { totalTasks: tasks.length, currentTaskIndex: tasks.length, tasks },
       };
       fs.writeFileSync(path.join(dir, '.work-state.json'), JSON.stringify(state));

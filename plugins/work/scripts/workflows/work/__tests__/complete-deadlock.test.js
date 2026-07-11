@@ -18,6 +18,7 @@ const fs = require('fs');
 const os = require('os');
 
 const WORK_STATE_PATH = path.join(__dirname, '..', 'work-state.js');
+const { ALL_STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 const TEMP_TASKS_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'complete-deadlock-test-'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -69,6 +70,17 @@ function cleanupTicket(ticketId) {
   try {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {}
+}
+
+// GH-695: completeWork now validates step preconditions — the legit flow
+// arrives at terminal with every non-complete step already completed. This
+// builds that genuine terminal shape for tests exercising `complete`.
+function markAllStepsCompleted(ticketId) {
+  const state = readState(ticketId);
+  for (const step of ALL_STEPS) {
+    state.stepStatus[step] = step === 'complete' ? 'in_progress' : 'completed';
+  }
+  writeState(ticketId, state);
 }
 
 // ─── Global Cleanup ─────────────────────────────────────────────────────────
@@ -129,12 +141,13 @@ describe('GH-106: complete step deadlock fix', () => {
       assert.ok(stderr.length > 0, 'complete should write error to stderr');
     });
 
-    it('complete exits 0 and marks status completed on valid state', async () => {
+    it('complete exits 0 and marks status completed on valid terminal state', async () => {
       const ticket = 'DEADLOCK-VALID';
       cleanupTicket(ticket);
 
-      // Initialize state first
+      // Initialize state, then bring it to the genuine terminal shape (GH-695)
       await runWorkState(['init', ticket, 'test ticket']);
+      markAllStepsCompleted(ticket);
       const { code, result } = await runWorkState(['complete', ticket]);
 
       assert.equal(code, 0, 'complete should exit 0 on success');
@@ -147,12 +160,94 @@ describe('GH-106: complete step deadlock fix', () => {
       cleanupTicket(ticket);
 
       await runWorkState(['init', ticket, 'test ticket']);
+      markAllStepsCompleted(ticket);
       await runWorkState(['complete', ticket]);
 
       // Second call should also succeed
       const { code, result } = await runWorkState(['complete', ticket]);
       assert.equal(code, 0, 'second complete should exit 0');
       assert.equal(result.status, 'completed', 'status should remain completed');
+    });
+  });
+
+  // ─── Test 3b: GH-695 — complete validates step preconditions ──────────────
+
+  describe('3b. GH-695: completeWork step-status precondition', () => {
+    it('refuses completion and lists the offending steps when steps are not completed', async () => {
+      const ticket = 'DEADLOCK-PRECONDITION';
+      cleanupTicket(ticket);
+
+      await runWorkState(['init', ticket, 'test ticket']);
+      const state = readState(ticket);
+      state.stepStatus.ticket = 'completed';
+      state.stepStatus.implement = 'in_progress';
+      writeState(ticket, state);
+
+      const { code, stderr } = await runWorkState(['complete', ticket]);
+      assert.equal(code, 1, 'complete should exit 1 when steps are not completed');
+      assert.ok(stderr.includes('implement'), `offender list should name implement: ${stderr}`);
+      assert.ok(
+        stderr.includes('work-next.js'),
+        `repair route should name work-next.js: ${stderr}`
+      );
+
+      const after = readState(ticket);
+      assert.notEqual(after.status, 'completed', 'status must not flip to completed');
+      assert.notEqual(
+        after.stepStatus.implement,
+        'completed',
+        'refusal must not blind-stamp steps completed'
+      );
+    });
+
+    it('WORK_OPERATOR_TOKEN=1 overrides the precondition and appends an audit row', async () => {
+      const ticket = 'DEADLOCK-OPERATOR';
+      cleanupTicket(ticket);
+
+      await runWorkState(['init', ticket, 'test ticket']);
+      const state = readState(ticket);
+      state.stepStatus.ticket = 'completed';
+      state.stepStatus.implement = 'in_progress';
+      writeState(ticket, state);
+
+      const { code, result } = await runWorkState(['complete', ticket], {
+        env: { WORK_OPERATOR_TOKEN: '1' },
+      });
+      assert.equal(code, 0, 'operator override should exit 0');
+      assert.equal(result.status, 'completed', 'operator override should complete the workflow');
+
+      const actionsPath = path.join(TEMP_TASKS_BASE, ticket, '.work-actions.json');
+      const actions = JSON.parse(fs.readFileSync(actionsPath, 'utf-8'));
+      const auditRow = actions.find(
+        (row) => row.step === 'complete' && /operator-override/.test(String(row.what || ''))
+      );
+      assert.ok(
+        auditRow,
+        `expected an operator-override audit row, got: ${JSON.stringify(actions)}`
+      );
+      assert.ok(
+        /WORK_OPERATOR_TOKEN/.test(String(auditRow.what)),
+        'audit row should name WORK_OPERATOR_TOKEN'
+      );
+    });
+
+    it('refuses when stepStatus is missing entirely (fail closed)', async () => {
+      const ticket = 'DEADLOCK-NO-STEPSTATUS';
+      cleanupTicket(ticket);
+
+      writeState(ticket, {
+        ticketId: ticket,
+        description: '',
+        currentStep: 1,
+        status: 'in_progress',
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      });
+
+      const { code } = await runWorkState(['complete', ticket]);
+      assert.equal(code, 1, 'missing stepStatus must fail closed');
     });
   });
 
@@ -234,7 +329,7 @@ describe('GH-106: complete step deadlock fix', () => {
   // If the module cannot load, the setup test FAILS (not silently skipped).
 
   describe('8-10. unstick-complete.js helpers', () => {
-    let sanitizeTicketId, isStuckInComplete, archiveArtifacts;
+    let sanitizeTicketId, isStuckInComplete, archiveArtifacts, unstickTicket;
     const origEnv = { ...process.env };
 
     it('setup — require unstick-complete.js', () => {
@@ -247,9 +342,11 @@ describe('GH-106: complete step deadlock fix', () => {
       sanitizeTicketId = mod.sanitizeTicketId;
       isStuckInComplete = mod.isStuckInComplete;
       archiveArtifacts = mod.archiveArtifacts;
+      unstickTicket = mod.unstickTicket;
       assert.ok(sanitizeTicketId, 'sanitizeTicketId must be exported');
       assert.ok(isStuckInComplete, 'isStuckInComplete must be exported');
       assert.ok(archiveArtifacts, 'archiveArtifacts must be exported');
+      assert.ok(unstickTicket, 'unstickTicket must be exported');
     });
 
     // ─── sanitizeTicketId ──────────────────────────────────────────────────
@@ -366,6 +463,63 @@ describe('GH-106: complete step deadlock fix', () => {
       const files = fs.readdirSync(archiveDir);
       assert.ok(files.length >= 2, 'Should have original + timestamped file');
       fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    // ─── unstickTicket × GH-695 precondition ───────────────────────────────
+
+    it('unstick: corrupted shape (complete in_progress, earlier steps pending) records completeWork ok:false', () => {
+      const ticket = 'TEST-UNSTICK-CORRUPT';
+      cleanupTicket(ticket);
+      const stepStatus = {};
+      for (const step of ALL_STEPS) stepStatus[step] = 'pending';
+      stepStatus.ticket = 'completed';
+      stepStatus.complete = 'in_progress';
+      writeState(ticket, {
+        ticketId: ticket,
+        description: '',
+        currentStep: ALL_STEPS.length,
+        status: 'in_progress',
+        stepStatus,
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      });
+
+      const result = unstickTicket(ticket);
+      const cw = result.actions.find((a) => a.step === 'completeWork');
+      assert.ok(cw, 'unstick must record a completeWork action row');
+      assert.equal(cw.ok, false, 'completeWork must fail closed on the corrupted shape');
+      const after = readState(ticket);
+      assert.notEqual(after.status, 'completed', 'corrupted shape must not be force-completed');
+      cleanupTicket(ticket);
+    });
+
+    it('unstick: all-others-completed recovery shape still completes', () => {
+      const ticket = 'TEST-UNSTICK-RECOVERY';
+      cleanupTicket(ticket);
+      const stepStatus = {};
+      for (const step of ALL_STEPS) stepStatus[step] = 'completed';
+      stepStatus.complete = 'pending';
+      writeState(ticket, {
+        ticketId: ticket,
+        description: '',
+        currentStep: ALL_STEPS.length,
+        status: 'in_progress',
+        stepStatus,
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      });
+
+      const result = unstickTicket(ticket);
+      const cw = result.actions.find((a) => a.step === 'completeWork');
+      assert.ok(cw, 'unstick must record a completeWork action row');
+      assert.equal(cw.ok, true, 'the GH-106 recovery shape must still complete');
+      const after = readState(ticket);
+      assert.equal(after.status, 'completed', 'recovery shape completes as before');
+      cleanupTicket(ticket);
     });
 
     after(() => {
