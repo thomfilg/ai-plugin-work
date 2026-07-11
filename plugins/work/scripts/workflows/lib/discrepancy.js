@@ -106,11 +106,14 @@ function compareClaims(higher, lower) {
  * @param {{missingInLower:string[], extraInLower:string[]}} comparison
  * @param {string} higherLabel - e.g. 'user prompt'
  * @param {string} lowerLabel  - e.g. 'brief'
- * @returns {Array<{questionText:string, scope:'user', rationale:string}>}
+ * @returns {Array<{questionText:string, scope:'user', rationale:string,
+ *   kind:'discrepancy', applyKey:string}>}
  */
 function buildDiscrepancyQuestions(comparison, higherLabel, lowerLabel) {
   if (!comparison) return [];
   const qs = [];
+  // Envelope routing (GH-543): the driver files the answer under
+  // `discrepancies: [{ claim: applyKey, decision: <answer> }]`.
   for (const claim of comparison.missingInLower) {
     qs.push({
       questionText:
@@ -118,6 +121,8 @@ function buildDiscrepancyQuestions(comparison, higherLabel, lowerLabel) {
         `Is this a drop in ${lowerLabel} that needs to be added, or was the ${higherLabel} mention out-of-date?`,
       scope: 'user',
       rationale: `Discrepancy: claim "${claim}" present in ${higherLabel}, absent in ${lowerLabel}.`,
+      kind: 'discrepancy',
+      applyKey: claim,
     });
   }
   for (const claim of comparison.extraInLower) {
@@ -127,6 +132,8 @@ function buildDiscrepancyQuestions(comparison, higherLabel, lowerLabel) {
         `Is this a legitimate ${lowerLabel}-level decision, or scope creep that should be removed?`,
       scope: 'user',
       rationale: `Discrepancy: claim "${claim}" absent in ${higherLabel}, present in ${lowerLabel}.`,
+      kind: 'discrepancy',
+      applyKey: claim,
     });
   }
   return qs;

@@ -118,7 +118,8 @@ function findUnresolvedSiblingGaps(briefText) {
  *
  * @param {Array<{surface:string, ticketId:string|null, raw:string}>} unresolved
  * @param {string} currentTicketId
- * @returns {Array<{questionText:string, scope:'user', rationale:string}>}
+ * @returns {Array<{questionText:string, scope:'user', rationale:string,
+ *   kind:'sibling-gap', applyKey:string, options:string[]}>}
  */
 function buildSiblingGapQuestions(unresolved, currentTicketId) {
   if (!Array.isArray(unresolved)) return [];
@@ -131,6 +132,11 @@ function buildSiblingGapQuestions(unresolved, currentTicketId) {
         `Implement the gap here as an exception, or complete ${owner} first?`,
       scope: 'user',
       rationale: u.raw,
+      // Envelope routing (GH-543): the driver files the answer under
+      // `siblingGaps: [{ surface: applyKey, decision: <option> }]`.
+      kind: 'sibling-gap',
+      applyKey: u.surface,
+      options: ['implement-here', 'wait-for-sibling'],
     };
   });
 }
