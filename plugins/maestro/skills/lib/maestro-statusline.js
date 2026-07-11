@@ -157,8 +157,8 @@ function readMarker(dir, key, kind) {
 }
 
 // The markers the conductor writes per ticket. Silence/question/restart-loop/
-// stuck-input are keyed by the tmux SESSION (`<id>-work`); dead-end and
-// pr-status are keyed by the bare ticket id (see state.js call sites).
+// stuck-input/idle-blocked-alert are keyed by the tmux SESSION (`<id>-work`);
+// dead-end and pr-status are keyed by the bare ticket id (state.js call sites).
 function readTicketMarkers(id, dir) {
   const s = `${id}-work`;
   return {
@@ -166,6 +166,7 @@ function readTicketMarkers(id, dir) {
     silence: readMarker(dir, s, 'silence'),
     restartLoop: readMarker(dir, s, 'restart-loop'),
     stuckInput: readMarker(dir, s, 'stuck-input'),
+    idleBlockedAlert: readMarker(dir, s, 'idle-blocked-alert'),
     deadEnd: readMarker(dir, id, 'dead-end'),
     prStatus: readMarker(dir, id, 'pr-status'),
   };

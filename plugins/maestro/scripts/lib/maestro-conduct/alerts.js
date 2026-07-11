@@ -55,7 +55,14 @@ function alertKey(obj) {
   // Flatten the "<ns>/" segment so persisted alert-count keys stay flat
   // (`<ticket>[-suffix]|kind|…`) and maestro-cleanup's bare-id purge matcher
   // finds them under MAESTRO_NS (GH-622).
-  return `${namespace.flattenKey(obj.session || obj.ticket)}|${obj.kind}|${obj.sha || obj.phase || '_'}`;
+  //
+  // Third segment precedence: alertId > sha > phase. `alertId` is an optional
+  // caller-provided incident identity for kinds where sha/phase is too coarse
+  // — question-pending content-hashes the prompt (GH-698 A4: two DIFFERENT
+  // prompts in the same phase used to collapse under one key, so the second
+  // inherited the first's repeat count and throttle window). Consumers only
+  // ever prefix-match up to `|kind|`, so the segment is opaque to them.
+  return `${namespace.flattenKey(obj.session || obj.ticket)}|${obj.kind}|${obj.alertId || obj.sha || obj.phase || '_'}`;
 }
 
 // Kinds the operator must act on now (answer a menu, decide on PR, kill a
@@ -75,6 +82,7 @@ const ACTION_REQUIRED_KINDS = new Set([
   'pr-comments-stuck',
   'comment-loop',
   'stuck-input',
+  'idle-blocked',
   'auth-broken',
 ]);
 
