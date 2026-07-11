@@ -9,7 +9,11 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { normalizeAgentName, isRunningInAgent } = require('../agent-detection');
+const {
+  normalizeAgentName,
+  isRunningInAgent,
+  isDispatchedAgentContext,
+} = require('../agent-detection');
 
 // Transcripts are written inside a private, permission-restricted directory
 // (fs.mkdtempSync → mode 0700, unpredictable name) rather than directly in the
@@ -598,5 +602,105 @@ describe('isSubagentFromInitialPrompt — marker debug logging & fail-open', () 
   it('env var short-circuits before any transcript scan (nonexistent transcript)', () => {
     process.env.CLAUDE_CURRENT_AGENT = 'commit-writer';
     assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['commit-writer']));
+  });
+});
+
+// ─── isDispatchedAgentContext — GH-695 alias-agnostic dispatched-agent gate ──
+
+describe('isDispatchedAgentContext', () => {
+  const savedEnv = {};
+  const created = [];
+
+  beforeEach(() => {
+    savedEnv.CLAUDE_CURRENT_AGENT = process.env.CLAUDE_CURRENT_AGENT;
+    delete process.env.CLAUDE_CURRENT_AGENT;
+  });
+
+  afterEach(() => {
+    if (savedEnv.CLAUDE_CURRENT_AGENT !== undefined) {
+      process.env.CLAUDE_CURRENT_AGENT = savedEnv.CLAUDE_CURRENT_AGENT;
+    } else {
+      delete process.env.CLAUDE_CURRENT_AGENT;
+    }
+    while (created.length) {
+      const p = created.pop();
+      try {
+        fs.unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  it('true when hookData.agent_type is set (known agent)', () => {
+    assert.ok(isDispatchedAgentContext(null, { agent_type: 'pr-generator' }));
+  });
+
+  it('true when hookData.agent_type is set (ANY value — alias-agnostic)', () => {
+    assert.ok(isDispatchedAgentContext(null, { agent_type: 'some-brand-new-agent' }));
+  });
+
+  it('true when CLAUDE_CURRENT_AGENT is set (any value)', () => {
+    process.env.CLAUDE_CURRENT_AGENT = 'whatever-agent';
+    assert.ok(isDispatchedAgentContext(null, {}));
+  });
+
+  it('true when the transcript path contains /subagents/', () => {
+    assert.ok(isDispatchedAgentContext('/nonexistent/subagents/agent_x.jsonl', {}));
+  });
+
+  it('true for a sidechain transcript (isSidechain marker, no attributionAgent)', () => {
+    const tmp = writeTranscript([
+      { type: 'user', isSidechain: true, message: { content: 'do the thing' } },
+    ]);
+    created.push(tmp);
+    assert.ok(isDispatchedAgentContext(tmp, {}));
+  });
+
+  it('true for a transcript carrying an attributionAgent marker', () => {
+    const tmp = writeTranscript([
+      {
+        type: 'user',
+        attributionAgent: 'work-workflow:pr-generator',
+        message: { content: 'generate the PR' },
+      },
+    ]);
+    created.push(tmp);
+    assert.ok(isDispatchedAgentContext(tmp, {}));
+  });
+
+  it('false for a bare main-session context (no env, no payload identity, plain transcript)', () => {
+    const tmp = writeTranscript([
+      { type: 'user', message: { content: 'please dispatch the pr-generator agent' } },
+    ]);
+    created.push(tmp);
+    assert.ok(!isDispatchedAgentContext(tmp, {}));
+  });
+
+  it('false when transcript is missing (fail-open at the hook)', () => {
+    assert.ok(!isDispatchedAgentContext('/nonexistent/transcript.jsonl', {}));
+  });
+
+  it('false when transcript is unparseable garbage (fail-open at the hook)', () => {
+    const tmp = path.join(TRANSCRIPT_DIR, `garbage-${process.pid}.jsonl`);
+    fs.writeFileSync(tmp, 'not json at all\n binary-ish\n{broken');
+    created.push(tmp);
+    assert.ok(!isDispatchedAgentContext(tmp, {}));
+  });
+
+  it('false when the sidechain marker sits beyond the first 10 lines (initial-markers window)', () => {
+    const lines = [];
+    for (let i = 0; i < 11; i++) {
+      lines.push({ type: 'user', message: { content: `line ${i}` } });
+    }
+    lines.push({ type: 'user', isSidechain: true, message: { content: 'late marker' } });
+    const tmp = writeTranscript(lines);
+    created.push(tmp);
+    assert.ok(!isDispatchedAgentContext(tmp, {}));
+  });
+
+  it('false for null transcript and empty hookData', () => {
+    assert.ok(!isDispatchedAgentContext(null, {}));
+    assert.ok(!isDispatchedAgentContext(undefined, undefined));
   });
 });

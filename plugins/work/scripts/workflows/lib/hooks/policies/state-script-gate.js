@@ -4,7 +4,8 @@
  * Strict Bash-command gating for state scripts, extracted from
  * enforce-step-workflow.js:
  *
- *   - shellTokenize(): quote-aware tokenizer for the strict bypass parser
+ *   - shellTokenize(): quote-aware tokenizer (lives in ./shell-tokenize,
+ *     re-exported here)
  *   - isTerminalCompleteBypass(): `work-state.js complete` allowed only at
  *     the terminal `complete` step (GH-276)
  *   - isTerminalSessionGuardBypass(): session-guard.js finish/reveal/complete
@@ -21,64 +22,9 @@ const {
   extractSubCommand,
   isSafeSubCommand,
 } = require('./agent-authorization');
-
-/**
- * Quote-aware shell tokenizer for the strict bypass parser.
- *
- * Splits on whitespace EXCEPT within balanced ASCII single or double quotes,
- * so paths containing spaces (e.g. `/Users/John Smith/...`) remain a single
- * token. Surrounding quotes are stripped from each token before return.
- *
- * Rejects (returns null) on:
- *   - Unbalanced quotes (open `"` or `'` with no matching close).
- *   - Nested/mixed quotes within a token are simply treated literally — we do
- *     not support shell-style escaping (`\"`, `$'..'`, etc.); the bypass is
- *     for the orchestrator's strict, direct invocation only.
- *
- * @param {string} input
- * @returns {string[] | null}
- */
-function shellTokenize(input) {
-  const tokens = [];
-  let current = '';
-  let inToken = false;
-  let quote = null; // either '"' or "'" when inside a quoted run
-
-  for (let idx = 0; idx < input.length; idx++) {
-    const ch = input[idx];
-
-    if (quote) {
-      if (ch === quote) {
-        quote = null; // close quote — token continues (allows `a"b"c` style)
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      inToken = true;
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
-      if (inToken) {
-        tokens.push(current);
-        current = '';
-        inToken = false;
-      }
-      continue;
-    }
-
-    current += ch;
-    inToken = true;
-  }
-
-  if (quote) return null; // unbalanced
-  if (inToken) tokens.push(current);
-  return tokens;
-}
+// Quote-aware tokenizer — extracted verbatim to ./shell-tokenize (file-size
+// burndown); re-exported below so consumers keep this import path.
+const { shellTokenize } = require('./shell-tokenize');
 
 // Strict token walk for `node <path>/work-state.js complete <ticket>`.
 // Env-assignment prefixes (FOO=bar node ...) are DISALLOWED entirely — they
@@ -172,20 +118,49 @@ function extractSessionGuardArgs(tokens) {
   return { scriptPath, targetTicket };
 }
 
-function makeTrace(enabled) {
+function makeTrace(enabled, label = 'isTerminalCompleteBypass') {
   return (reason, extra) => {
     if (enabled) {
       try {
         process.stderr.write(
-          `[isTerminalCompleteBypass] ${reason}` +
-            (extra ? ` | ${JSON.stringify(extra)}` : '') +
-            '\n'
+          `[${label}] ${reason}` + (extra ? ` | ${JSON.stringify(extra)}` : '') + '\n'
         );
       } catch {
         /* never throw from debug */
       }
     }
   };
+}
+
+// GH-695: guidance appended to block messages when a dispatched agent attempts
+// a terminal bypass. The mechanical block must be legible — the agent's correct
+// move is reporting the wedge, and a misclassified orchestrator gets the most
+// common cause (a leaked env var) named.
+const DISPATCHED_AGENT_GUIDANCE =
+  'Dispatched-agent context detected: the terminal bypass is orchestrator-only (GH-695).\n' +
+  'Report `BLOCKED: <detail>` to the orchestrator instead of finishing the workflow yourself.\n' +
+  'If you ARE the orchestrator, check for a leaked CLAUDE_CURRENT_AGENT env var in this session.\n';
+
+// GH-695: whether this (scriptBase, subCmd) pair is one of the terminal
+// bypasses — the only allowlist entries the dispatched-agent rejection guards.
+function isTerminalBypassEligible(scriptBase, subCmd) {
+  if (scriptBase === 'work-state.js') return subCmd === 'complete';
+  if (scriptBase === 'session-guard.js') {
+    return subCmd === 'finish' || subCmd === 'reveal' || subCmd === 'complete';
+  }
+  return false;
+}
+
+// GH-695: true when the hook context belongs to ANY dispatched agent.
+// Errors → false (fail-open at the hook; the completeWork script-side
+// precondition is the backstop). Missing dep keeps legacy behavior.
+function isDispatchedContext(deps, hookData) {
+  try {
+    if (typeof deps.isDispatchedAgentContext !== 'function') return false;
+    return deps.isDispatchedAgentContext(hookData?.transcript_path, hookData) === true;
+  } catch {
+    return false;
+  }
 }
 
 // Verify the /work workflow is at the terminal `complete` step — reuses the
@@ -215,16 +190,24 @@ function isAtTerminalStep(deps, ticketId, trace, debugBypass) {
 /**
  * Step-conditional bypass for `work-state.js complete` at the terminal step (GH-276).
  * Returns true ONLY when ALL conditions are met:
- *   1. Command is a strict `node <path>/work-state.js complete <ticketId>` invocation
- *   2. No shell operators, substitutions, or extra arguments
- *   3. Target ticket matches the active ticket
- *   4. The workflow is at the terminal `complete` step
+ *   1. The context is NOT a dispatched agent (GH-695 — orchestrator-only)
+ *   2. Command is a strict `node <path>/work-state.js complete <ticketId>` invocation
+ *   3. No shell operators, substitutions, or extra arguments
+ *   4. Target ticket matches the active ticket
+ *   5. The workflow is at the terminal `complete` step
  */
-function isTerminalCompleteBypass(deps, cmd, ticketId) {
+function isTerminalCompleteBypass(deps, cmd, ticketId, hookData) {
   const DEBUG_BYPASS = process.env.ENFORCE_HOOK_DEBUG === '1';
   const trace = makeTrace(DEBUG_BYPASS);
 
-  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
+  // GH-695: reject FIRST when the caller is ANY dispatched agent — gates that
+  // only bind the orchestrator are not gates.
+  if (isDispatchedContext(deps, hookData)) {
+    trace('reject: dispatched-agent context');
+    return false;
+  }
+
+  // Reject shell operators and substitutions — cheapest syntactic fail-fast.
   if (/[;&|$`<>(){}\n]/.test(cmd)) {
     trace('reject: shell metachars');
     return false;
@@ -273,8 +256,17 @@ function isTerminalCompleteBypass(deps, cmd, ticketId) {
  * the terminal step (GH-338). Mirrors isTerminalCompleteBypass() but for
  * session-guard.js subcommands.
  */
-function isTerminalSessionGuardBypass(deps, cmd, ticketId) {
-  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
+function isTerminalSessionGuardBypass(deps, cmd, ticketId, hookData) {
+  // GH-695: reject FIRST when the caller is ANY dispatched agent.
+  if (isDispatchedContext(deps, hookData)) {
+    makeTrace(
+      process.env.ENFORCE_HOOK_DEBUG === '1',
+      'isTerminalSessionGuardBypass'
+    )('reject: dispatched-agent context');
+    return false;
+  }
+
+  // Reject shell operators and substitutions — cheapest syntactic fail-fast.
   if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
 
   // Normalize by stripping balanced surrounding quote pairs (see
@@ -303,17 +295,17 @@ function isTerminalSessionGuardBypass(deps, cmd, ticketId) {
 }
 
 // Step-conditional bypasses shared by Rule 3 and Rule 3b.
-function isTerminalBypassAllowed(deps, scriptBase, subCmd, cmd, ticketId) {
+function isTerminalBypassAllowed(deps, scriptBase, subCmd, cmd, ticketId, hookData) {
   // work-state.js complete at terminal step (GH-276)
   if (scriptBase === 'work-state.js' && subCmd === 'complete') {
-    return isTerminalCompleteBypass(deps, cmd, ticketId);
+    return isTerminalCompleteBypass(deps, cmd, ticketId, hookData);
   }
   // session-guard.js finish/reveal/complete at terminal step (GH-338)
   if (
     scriptBase === 'session-guard.js' &&
     (subCmd === 'finish' || subCmd === 'reveal' || subCmd === 'complete')
   ) {
-    return isTerminalSessionGuardBypass(deps, cmd, ticketId);
+    return isTerminalSessionGuardBypass(deps, cmd, ticketId, hookData);
   }
   return false;
 }
@@ -326,7 +318,7 @@ function isTerminalBypassAllowed(deps, scriptBase, subCmd, cmd, ticketId) {
  *
  * @returns {{ blocked: true, message: string } | null}
  */
-function checkUnsafeSubcommands(deps, cmd, ticketId) {
+function checkUnsafeSubcommands(deps, cmd, ticketId, hookData) {
   const stateMatches = getNodeInvocations(cmd);
   for (const m of stateMatches) {
     const scriptPath = m[1] || m[2] || m[3];
@@ -340,13 +332,16 @@ function checkUnsafeSubcommands(deps, cmd, ticketId) {
 
     const subCmd = extractSubCommand(cmd, m, scriptBase);
     if (isSafeSubCommand(scriptBase, subCmd, deps.safeSubcommands)) continue;
-    if (isTerminalBypassAllowed(deps, scriptBase, subCmd, cmd, ticketId)) continue;
-    return {
-      blocked: true,
-      message:
-        `BLOCKED: Direct Bash call to ${scriptBase} with sub-command '${subCmd}' is not allowed.\n` +
-        `State files must only be modified through the orchestrator/workflow-engine scripts.\n`,
-    };
+    if (isTerminalBypassAllowed(deps, scriptBase, subCmd, cmd, ticketId, hookData)) continue;
+    let message =
+      `BLOCKED: Direct Bash call to ${scriptBase} with sub-command '${subCmd}' is not allowed.\n` +
+      `State files must only be modified through the orchestrator/workflow-engine scripts.\n`;
+    // GH-695: a dispatched agent attempting a terminal bypass gets told the
+    // correct move (report the wedge) instead of a mysterious denial.
+    if (isTerminalBypassEligible(scriptBase, subCmd) && isDispatchedContext(deps, hookData)) {
+      message += DISPATCHED_AGENT_GUIDANCE;
+    }
+    return { blocked: true, message };
   }
   return null;
 }
@@ -363,17 +358,25 @@ function checkUnsafeSubcommands(deps, cmd, ticketId) {
  * @param {string} deps.tasksBase — TASKS_BASE (debug traces only)
  * @param {Function} deps.safeTicketPath — ticket sanitizer (debug traces only)
  * @param {Function} deps.debugLogCandidatePath — GH-452 diagnostic
+ * @param {Function} [deps.isDispatchedAgentContext] — GH-695 dispatched-agent
+ *   detector (transcriptPath, hookData) => boolean; when absent the terminal
+ *   bypasses keep their pre-GH-695 (orchestrator-assumed) behavior
  */
 function createStateScriptGate(deps) {
   return {
-    isTerminalCompleteBypass: (cmd, ticketId) => isTerminalCompleteBypass(deps, cmd, ticketId),
-    isTerminalSessionGuardBypass: (cmd, ticketId) =>
-      isTerminalSessionGuardBypass(deps, cmd, ticketId),
-    checkUnsafeSubcommands: (cmd, ticketId) => checkUnsafeSubcommands(deps, cmd, ticketId),
+    isTerminalCompleteBypass: (cmd, ticketId, hookData) =>
+      isTerminalCompleteBypass(deps, cmd, ticketId, hookData),
+    isTerminalSessionGuardBypass: (cmd, ticketId, hookData) =>
+      isTerminalSessionGuardBypass(deps, cmd, ticketId, hookData),
+    checkUnsafeSubcommands: (cmd, ticketId, hookData) =>
+      checkUnsafeSubcommands(deps, cmd, ticketId, hookData),
+    isDispatchedContext: (hookData) => isDispatchedContext(deps, hookData),
   };
 }
 
 module.exports = {
   shellTokenize, // quote-aware tokenizer (exported for reuse/tests)
   createStateScriptGate, // terminal bypasses + Rule 3b sub-command gate
+  DISPATCHED_AGENT_GUIDANCE, // GH-695 block-message guidance (reused by Rule 3)
+  isTerminalBypassEligible, // GH-695 terminal-bypass (script, subCmd) predicate
 };

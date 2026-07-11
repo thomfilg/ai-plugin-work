@@ -177,7 +177,10 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     transitionPattern: /work\.workflow\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
       /work\.workflow\.js\s+(plan|transitions|graph)/,
-      /work-state\.js\s+(get|resume-info|init|task-current|task-advance|task-get|task-init)/,
+      // task-advance dropped (GH-695) — aligned with SAFE_SUBCOMMANDS in
+      // lib/hooks/policies/hook-config.js: a Rule-1/2-exempt command that
+      // Rule 3b blocks is dead config.
+      /work-state\.js\s+(get|resume-info|init|task-current|task-get|task-init)/,
     ],
     transitionHint: `node ${path.join(__dirname, 'work.workflow.js')} transition`,
   };

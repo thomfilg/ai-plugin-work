@@ -53,7 +53,11 @@ const SAFE_SUBCOMMANDS = {
     'add-error',
     'task-init',
     'task-current',
-    'task-advance',
+    // 'task-advance' removed (GH-695): advanceTask blind-marks the current
+    // task completed. Its legitimate callers are driver-internal execFileSync
+    // spawns (advance-gate.js, next-instruction.js, task-next.js) that never
+    // traverse PreToolUse — a Bash call is never legitimate. exemptPatterns
+    // in workflows/work/workflow-definition.js is kept aligned.
     'task-get',
   ]),
   'workflow-state.js': new Set(['get', 'resume-info', 'add-error']), // init excluded: not idempotent (resets all steps). exemptPatterns aligned.

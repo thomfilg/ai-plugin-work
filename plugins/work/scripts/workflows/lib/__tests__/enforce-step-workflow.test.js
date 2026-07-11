@@ -2352,6 +2352,148 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'));
     });
 
+    // ─── GH-695: task-advance dropped from SAFE_SUBCOMMANDS ─────────────────
+    // advanceTask blind-marks the current task completed; its legitimate
+    // callers are driver-internal execFileSync spawns that never traverse
+    // PreToolUse. A Bash call is never legitimate — in ANY context.
+
+    it('blocks direct work-state.js task-advance call at implement step (GH-695)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} task-advance ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'direct task-advance should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks direct work-state.js task-advance call even at terminal step (GH-695)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} task-advance ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'task-advance has no terminal bypass — blocked in every context');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('still allows work-state.js task-current command (GH-695 regression)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} task-current ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 0, 'task-current is read-only and stays allowed');
+    });
+
+    it('still allows work-state.js task-get command (GH-695 regression)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} task-get ${TEST_TICKET} 1` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 0, 'task-get is read-only and stays allowed');
+    });
+
+    // ─── GH-695: terminal complete bypass rejects dispatched-agent contexts ──
+    // The GH-276 bypass is orchestrator-only. Any dispatched-agent signal
+    // (payload agent_type, CLAUDE_CURRENT_AGENT, /subagents/ path, sidechain
+    // transcript markers) rejects the bypass even at the genuine terminal step.
+
+    it('blocks work-state.js complete at terminal step when payload carries agent_type (GH-695)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          agent_type: 'pr-generator',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'dispatched-agent payload must reject the terminal bypass');
+      assert.ok(stderr.includes('BLOCKED'), `expected BLOCKED in stderr, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('orchestrator'),
+        `block message should direct the agent to report BLOCKED to the orchestrator, got: ${stderr}`
+      );
+      assert.ok(
+        stderr.includes('CLAUDE_CURRENT_AGENT'),
+        `block message should name CLAUDE_CURRENT_AGENT for misclassified orchestrators, got: ${stderr}`
+      );
+    });
+
+    it('blocks work-state.js complete at terminal step when CLAUDE_CURRENT_AGENT is set (GH-695)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
+        },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'pr-generator' }
+      );
+      assert.equal(code, 2, 'CLAUDE_CURRENT_AGENT must reject the terminal bypass');
+      assert.ok(stderr.includes('BLOCKED'), `expected BLOCKED in stderr, got: ${stderr}`);
+    });
+
+    it('blocks work-state.js complete at terminal step from a sidechain transcript (GH-695)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+      const transcriptPath = path.join(TASKS_DIR, 'sidechain-transcript.jsonl');
+      fs.writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({
+          type: 'user',
+          isSidechain: true,
+          attributionAgent: 'work-workflow:pr-generator',
+          message: { content: 'generate the PR' },
+        })}\n`
+      );
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          transcript_path: transcriptPath,
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'sidechain transcript markers must reject the terminal bypass');
+      assert.ok(stderr.includes('BLOCKED'), `expected BLOCKED in stderr, got: ${stderr}`);
+    });
+
+    it('blocks work-state.js complete at terminal step when transcript path is under /subagents/ (GH-695)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          transcript_path: '/nonexistent/subagents/agent_x.jsonl',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'a /subagents/ transcript path must reject the terminal bypass');
+      assert.ok(stderr.includes('BLOCKED'), `expected BLOCKED in stderr, got: ${stderr}`);
+    });
+
     it('blocks work-state.js init-subtask command', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
@@ -4784,6 +4926,38 @@ describe('enforce-step-workflow', () => {
         'PreToolUse'
       );
       assert.equal(code, 0, `complete should be allowed at complete step. stderr: ${stderr}`);
+    });
+
+    // ─── GH-695: terminal bypass rejects dispatched-agent contexts ──────────
+
+    it('blocks session-guard.js finish at complete step when payload carries agent_type (GH-695)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          agent_type: 'pr-generator',
+          tool_input: { command: `node ${SESSION_GUARD_PATH} finish ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'dispatched-agent payload must reject the session-guard bypass');
+      assert.ok(stderr.includes('BLOCKED'), `expected BLOCKED in stderr, got: ${stderr}`);
+    });
+
+    it('blocks session-guard.js complete at complete step when CLAUDE_CURRENT_AGENT is set (GH-695)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${SESSION_GUARD_PATH} complete ${TEST_TICKET}` },
+        },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'pr-generator' }
+      );
+      assert.equal(code, 2, 'CLAUDE_CURRENT_AGENT must reject the session-guard bypass');
+      assert.ok(stderr.includes('BLOCKED'), `expected BLOCKED in stderr, got: ${stderr}`);
     });
 
     // ─── R1/R7: Allow safe subcommands (init, status) at any step ───────────

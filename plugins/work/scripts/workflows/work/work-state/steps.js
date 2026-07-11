@@ -9,6 +9,7 @@
 
 const { STEPS, loadState, saveState, initState, autoInitTdd } = require('./core');
 const { autoCompleteCheckpointTasks } = require('./checkpoints');
+const { appendAction } = require('../lib/work-actions');
 
 /**
  * Set step status
@@ -79,8 +80,51 @@ function addError(ticketId, step, error) {
 }
 
 /**
+ * Terminal guard (GH-245): error message when tasksMeta has pending tasks,
+ * null otherwise. GH-410: directive message when the only pending tasks are
+ * checkpoint-kind without an APPROVED completion.check.md report.
+ */
+function pendingTasksMessage(state) {
+  if (!state.tasksMeta || !Array.isArray(state.tasksMeta.tasks)) return null;
+  const pendingTasks = state.tasksMeta.tasks.filter((t) => t.status !== 'completed');
+  if (pendingTasks.length === 0) return null;
+  const allCheckpoint = pendingTasks.every((t) => t && t.kind === 'checkpoint');
+  return allCheckpoint
+    ? `Cannot complete workflow: ${pendingTasks.length} checkpoint task(s) still pending — expected APPROVED completion.check.md to auto-close them (see GH-410)`
+    : `Cannot complete workflow: ${pendingTasks.length} tasks still pending`;
+}
+
+/**
+ * GH-695 step-status precondition: error message when any non-complete step
+ * is not 'completed', null when the shape is genuinely terminal. Missing
+ * stepStatus fails closed. WORK_OPERATOR_TOKEN=1 overrides (returns null)
+ * and leaves an appendAction audit row — the documented human-shell repair
+ * route (hooks reject env-prefixed agent commands, so agents can't use it).
+ */
+function stepPreconditionMessage(state, ticketId) {
+  const stepStatus = state.stepStatus || {};
+  const offenders = STEPS.filter((step) => step !== 'complete' && stepStatus[step] !== 'completed');
+  if (offenders.length === 0) return null;
+  if (process.env.WORK_OPERATOR_TOKEN !== '1') {
+    return (
+      `Cannot complete workflow: step(s) not completed: ${offenders.join(', ')} — ` +
+      `drive them with work-next.js (operator repair route: WORK_OPERATOR_TOKEN=1 from a human shell, audited)`
+    );
+  }
+  appendAction(ticketId, {
+    step: 'complete',
+    what: 'operator-override completion (WORK_OPERATOR_TOKEN)',
+    meta: { offenders },
+  });
+  return null;
+}
+
+/**
  * Mark work as complete.
  * GH-106: Made idempotent — if already completed, returns existing state.
+ * GH-695: Validates step preconditions — every non-complete step must already
+ * be 'completed' (the legit flow always arrives at terminal in this shape;
+ * transitions mark each step as they pass).
  * Returns { error: ... } when no state found (caller must check).
  */
 function completeWork(ticketId) {
@@ -102,22 +146,17 @@ function completeWork(ticketId) {
     saveState(ticketId, state);
   }
 
-  // Terminal guard: block completion if tasks are still pending (GH-245).
-  // GH-410: emit a directive message when the only pending tasks are
-  // checkpoint-kind without an APPROVED completion.check.md report.
-  if (state.tasksMeta && Array.isArray(state.tasksMeta.tasks)) {
-    const pendingTasks = state.tasksMeta.tasks.filter((t) => t.status !== 'completed');
-    if (pendingTasks.length > 0) {
-      const allCheckpoint = pendingTasks.every((t) => t && t.kind === 'checkpoint');
-      const msg = allCheckpoint
-        ? `Cannot complete workflow: ${pendingTasks.length} checkpoint task(s) still pending — expected APPROVED completion.check.md to auto-close them (see GH-410)`
-        : `Cannot complete workflow: ${pendingTasks.length} tasks still pending`;
-      return { error: msg };
-    }
-  }
+  const pendingMsg = pendingTasksMessage(state);
+  if (pendingMsg) return { error: pendingMsg };
+
+  const preconditionMsg = stepPreconditionMessage(state, ticketId);
+  if (preconditionMsg) return { error: preconditionMsg };
 
   state.status = 'completed';
   state.completedTime = new Date().toISOString();
+  if (!state.stepStatus) state.stepStatus = {};
+  // No-op normalization in the legit flow (every step already 'completed');
+  // only the audited operator override can stamp anything here.
   STEPS.forEach((step) => {
     state.stepStatus[step] = 'completed';
   });
