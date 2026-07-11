@@ -83,26 +83,33 @@ function resolveRules(argvRules, env = process.env) {
  * @returns {{file: string, added: string[], skipped?: string}}
  *   `skipped` names the reason nothing was written ('unparsable-settings').
  */
-function applyAgentPermissions(worktree, rules) {
-  const dir = path.join(worktree, '.claude');
-  const file = path.join(dir, 'settings.local.json');
-  // Single read, no exists-then-read (js/file-system-race): a missing file is
-  // a fresh worktree, anything else unreadable/corrupt is the operator's —
-  // never overwrite it.
-  let settings = {};
+/**
+ * Read + parse the existing settings file. Single read, no exists-then-read
+ * (js/file-system-race): a missing file is a fresh worktree ⇒ `{}`; anything
+ * unreadable/corrupt is the operator's ⇒ `skipped` (never overwrite it).
+ * @returns {{settings: object}|{skipped: string}}
+ */
+function readSettings(file) {
   let raw = null;
   try {
     raw = fs.readFileSync(file, 'utf8');
   } catch (e) {
-    if (e.code !== 'ENOENT') return { file, added: [], skipped: 'unreadable-settings' };
+    if (e.code !== 'ENOENT') return { skipped: 'unreadable-settings' };
   }
-  if (raw !== null) {
-    try {
-      settings = JSON.parse(raw);
-    } catch {
-      return { file, added: [], skipped: 'unparsable-settings' };
-    }
+  if (raw === null) return { settings: {} };
+  try {
+    return { settings: JSON.parse(raw) };
+  } catch {
+    return { skipped: 'unparsable-settings' };
   }
+}
+
+function applyAgentPermissions(worktree, rules) {
+  const dir = path.join(worktree, '.claude');
+  const file = path.join(dir, 'settings.local.json');
+  const read = readSettings(file);
+  if (read.skipped) return { file, added: [], skipped: read.skipped };
+  let settings = read.settings;
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) settings = {};
   if (!settings.permissions || typeof settings.permissions !== 'object') {
     settings.permissions = {};
