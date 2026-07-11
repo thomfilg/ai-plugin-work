@@ -99,7 +99,11 @@ function git(cwd, args) {
 function commitAndPush({ message, cwd, push }) {
   git(cwd, ['add', '-A']);
   git(cwd, ['commit', '-m', message]);
-  if (push) git(cwd, ['push']);
+  // `-u origin HEAD` publishes the branch under its own name and sets
+  // tracking. A bare `git push` dies in fresh /bootstrap worktrees, whose
+  // branch is created tracking origin/<base> (GH-697); this form is
+  // idempotent for branches already tracking their same-name remote branch.
+  if (push) git(cwd, ['push', '-u', 'origin', 'HEAD']);
 }
 
 /** CLI entry point. */
