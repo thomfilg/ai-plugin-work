@@ -27,6 +27,47 @@ const OPTION_CURSOR_RE = /^\s*❯\s*[0-9]+\.\s/m;
 
 const { isCodexPaneDialect } = require('../live-spinner');
 
+// A line shaped like a menu option (cursor or indented "N. text").
+const OPTION_LINE_RE = /^(❯|\s+)[ ]*[0-9]+\.\s/;
+
+/**
+ * The LAST contiguous run of option-shaped lines — the menu block at the
+ * bottom of the pane. The capture carries ~100 lines of scrollback (tmux.js),
+ * and numbered prose up there (tool output, a subagent stream) both pollutes
+ * the operator-facing options AND flaps the A4 content hash keyed on them —
+ * each flap would mint a fresh alert identity and an immediate wake.
+ * Trade-off: a wrapped option's indented continuation line breaks contiguity,
+ * so very tall menus may surface only their bottom options — acceptable, the
+ * block is stable per prompt (which is all the hash needs) and buildUnblockCmd
+ * degrades gracefully without a ❯-marked line.
+ */
+function optionBlock(pane) {
+  const lines = pane.split('\n');
+  let end = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (OPTION_LINE_RE.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  if (end === -1) return [];
+  let start = end;
+  while (start > 0 && OPTION_LINE_RE.test(lines[start - 1])) start -= 1;
+  return lines
+    .slice(start, end + 1)
+    .slice(0, 4)
+    .map((l) => l.trim());
+}
+
+/** First line matching the permission grammar, whitespace-collapsed, or null.
+ *  Carries the prompt's own identity (rule name, file being edited) so two
+ *  different permission prompts with identical boilerplate option sets don't
+ *  collapse into one A4 content hash (GH-698 review). */
+function matchedPromptLine(pane) {
+  const line = pane.split('\n').find((l) => PERM_PROMPT_RE.test(l));
+  return line ? line.replace(/\s+/g, ' ').trim() : null;
+}
+
 function detect({ pane, dialect }) {
   // Codex dialects: the menu/permission grammar below is claude-TUI-only.
   // Exec-mode questions surface as parked-BLOCKED /work state files (C3), and
@@ -39,18 +80,13 @@ function detect({ pane, dialect }) {
   const optionCursor = OPTION_CURSOR_RE.test(pane);
   if (!menuFooter && !permPrompt && !optionCursor) return { hit: false };
 
-  const optionLines = pane
-    .split('\n')
-    .filter((l) => /^(❯|\s+)[ ]*[0-9]+\.\s/.test(l))
-    .slice(0, 4)
-    .map((l) => l.trim());
-
   return {
     hit: true,
     kind: 'question-pending',
-    options: optionLines,
+    options: optionBlock(pane),
     promptKind: permPrompt ? 'permission' : 'menu',
+    promptLine: permPrompt ? matchedPromptLine(pane) : null,
   };
 }
 
-module.exports = { name: 'question', detect };
+module.exports = { name: 'question', detect, matchedPromptLine, optionBlock };

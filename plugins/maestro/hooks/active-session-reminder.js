@@ -74,6 +74,7 @@ const PENDING_KINDS = new Set([
   'pr-comments-stuck',
   'comment-loop',
   'stuck-input',
+  'idle-blocked',
   'auth-broken',
   'spinner-hang',
   'no-progress',

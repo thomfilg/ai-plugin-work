@@ -130,7 +130,7 @@ The full daemon event vocabulary (every emitted `kind`, its shape, emitter, and 
 
 ## Env
 
-Every daemon tunable (namespace, cadence floors, wake filter, rotation gates) is documented in **[`reference/env-vars.md`](reference/env-vars.md)** — read it before tuning. The most load-bearing defaults: `HEARTBEAT_MIN`=30 / `HEARTBEAT_MAX_MIN`=120 (unchanged-state beat cadence; a state-change beat is still written to the logfile/`_heartbeat.json` immediately, but no beat ever wakes the model), `CONDUCT_WAKE_EVENTS`=the 15-kind wake allowlist (custom lists replace it; `all`/`*` restores always-wake), `SILENCE_LIMIT_SEC`=300 (auto-restart), `MAESTRO_NS` (concurrent-instance isolation), and `MAESTRO_STOP_GUARD` for the conducting session.
+Every daemon tunable (namespace, cadence floors, wake filter, rotation gates) is documented in **[`reference/env-vars.md`](reference/env-vars.md)** — read it before tuning. The most load-bearing defaults: `HEARTBEAT_MIN`=30 / `HEARTBEAT_MAX_MIN`=120 (unchanged-state beat cadence; a state-change beat is still written to the logfile/`_heartbeat.json` immediately, but no beat ever wakes the model), `CONDUCT_WAKE_EVENTS`=the default wake allowlist (full kind list in `reference/env-vars.md`; custom lists replace it; `all`/`*` restores always-wake), `SILENCE_LIMIT_SEC`=300 (auto-restart), `MAESTRO_NS` (concurrent-instance isolation), and `MAESTRO_STOP_GUARD` for the conducting session.
 
 ## After launch
 
