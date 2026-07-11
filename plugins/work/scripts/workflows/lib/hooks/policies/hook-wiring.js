@@ -21,7 +21,7 @@ const {
 } = require('./state-protection');
 const { SAFE_SUBCOMMANDS, TRUSTED_SCRIPT_DIRS, debugLogCandidatePath } = require('./hook-config');
 const { createStateLoader, getCurrentStep } = require('./workflow-context');
-const { createStateScriptGate } = require('./state-script-gate');
+const { createStateScriptGate, DISPATCHED_AGENT_GUIDANCE } = require('./state-script-gate');
 const { createAgentGateRule } = require('./agent-gate-rule');
 const { mergeAgentGatedScripts } = require('./workflow-discovery');
 
@@ -56,17 +56,26 @@ function buildProtectors(deps, loadStateFile, exemptScripts) {
   return { artifactProtector, stateFileProtector, followUpStateProtector };
 }
 
+// Command shapes covered by the terminal-step bypasses (GH-276/GH-338) — used
+// only to decide whether a still-blocked Rule 3 result deserves the GH-695
+// dispatched-agent guidance in its message.
+const TERMINAL_BYPASS_SHAPE =
+  /(?:work-state\.js['"]?\s+['"]?complete|session-guard\.js['"]?\s+['"]?(?:finish|reveal|complete))\b/;
+
 // Apply the terminal-step bypasses to a blocked Rule 3 result (Bash only).
-function applyTerminalBypasses(rule3, gate, toolName, toolInput, ticketId) {
+function applyTerminalBypasses(rule3, gate, toolName, toolInput, ticketId, hookData) {
   if (toolName !== 'Bash') return;
   const cmd = String(toolInput?.command || '').trim();
   // Step-conditional bypass: work-state.js complete is allowed at the terminal step (GH-276)
-  if (rule3.match === '.work-state.json' && gate.isTerminalCompleteBypass(cmd, ticketId)) {
+  if (
+    rule3.match === '.work-state.json' &&
+    gate.isTerminalCompleteBypass(cmd, ticketId, hookData)
+  ) {
     rule3.blocked = false;
   }
   // Step-conditional bypass: session-guard.js finish/reveal/complete at terminal step (GH-338)
   // Not gated on rule3.match — session-guard.js may trigger Rule 3 via different state files
-  if (rule3.blocked && gate.isTerminalSessionGuardBypass(cmd, ticketId)) {
+  if (rule3.blocked && gate.isTerminalSessionGuardBypass(cmd, ticketId, hookData)) {
     rule3.blocked = false;
   }
 }
@@ -77,13 +86,22 @@ function applyTerminalBypasses(rule3, gate, toolName, toolInput, ticketId) {
  * protect, and the hook should not block tool use it cannot reason about.
  */
 function makeStateFileRule({ stateFileProtector, gate, basenameToHint, workflows }) {
-  return function checkStateFileRule(toolName, toolInput, ticketId) {
+  return function checkStateFileRule(toolName, toolInput, ticketId, hookData) {
     const rule3 = ticketId ? stateFileProtector.check(toolName, toolInput) : { blocked: false };
     if (!rule3.blocked) return rule3;
-    applyTerminalBypasses(rule3, gate, toolName, toolInput, ticketId);
+    applyTerminalBypasses(rule3, gate, toolName, toolInput, ticketId, hookData);
     if (rule3.blocked) {
       const hint = basenameToHint[rule3.match] || workflows[0].transitionHint;
       rule3.message = rule3.message + `Use: ${hint} ${ticketId} <step>\n`;
+      // GH-695: name the correct move for a dispatched agent that attempted
+      // the terminal bypass (and the leaked-env cause for an orchestrator).
+      if (
+        toolName === 'Bash' &&
+        TERMINAL_BYPASS_SHAPE.test(String(toolInput?.command || '')) &&
+        gate.isDispatchedContext(hookData)
+      ) {
+        rule3.message += DISPATCHED_AGENT_GUIDANCE;
+      }
     }
     return rule3;
   };
@@ -113,6 +131,7 @@ function makeProtectorsRule(protectors) {
  * @param {string[]} deps.workSteps — /work ALL_STEPS
  * @param {Function} deps.getTicketId
  * @param {Function} deps.isRunningInAgent
+ * @param {Function} deps.isDispatchedAgentContext — GH-695 dispatched-agent detector
  * @param {Function} deps.normalizeAgentName
  * @param {string} deps.hookFilename — enforce-step-workflow.js path
  */
@@ -152,6 +171,8 @@ function createHookWiring(deps) {
     tasksBase: deps.tasksBase,
     safeTicketPath: deps.safeTicketPath,
     debugLogCandidatePath,
+    // GH-695: terminal bypasses reject any dispatched-agent context
+    isDispatchedAgentContext: deps.isDispatchedAgentContext,
   });
 
   // Rule 5: agent-gated writer scripts (agent identity + step + token mint)

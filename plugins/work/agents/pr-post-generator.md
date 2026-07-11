@@ -28,6 +28,9 @@ You enhance PR descriptions with visual documentation and test results AFTER the
 - Screenshots are uploaded to the wiki page ONLY
 - The PR gets a **link** to the wiki page, NOT embedded images
 
+## HARD BOUNDARIES — WORKFLOW STATE
+If a runner or state transition wedges, STOP and report `BLOCKED: <detail>` to the orchestrator — never invoke `work-state.js`, `session-guard.js`, or `work.workflow.js` mutating subcommands.
+
 ## FABRICATION GUARD
 
 **Test-evidence rule (zero tolerance):** every `PASS`, `FAIL`, "stability run",

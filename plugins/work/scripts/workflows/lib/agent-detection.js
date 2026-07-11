@@ -11,6 +11,9 @@ const fs = require('fs');
 // scan). The claude scanning helpers below stay byte-for-byte — they are the
 // characterization-locked claude leg.
 const { sniffFormat, detectAgentContext } = require('./runtime/transcript');
+// Structural marker helpers + the GH-695 dispatched-agent predicate — moved
+// verbatim to ./transcript-markers (file-size burndown); re-exported below.
+const { readInitialMarkers, isDispatchedAgentContext } = require('./transcript-markers');
 
 /**
  * Normalize an agent name by stripping optional namespace prefixes and lowercasing.
@@ -239,66 +242,6 @@ function isRunningInAgent(transcriptPath, agentAliases, hookData) {
 }
 
 /**
- * Extract the prose text of a single system/user transcript entry.
- * Non-message entries and unknown content shapes yield an empty string.
- */
-function extractEntryText(entry) {
-  if (entry.type !== 'system' && entry.type !== 'user') {
-    return '';
-  }
-  const msgContent = entry.message?.content;
-  if (typeof msgContent === 'string') {
-    return msgContent;
-  }
-  if (Array.isArray(msgContent)) {
-    return msgContent.map((i) => i.text || '').join(' ');
-  }
-  return '';
-}
-
-/**
- * Read the structural subagent markers from early transcript lines.
- *
- * Mirrors the per-line JSON.parse-in-try/catch pattern used by
- * isSubagentFromTranscript. Untrusted fields are read defensively.
- *
- * @param {string[]} earlyLines - The first N raw transcript lines
- * @returns {{attributionAgent: string, isSidechain: boolean, promptText: string}}
- */
-function readInitialMarkers(earlyLines) {
-  let attributionAgent = '';
-  let isSidechain = false;
-  let promptText = '';
-
-  for (const line of earlyLines) {
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue; // skip non-JSON lines
-    }
-
-    // A sidechain flag on ANY early line marks this as a subagent transcript.
-    if (entry.isSidechain === true) {
-      isSidechain = true;
-    }
-
-    // First attributionAgent wins — it is the authoritative identity.
-    if (!attributionAgent && entry.attributionAgent) {
-      attributionAgent = String(entry.attributionAgent);
-    }
-
-    // Accumulate prose from system/user messages for the gated name check.
-    const text = extractEntryText(entry);
-    if (text) {
-      promptText = promptText ? `${promptText} ${text}` : text;
-    }
-  }
-
-  return { attributionAgent, isSidechain, promptText };
-}
-
-/**
  * Detect agent identity from the subagent's own transcript.
  *
  * A genuine Task-spawned subagent transcript carries positive structural
@@ -375,5 +318,6 @@ module.exports = {
   isRunningInAgent,
   isSubagentFromTranscript,
   isSubagentFromInitialPrompt,
+  isDispatchedAgentContext, // GH-695 — lives in ./transcript-markers, re-exported
   normalizeAgentName,
 };
