@@ -104,12 +104,19 @@ This ensures consistent PR descriptions with proper analysis.`,
     message: `❌ Direct \`git commit\` is not allowed.
 
 ✅ Author your semantic message, then commit + push through the guard script — it
-   validates the format, blocks AI attribution, enforces a human git identity,
-   and pushes. It is the ONLY sanctioned commit path; nothing commits around it:
+   auto-formats whitespace/wrapping, validates the format, blocks AI attribution,
+   enforces a human git identity, and pushes. It is the ONLY sanctioned commit
+   path; it runs non-interactively (no approval step) and needs NO temp file —
+   repeat -m once per body paragraph, git-style:
 
-     node "${COMMIT_SCRIPT}" -m "type(scope): summary (#123)"
+     node "${COMMIT_SCRIPT}" -m "type(scope): imperative summary (#123)" -m "optional body paragraph"
 
-   (Use \`-F <file>\` for a multi-line message, or \`--no-push\` to commit only.)
+   Message contract (rejections repeat this):
+   • header ≤72 chars: type(scope): imperative summary — no trailing period, no emoji
+   • types: feat | fix | docs | style | refactor | test | chore | perf | ci | build
+   • a ticket ref (e.g. "(#123)") must appear somewhere in the message
+   • body lines auto-wrap at 100 chars — write freely
+   (Also accepted: --header "<title>", -F <file>, -F - for stdin, --no-push, --cwd <dir>.)
 
 💡 Amend / fixup / empty commits are exempt via --amend / --allow-empty / fixup! / squash!.`,
   },

@@ -9,14 +9,21 @@
  * the commit contract.
  *
  * The session agent authors the message; this script is the guard that:
- *   1. validates it against the shared rules (`commit-msg-rules.js`) — semantic
- *      format, no AI attribution, ticket ID, <=72 title, imperative mood, ...;
- *   2. rejects an AI git identity (claude/codex/gemini/...) via `git-identity.js`;
- *   3. stages everything, commits under the human identity, and pushes.
+ *   1. auto-formats it mechanically (CRLF/whitespace normalization, one blank
+ *      line after the header, body lines wrapped at the validator's limit) so
+ *      agents are never bounced for formatting they could not predict;
+ *   2. validates it against the shared rules (`commit-msg-rules.js`) — semantic
+ *      format, no AI attribution, ticket ID, <=72 header, imperative mood, ...;
+ *   3. rejects an AI git identity (claude/codex/gemini/...) via `git-identity.js`;
+ *   4. stages everything, commits under the human identity, and pushes.
  *
- * Usage:
+ * Runs non-interactively: there is no confirmation/approval step.
+ *
+ * Usage (no temp file needed — git-style repeated -m):
  *   node commit-and-push.js -m "feat(scope): add thing (#123)"
- *   node commit-and-push.js -F <message-file>
+ *   node commit-and-push.js -m "feat(scope): add thing (#123)" -m "body paragraph" -m "another"
+ *   node commit-and-push.js --header "fix(scope): patch thing (#123)" -m "body paragraph"
+ *   node commit-and-push.js -F <message-file>      (or `-F -` to read stdin)
  *   node commit-and-push.js "feat(scope): add thing (#123)"   (positional)
  * Flags: --cwd <dir> (default cwd), --no-push (commit only).
  *
@@ -26,40 +33,159 @@
 
 const fs = require('fs');
 const { execFileSync } = require('child_process');
-const { validateMessage } = require('../hooks/commit-msg-rules');
+const {
+  validateMessage,
+  ALLOWED_TYPES,
+  MAX_TITLE_LEN,
+  MAX_BODY_LINE_LEN,
+} = require('../hooks/commit-msg-rules');
 const { getProviderConfig } = require('../../lib/ticket-provider');
 const { resolveGitUser, isAiIdentity } = require('../../lib/git-identity');
 
-const USAGE = 'usage: commit-and-push.js -m "<semantic message>" [--cwd <dir>] [--no-push]';
+const USAGE =
+  'usage: commit-and-push.js -m "<header>" [-m "<body paragraph>" ...] [--cwd <dir>] [--no-push]';
 
-/** Read a `-F` message file. Throws a usage error when the path is unreadable. */
+// The full message contract, printed with every usage/validation failure so an
+// agent can compose a passing message on the FIRST retry instead of probing
+// the rules one rejection at a time.
+const FORMAT_HELP = [
+  'Message contract (validated; whitespace/wrapping is auto-formatted):',
+  `  header : type(scope): imperative summary (#123) — MAX ${MAX_TITLE_LEN} chars, no trailing period, no emoji`,
+  `  types  : ${[...ALLOWED_TYPES].join(' | ')}`,
+  '  ticket : a ticket ref for the configured provider (e.g. "(#123)") must appear in the message',
+  `  body   : optional — repeat -m once per paragraph; lines are auto-wrapped at ${MAX_BODY_LINE_LEN} chars`,
+  '',
+  'Input forms (inline — no temp file; runs non-interactively, no approval step):',
+  '  -m "<header>" [-m "<body paragraph>" ...]        git-style: the FIRST -m is the header',
+  '  --header "<header>" [-m "<body paragraph>" ...]  explicit header form',
+  '  -F <file> | -F -                                 full message from a file or stdin',
+  'Flags: --cwd <dir>   --no-push (commit only)',
+].join('\n');
+
+/** Read a `-F` message file; `-` reads stdin so no temp file is ever needed. */
 function readFileArg(file) {
-  if (!file) throw new Error(USAGE);
+  if (file === '-') return fs.readFileSync(0, 'utf8');
   return fs.readFileSync(file, 'utf8');
 }
 
+// Flags that consume the next argv token.
+const VALUE_FLAGS = {
+  '-m': (opts, v) => opts.parts.push(v),
+  '--message': (opts, v) => opts.parts.push(v),
+  '--header': (opts, v) => {
+    opts.header = v;
+  },
+  '--title': (opts, v) => {
+    opts.header = v;
+  },
+  '-F': (opts, v) => {
+    opts.fileText = readFileArg(v);
+  },
+  '--file': (opts, v) => {
+    opts.fileText = readFileArg(v);
+  },
+  '--cwd': (opts, v) => {
+    opts.cwd = v;
+  },
+};
+
+/** A bare first token is the header (legacy positional form). */
+function isFirstPositional(opts) {
+  return opts.fileText === null && opts.header === null && opts.parts.length === 0;
+}
+
 /**
- * Apply the argv token at `i` to `opts`, returning the (possibly advanced) index
- * so flags that consume a value skip it on the next iteration.
+ * Apply the argv token at `i` to `opts`, returning the (possibly advanced)
+ * index so flags that consume a value skip it on the next iteration.
  */
 function applyArg(argv, i, opts) {
   const arg = argv[i];
-  if (arg === '-m' || arg === '--message') opts.message = argv[++i];
-  else if (arg === '-F' || arg === '--file') opts.message = readFileArg(argv[++i]);
-  else if (arg === '--cwd') opts.cwd = argv[++i];
-  else if (arg === '--no-push') opts.push = false;
-  else if (opts.message === null && !arg.startsWith('-')) opts.message = arg;
+  const handler = VALUE_FLAGS[arg];
+  if (handler) {
+    const value = argv[++i];
+    if (value === undefined) throw new Error(`${arg} needs a value\n${USAGE}\n\n${FORMAT_HELP}`);
+    handler(opts, value);
+    return i;
+  }
+  if (arg === '--no-push') {
+    opts.push = false;
+    return i;
+  }
+  if (!arg.startsWith('-') && isFirstPositional(opts)) opts.parts.push(arg);
   return i;
+}
+
+/** Join header + `-m` body paragraphs (or take the `-F` text verbatim). */
+function assembleMessage(opts) {
+  if (opts.fileText !== null) {
+    if (opts.header !== null || opts.parts.length) {
+      throw new Error(`-F carries the full message — do not mix it with -m/--header\n${USAGE}`);
+    }
+    return opts.fileText;
+  }
+  const parts = [...opts.parts];
+  const header = opts.header !== null ? opts.header : parts.shift();
+  if (!header || !header.trim()) throw new Error(`${USAGE}\n\n${FORMAT_HELP}`);
+  return [header, ...parts].join('\n\n');
+}
+
+/** Greedy word-wrap of one body line at `max`, keeping an indent/bullet prefix. */
+function wrapLine(line, max) {
+  if (line.length <= max) return [line];
+  const prefix = (line.match(/^\s*(?:[-*]\s+)?/) || [''])[0];
+  const cont = ' '.repeat(prefix.length);
+  const words = line.slice(prefix.length).split(/\s+/);
+  const out = [];
+  let cur = prefix + words[0];
+  for (const word of words.slice(1)) {
+    const joined = `${cur} ${word}`;
+    if (joined.length > max) {
+      out.push(cur);
+      cur = cont + word;
+    } else {
+      cur = joined;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
+ * Mechanical auto-format so agents are never bounced for whitespace they could
+ * not predict: CRLF→LF, trailing-space strip, collapsed header whitespace,
+ * exactly one blank line between header and body, single blank line between
+ * paragraphs, body lines wrapped at the validator's limit. The HEADER is never
+ * rewritten beyond whitespace — shortening a semantic title is lossy, so an
+ * over-long header still rejects (with the contract printed).
+ */
+function formatMessage(raw) {
+  const lines = String(raw)
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((l) => l.replace(/\s+$/, ''));
+  while (lines.length && !lines[0]) lines.shift();
+  const header = (lines.shift() || '').replace(/\s+/g, ' ').trim();
+  const body = [];
+  let pendingBlank = false;
+  for (const line of lines) {
+    if (!line) {
+      pendingBlank = true;
+      continue;
+    }
+    if (pendingBlank && body.length) body.push('');
+    pendingBlank = false;
+    body.push(...wrapLine(line, MAX_BODY_LINE_LEN));
+  }
+  return body.length ? `${header}\n\n${body.join('\n')}` : header;
 }
 
 /** Parse argv into `{ message, cwd, push }`. Throws a usage error on bad input. */
 function parseArgs(argv) {
-  const opts = { message: null, cwd: process.cwd(), push: true };
+  const opts = { parts: [], header: null, fileText: null, cwd: process.cwd(), push: true };
   for (let i = 0; i < argv.length; i++) {
     i = applyArg(argv, i, opts);
   }
-  if (!opts.message || !opts.message.trim()) throw new Error(USAGE);
-  return opts;
+  return { message: formatMessage(assembleMessage(opts)), cwd: opts.cwd, push: opts.push };
 }
 
 /** Render a rule-validation failure into the two-line stderr block. */
@@ -119,7 +245,7 @@ function main() {
 
   const failure = validate(opts.message, opts.cwd);
   if (failure) {
-    process.stderr.write(failure);
+    process.stderr.write(`${failure}\n${FORMAT_HELP}\n`);
     process.exit(1);
     return;
   }
@@ -141,4 +267,12 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { parseArgs, validate, formatValidationFailure, formatIdentityFailure };
+module.exports = {
+  parseArgs,
+  formatMessage,
+  wrapLine,
+  validate,
+  formatValidationFailure,
+  formatIdentityFailure,
+  FORMAT_HELP,
+};

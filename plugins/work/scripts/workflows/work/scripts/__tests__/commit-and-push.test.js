@@ -13,9 +13,12 @@ const { spawnSync } = require('child_process');
 
 const {
   parseArgs,
+  formatMessage,
+  wrapLine,
   validate,
   formatValidationFailure,
   formatIdentityFailure,
+  FORMAT_HELP,
 } = require('../commit-and-push');
 
 const SCRIPT = path.join(__dirname, '..', 'commit-and-push.js');
@@ -42,6 +45,68 @@ describe('commit-and-push — parseArgs', () => {
   it('throws a usage error when no message is provided', () => {
     assert.throws(() => parseArgs([]), /usage: commit-and-push.js/);
     assert.throws(() => parseArgs(['--no-push']), /usage: commit-and-push.js/);
+  });
+
+  it('joins repeated -m git-style: first -m is the header, the rest are body paragraphs', () => {
+    const opts = parseArgs(['-m', 'feat(x): add thing (#1)', '-m', 'first para', '-m', 'second']);
+    assert.equal(opts.message, 'feat(x): add thing (#1)\n\nfirst para\n\nsecond');
+  });
+
+  it('accepts an explicit --header with -m body paragraphs', () => {
+    const opts = parseArgs(['--header', 'fix(y): patch thing (#2)', '-m', 'why it broke']);
+    assert.equal(opts.message, 'fix(y): patch thing (#2)\n\nwhy it broke');
+  });
+
+  it('rejects mixing -F with -m/--header (which message would win is ambiguous)', () => {
+    assert.throws(() => parseArgs(['-F', '/dev/null', '-m', 'feat(x): thing (#1)']), /do not mix/);
+  });
+
+  it('throws a usage error naming the flag when a value is missing', () => {
+    assert.throws(() => parseArgs(['-m']), /-m needs a value/);
+    assert.throws(() => parseArgs(['--header']), /--header needs a value/);
+  });
+
+  it('usage errors carry the full message contract so agents pass on the first retry', () => {
+    try {
+      parseArgs([]);
+      assert.fail('expected a usage error');
+    } catch (err) {
+      assert.match(err.message, /Message contract/);
+      assert.match(err.message, /MAX 72 chars/);
+      assert.match(err.message, /feat \| fix \| docs/);
+    }
+  });
+});
+
+describe('commit-and-push — formatMessage (auto-format)', () => {
+  it('normalizes CRLF, trailing spaces, header whitespace, and blank-line runs', () => {
+    const raw =
+      '  feat(x):   add   thing (#1)  \r\n\r\n\r\nbody line  \r\n\r\n\r\n\r\nnext para\r\n\r\n';
+    assert.equal(formatMessage(raw), 'feat(x): add thing (#1)\n\nbody line\n\nnext para');
+  });
+
+  it('ensures exactly one blank line between header and body', () => {
+    assert.equal(formatMessage('feat(x): a (#1)\nbody'), 'feat(x): a (#1)\n\nbody');
+  });
+
+  it('wraps long body prose at 100 columns, preserving bullet indentation', () => {
+    const long = `- ${'word '.repeat(30).trim()}`;
+    const out = formatMessage(`feat(x): a (#1)\n\n${long}`);
+    const bodyLines = out.split('\n').slice(2);
+    assert.ok(bodyLines.length > 1, 'the long bullet is wrapped');
+    for (const line of bodyLines) assert.ok(line.length <= 100, `<=100: "${line}"`);
+    assert.match(bodyLines[0], /^- word/);
+    assert.match(bodyLines[1], /^ {2}word/, 'continuation lines align under the bullet text');
+  });
+
+  it('never rewrites the header beyond whitespace (over-long headers still reject)', () => {
+    const header = `feat(x): ${'y'.repeat(80)} (#1)`;
+    assert.equal(formatMessage(header), header);
+  });
+
+  it('wrapLine leaves unbreakable tokens (URLs) on their own line', () => {
+    const url = `https://example.com/${'a'.repeat(120)}`;
+    assert.deepEqual(wrapLine(url, 100), [url]);
   });
 });
 
@@ -82,5 +147,24 @@ describe('commit-and-push — CLI exit codes', () => {
     const r = spawnSync('node', [SCRIPT, '-m', 'not a semantic commit'], { encoding: 'utf8' });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /commit rejected:/);
+  });
+
+  it('every rejection restates the full message contract (FORMAT_HELP)', () => {
+    const r = spawnSync('node', [SCRIPT, '-m', 'not a semantic commit'], { encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /Message contract/);
+    assert.match(r.stderr, /MAX 72 chars/);
+    assert.ok(FORMAT_HELP.includes('no approval step'));
+  });
+
+  it('reads the full message from stdin via -F - (no temp file)', () => {
+    // Invalid TYPE on purpose: proves the stdin text reached the validator
+    // (parse succeeded) without ever touching git.
+    const r = spawnSync('node', [SCRIPT, '-F', '-'], {
+      encoding: 'utf8',
+      input: 'nope(x): reach the validator (#1)\n\nbody\n',
+    });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /not an allowed commit type/);
   });
 });
