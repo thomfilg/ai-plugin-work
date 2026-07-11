@@ -14,6 +14,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 const registerBriefGate = require('../brief-gate');
+const registerQuestionRouter = require('../question-router');
 
 function makeRegistry() {
   const byStep = {};
@@ -24,6 +25,15 @@ function makeRegistry() {
     },
     run: (step, entry, ctx) => (byStep[step] || []).forEach((fn) => fn(entry, ctx)),
   };
+}
+
+/**
+ * Register the brief_gate chain in index.js order (GH-543): the brief-gate
+ * injector runs first, the question-router routes/batches after it.
+ */
+function registerChain(reg) {
+  registerBriefGate(reg.register);
+  registerQuestionRouter(reg.register);
 }
 
 const validManifest = () => ({
@@ -126,7 +136,7 @@ describe('brief-gate Gate A sibling-gap injection', () => {
       ].join('\n')
     );
     const reg = makeRegistry();
-    registerBriefGate(reg.register);
+    registerChain(reg);
     const entry = { step: 'brief_gate' };
     reg.run('brief_gate', entry, ctx());
     assert.ok(entry._overrideInstruction);
@@ -134,6 +144,29 @@ describe('brief-gate Gate A sibling-gap injection', () => {
     const qs = entry._overrideInstruction.userQuestions || [];
     assert.equal(qs.length, 1);
     assert.match(qs[0].question, /GH-100/);
+  });
+
+  it('injector only merges into the payload — routing is the question-router job (GH-543)', () => {
+    fs.writeFileSync(
+      path.join(tmp, 'brief.md'),
+      [
+        '## Out of scope (sibling-owned)',
+        '- `lib/x.ts` — owned by GH-100 (status: Done, PR: #50). Reason: read path missing.',
+        '',
+      ].join('\n')
+    );
+    const reg = makeRegistry();
+    registerBriefGate(reg.register); // injector alone, no router
+    const entry = { step: 'brief_gate' };
+    reg.run('brief_gate', entry, ctx());
+    assert.equal(
+      entry._overrideInstruction,
+      undefined,
+      'the injector must not set _overrideInstruction itself'
+    );
+    const qs = (entry.askUserQuestionPayload || {}).questions || [];
+    assert.equal(qs.length, 1);
+    assert.equal(qs[0].kind, 'sibling-gap');
   });
 
   it('passes when every gap has a matching decision', () => {
@@ -172,7 +205,7 @@ describe('brief-gate open-questions handling (regression)', () => {
 
   it('emits local-questions note when only local questions present', () => {
     const reg = makeRegistry();
-    registerBriefGate(reg.register);
+    registerChain(reg);
     const entry = {
       step: 'brief_gate',
       askUserQuestionPayload: {
@@ -186,7 +219,7 @@ describe('brief-gate open-questions handling (regression)', () => {
 
   it('builds blocked override for cross-ticket / user questions', () => {
     const reg = makeRegistry();
-    registerBriefGate(reg.register);
+    registerChain(reg);
     const entry = {
       step: 'brief_gate',
       askUserQuestionPayload: {
@@ -207,7 +240,7 @@ describe('brief-gate answers-file transport (GH-543)', () => {
 
   function blockedEntry() {
     const reg = makeRegistry();
-    registerBriefGate(reg.register);
+    registerChain(reg);
     const entry = {
       step: 'brief_gate',
       askUserQuestionPayload: {
@@ -269,7 +302,7 @@ describe('brief-gate answers-file transport (GH-543)', () => {
       ].join('\n')
     );
     const reg = makeRegistry();
-    registerBriefGate(reg.register);
+    registerChain(reg);
     const entry = { step: 'brief_gate' };
     reg.run('brief_gate', entry, ctx());
     assert.ok(entry._overrideInstruction);

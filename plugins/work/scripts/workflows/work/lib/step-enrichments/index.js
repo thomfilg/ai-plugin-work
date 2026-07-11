@@ -69,6 +69,13 @@ require('./ticket')(register);
 require('./related-tickets-inject')(register);
 require('./brief')(register);
 require('./brief-gate')(register);
+// GH-543: the question-router owns brief_gate question DELIVERY (local/user
+// routing + batching to AskUserQuestion's 4-question cap). Registered right
+// after the brief-gate injector — the position the routing was extracted
+// from — and BEFORE discrepancy-gate, so brief_gate discrepancy delivery
+// stays opportunistic (surfacing it at every gate is follow-up work; the
+// router caps any discrepancy questions that do ride along in the payload).
+require('./question-router')(register);
 require('./spec-gate')(register);
 require('./context-inject')(register);
 require('./tasks-scope-gate')(register);

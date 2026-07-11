@@ -9,9 +9,12 @@
  * Decision matrix:
  *   1. `!s.hasBrief`                           → DEFER "No brief.md present"
  *   2. `brief.md` unreadable (fail-closed)      → RUN   "brief.md unreadable — regenerate brief"
- *   3. Parser returns zero blocking questions  → DEFER "All blocking questions resolved"
+ *   3. Zero blocking questions AND zero
+ *      undecided sibling gaps (GH-543)          → DEFER "All blocking questions resolved"
  *   4. Otherwise                               → RUN with an AskUserQuestion
  *                                                payload + `onResolve: 'rewrite brief.md'`
+ *                                                (sibling-gap-only briefs emit an empty
+ *                                                payload; the enrichment injector fills it)
  *
  * The RUN payload instructs the orchestrator to invoke AskUserQuestion
  * inline (hooks are non-interactive — the gate step is a planning-time
@@ -30,6 +33,8 @@
 const fs = require('fs');
 const openQuestions = require('../lib/open-questions');
 const { applyGateResolutions } = require('../lib/apply-gate-resolutions');
+const { findUnresolvedSiblingGaps } = require('../../lib/brief-sibling-gaps');
+const { MAX_PER_ASK } = require('../lib/question-batching');
 const { T, renderQuestionText, getRuntime } = require('../../lib/instruction-vocab');
 
 /**
@@ -94,8 +99,13 @@ function briefGateStep(add, s, ctx) {
 
   const questions = openQuestions.parse(markdown);
   const blocking = openQuestions.findBlocking(questions);
+  // GH-543: undecided sibling-gap entries block the gate too. Without this
+  // the gate would DEFER the moment open questions deplete, enrichments
+  // would never run (they require a delegating RUN entry), and any trailing
+  // sibling-gap batches would be silently dropped instead of delivered.
+  const unresolvedGaps = findUnresolvedSiblingGaps(markdown).unresolved;
 
-  if (blocking.length === 0) {
+  if (blocking.length === 0 && unresolvedGaps.length === 0) {
     add(STEPS.brief_gate, 'DEFER', null, 'All blocking questions resolved');
     return;
   }
@@ -103,24 +113,62 @@ function briefGateStep(add, s, ctx) {
   // The question renderer keeps claude byte-identical and swaps the codex
   // vocabulary (request_user_input prose / parked-gate notice per mode, C3).
   const rt = getRuntime();
-  add(
-    STEPS.brief_gate,
-    'RUN',
-    T('tool.question', {}, rt.name),
-    `Resolve ${blocking.length} unresolved cross-ticket/architectural question(s)`,
-    {
-      agentType: 'general-purpose',
-      agentPrompt: renderQuestionText(
-        `Use AskUserQuestion to resolve ${blocking.length} unresolved open question(s) in brief.md, then call applyBriefResolutions() to persist the answers.`,
+
+  if (blocking.length === 0) {
+    // Only sibling-gap decisions remain. Same delegate shape as the
+    // open-question branch so enrichAndReturn executes the enrichment chain
+    // (sibling-gap injector → question-router) and the questions — batched
+    // to the AskUserQuestion cap — actually reach the user. The step emits
+    // an empty payload; the injector fills it.
+    addQuestionRun(add, ctx, rt, {
+      reason: `Resolve ${unresolvedGaps.length} unresolved sibling-gap decision(s)`,
+      prompt: renderQuestionText(
+        `Use AskUserQuestion to resolve ${unresolvedGaps.length} unresolved sibling-gap decision(s) in brief.md${batchingSuffix(unresolvedGaps.length)}, then call applyBriefResolutions() to persist the answers.`,
         rt
       ),
-      askUserQuestionPayload: buildAskUserQuestionPayload(blocking),
-      onResolve: 'rewrite brief.md',
-      // GH-543 file transport: the CLI reads the default answers file
-      // (<tasksDir>/.brief-gate-answers.json) — no answer JSON on the argv.
-      postResolveCommand: `node "${path.join(__dirname, '..', 'scripts', 'apply-brief-gate-answers.js')}" "${briefPath}"`,
-    }
-  );
+      payload: buildAskUserQuestionPayload([]),
+      briefPath,
+    });
+    return;
+  }
+
+  addQuestionRun(add, ctx, rt, {
+    reason: `Resolve ${blocking.length} unresolved cross-ticket/architectural question(s)`,
+    prompt: renderQuestionText(
+      `Use AskUserQuestion to resolve ${blocking.length} unresolved open question(s) in brief.md${batchingSuffix(blocking.length)}, then call applyBriefResolutions() to persist the answers.`,
+      rt
+    ),
+    payload: buildAskUserQuestionPayload(blocking),
+    briefPath,
+  });
+}
+
+/**
+ * Emit the AskUserQuestion RUN entry shared by the open-question and
+ * sibling-gap branches. `prompt` arrives pre-rendered through
+ * renderQuestionText at the construction site (the vocab lint requires the
+ * tool literal inside the renderer call). The postResolveCommand is the
+ * GH-543 file-transport CLI: it reads the default answers file
+ * (<tasksDir>/.brief-gate-answers.json) — no answer JSON ever rides the argv.
+ */
+function addQuestionRun(add, ctx, rt, { reason, prompt, payload, briefPath }) {
+  const { STEPS, path } = ctx;
+  add(STEPS.brief_gate, 'RUN', T('tool.question', {}, rt.name), reason, {
+    agentType: 'general-purpose',
+    agentPrompt: prompt,
+    askUserQuestionPayload: payload,
+    onResolve: 'rewrite brief.md',
+    postResolveCommand: `node "${path.join(__dirname, '..', 'scripts', 'apply-brief-gate-answers.js')}" "${briefPath}"`,
+  });
+}
+
+/**
+ * GH-543: batching note appended to the gate prompt ONLY above the
+ * AskUserQuestion cap, keeping the ≤4-question claude prompts byte-identical
+ * to the pre-batching pins (question-gates-runtime.test.js).
+ */
+function batchingSuffix(count) {
+  return count > MAX_PER_ASK ? ` (in batches of at most ${MAX_PER_ASK})` : '';
 }
 
 /**
