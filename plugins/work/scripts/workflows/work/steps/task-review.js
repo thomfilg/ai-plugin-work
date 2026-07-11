@@ -12,6 +12,8 @@
  *   3. Final task (current == last)           -> DEFER "Final task -- /check handles review"
  *   4. Fix rounds exhausted (>= max)          -> RUN  AskUserQuestion escalation
  *   5. Intermediate task needing review       -> RUN  parallel /tests-review + /code-review
+ *      (unless commit evidence is missing — GH-693 — then RUN AskUserQuestion
+ *      escalation instead of scheduling a vacuous review)
  */
 
 'use strict';
@@ -75,10 +77,51 @@ function addEscalation(add, ctx, { currentIdx, totalTasks, fixRounds, maxFixRoun
 }
 
 /**
+ * GH-693: commit evidence missing — computeTaskDiff returned { blocked }.
+ * Never schedule a vacuous review; escalate to the user via the same
+ * AskUserQuestion shape as the fix-rounds escalation, and audit the block.
+ */
+function addBlockedEscalation(add, ctx, { currentIdx, totalTasks, reason }) {
+  const { STEPS } = ctx;
+  const rt = getRuntime();
+  add(
+    STEPS.task_review,
+    'RUN',
+    T('tool.question', {}, rt.name),
+    `Task ${currentIdx + 1}/${totalTasks} blocked: commit evidence missing (${reason}) -- escalating to user`,
+    {
+      agentType: 'general-purpose',
+      agentPrompt: renderQuestionText(
+        `Task ${currentIdx + 1} cannot be reviewed: ${reason}. Use AskUserQuestion to ask the user whether to run the commit step now, fetch the base ref, or abort.`,
+        rt
+      ),
+    }
+  );
+  appendAction(ctx.ticket, {
+    step: STEPS.task_review,
+    what: `task ${currentIdx + 1}/${totalTasks} review blocked: commit evidence missing (${reason}) -- escalating`,
+  });
+}
+
+/**
+ * Compute the task-scoped diff range for the review. GH-693 blocked results
+ * ({ blocked, reason }) pass through; genuine exceptions -> null (the review
+ * proceeds with the "computed from .last-commit-sha" note, as before).
+ */
+function computeDiffRange(reviewTasksDir, ticket) {
+  try {
+    return computeTaskDiff(reviewTasksDir, ticket);
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
  * Decision 5: intermediate task -- run parallel tests-review + code-review.
  */
 function addReviewRun(add, ctx, { currentIdx, totalTasks, currentTask }) {
   const { STEPS } = ctx;
+  const taskTitle = currentTask?.title || 'unknown';
   // Override tasksDir to per-task subfolder when task context is available.
   // ctx._currentTaskIdx is set by the implement step; when present (not undefined/null),
   // use taskSegment() to construct the per-task path for artifact resolution.
@@ -87,30 +130,31 @@ function addReviewRun(add, ctx, { currentIdx, totalTasks, currentTask }) {
       ? path.join(ctx.tasksDir, taskSegment(currentIdx + 1))
       : ctx.tasksDir;
   // Compute task-scoped diff range via computeTaskDiff (reads .last-commit-sha,
-  // validates, falls back to base branch on missing/invalid SHA). The range is
-  // passed to the orchestrator in plan-entry metadata so /tests-review and
+  // validates, falls back to the merge-base on missing/invalid SHA). The range
+  // is passed to the orchestrator in plan-entry metadata so /tests-review and
   // /code-review receive the task-specific diff, not the full branch diff.
-  let diffRange;
-  try {
-    diffRange = computeTaskDiff(reviewTasksDir, ctx.ticket);
-  } catch (_e) {
-    diffRange = null;
+  const diffRange = computeDiffRange(reviewTasksDir, ctx.ticket);
+  // GH-693: zero commits ahead of base (or git failure) — the diff range is
+  // vacuous. Escalate instead of scheduling a review that reviews nothing.
+  if (diffRange && diffRange.blocked) {
+    addBlockedEscalation(add, ctx, { currentIdx, totalTasks, reason: diffRange.reason });
+    return;
   }
   add(
     STEPS.task_review,
     'RUN',
     'Skill(tests-review) + Skill(code-review)',
-    `Task ${currentIdx + 1}/${totalTasks}: review "${currentTask?.title || 'unknown'}" before advancing`,
+    `Task ${currentIdx + 1}/${totalTasks}: review "${taskTitle}" before advancing`,
     {
       agentType: 'skill',
-      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Scope both reviews to the task diff range${diffRange ? ` (base=${diffRange.base}, head=${diffRange.head})` : ' (computed from .last-commit-sha)'}. Set REPORT_FOLDER=${reviewTasksDir} for both skills. Aggregate results and fail the gate if either review fails.`,
+      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${taskTitle}"). Scope both reviews to the task diff range${diffRange ? ` (base=${diffRange.base}, head=${diffRange.head})` : ' (computed from .last-commit-sha)'}. Set REPORT_FOLDER=${reviewTasksDir} for both skills. Aggregate results and fail the gate if either review fails.`,
       diffRange,
       reportFolder: reviewTasksDir,
     }
   );
   appendAction(ctx.ticket, {
     step: STEPS.task_review,
-    what: `task ${currentIdx + 1}/${totalTasks} review scheduled for "${currentTask?.title || 'unknown'}"`,
+    what: `task ${currentIdx + 1}/${totalTasks} review scheduled for "${taskTitle}"`,
   });
 }
 

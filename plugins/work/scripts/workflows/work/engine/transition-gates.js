@@ -2,9 +2,9 @@
  * transition-gates.js
  *
  * The gate checks run by transition-step.js before a transition is applied:
- * TDD evidence, multi-task completion, DEFER re-evaluation, the check-to-PR
- * quality gate, check-drift detection (GH-299), and the generic step-verify
- * gate (GH-260).
+ * TDD evidence, multi-task completion, commit evidence (GH-693), DEFER
+ * re-evaluation, the check-to-PR quality gate, check-drift detection
+ * (GH-299), and the generic step-verify gate (GH-260).
  *
  * Each gate takes the shared transition context and returns an error result
  * to surface, or null to proceed. `runTransitionGates` chains them in order.
@@ -154,6 +154,62 @@ function multiTaskGate(ctx) {
     error: true,
     message: `Cannot leave implement: task ${currentIdx + 1}/${totalTasks} done, ${totalTasks - currentIdx - 1} tasks remaining. Advance to next task first.`,
     gate: 'multi-task',
+  };
+}
+
+/** Resolve the configured base branch for the commit-evidence gate. */
+function resolveGateBase() {
+  try {
+    const { getBaseBranch } = require(path.join(__dirname, '..', '..', 'lib', 'config'));
+    return getBaseBranch() || 'origin/main';
+  } catch {
+    return 'origin/main';
+  }
+}
+
+const GATE_EXEC_OPTS = { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] };
+
+/** Commits ahead of base; throws when git fails or output is unparseable. */
+function gateCommitsAhead(baseBranch) {
+  // Dynamic require so tests can mock child_process.execFileSync.
+  const output = require('child_process')
+    .execFileSync('git', ['rev-list', '--count', `${baseBranch}..HEAD`], GATE_EXEC_OPTS)
+    .trim();
+  const count = Number.parseInt(output, 10);
+  if (!Number.isFinite(count)) throw new Error(`unparseable output "${output}"`);
+  return count;
+}
+
+/**
+ * GH-693: Commit-evidence gate — forward transitions out of commit or
+ * task_review require >=1 commit ahead of base (`git rev-list --count`).
+ * task_review deliberately STAYS a softStep (GH-211 advisory), so
+ * stepVerifyGate never consults it — this additive gate makes "completed
+ * with zero commits" impossible for both steps on every transition path.
+ * No deadlock: task_review only runs after commit, which proved commits
+ * ahead. Fail-closed on git errors with a DISTINCT "git failed" message.
+ */
+function commitEvidenceGate(ctx) {
+  const { currentStep, targetStep, isForward, deps } = ctx;
+  const gated = currentStep === deps.STEPS.commit || currentStep === deps.STEPS.task_review;
+  if (!isForward || !gated || currentStep === targetStep) return null;
+  const baseBranch = resolveGateBase();
+  let count;
+  try {
+    count = gateCommitsAhead(baseBranch);
+  } catch (err) {
+    const detail = err && typeof err.message === 'string' ? err.message : String(err);
+    return {
+      error: true,
+      gate: 'commit-evidence',
+      message: `BLOCKED: git failed while checking commit evidence for ${currentStep} → ${targetStep} — \`git rev-list --count ${baseBranch}..HEAD\` errored (${detail}). Repair the worktree (git fetch origin main, verify BASE_BRANCH) and retry.`,
+    };
+  }
+  if (count >= 1) return null;
+  return {
+    error: true,
+    gate: 'commit-evidence',
+    message: `BLOCKED: cannot leave ${currentStep} with zero commits ahead of ${baseBranch} — \`git rev-list --count ${baseBranch}..HEAD\` returned ${count}. Run the commit step to commit the task work first, or \`git fetch\` the base ref if ${baseBranch} is stale.`,
   };
 }
 
@@ -312,6 +368,7 @@ function runTransitionGates(ctx) {
   return (
     tddGate(ctx) ||
     multiTaskGate(ctx) ||
+    commitEvidenceGate(ctx) ||
     deferGate(ctx) ||
     checkToPrGate(ctx) ||
     checkDriftGate(ctx) ||

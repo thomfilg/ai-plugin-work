@@ -83,6 +83,11 @@ function writeContext(ctx, diff, files) {
 
 function validate(ctx) {
   const diff = computeDiff(ctx);
+  if (diff && diff.blocked) {
+    // GH-693: surface the same blocked state as the plan-time gate instead
+    // of auditing an empty range (validator-unification invariant).
+    return { ok: false, errors: [diff.reason] };
+  }
   const root = ctx.worktreeRoot || process.cwd();
   const files = gitDiffNameOnly(diff.base, diff.head, root);
   if (!files.length) {
