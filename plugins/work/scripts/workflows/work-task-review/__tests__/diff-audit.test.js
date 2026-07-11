@@ -33,7 +33,7 @@ describe('diff_audit validate (GH-693 blocked propagation)', () => {
     origExecFileSync = cp.execFileSync;
     cp.execFileSync = (cmd, args, opts) => {
       if (cmd === 'git' && args[0] === 'rev-list' && args[1] === '--count') {
-        if (revList instanceof Error) throw revList;
+        if (typeof revList !== 'string') throw revList;
         return revList;
       }
       if (cmd === 'git' && args[0] === 'merge-base' && args[1] !== '--is-ancestor') {

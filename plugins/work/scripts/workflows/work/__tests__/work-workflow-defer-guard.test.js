@@ -321,7 +321,11 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
     gitCommit('base');
     git('update-ref', 'refs/remotes/origin/main', git('rev-parse', 'HEAD').trim());
     gitCommit('task work');
-    const gitOpts = { cwd: repoDir, env: { BASE_BRANCH: 'main' } };
+    // Pin TASKS_BASE explicitly: with cwd inside the throwaway repo, config.js
+    // would otherwise re-derive WORKTREES_BASE from that repo's toplevel and
+    // the orchestrator would look for state under /tmp/tasks (CI has no
+    // TASKS_BASE env, unlike local runs).
+    const gitOpts = { cwd: repoDir, env: { BASE_BRANCH: 'main', TASKS_BASE } };
 
     try {
       // First transition: task_review -> check (check is deferred, plan is fresh) — should succeed

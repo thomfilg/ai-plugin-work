@@ -14,7 +14,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const TEMP = path.join(os.tmpdir(), 'task-review-gate-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) —
+// never write directly into the shared os.tmpdir() (insecure-temporary-file).
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'task-review-gate-test-'));
 let testCount = 0;
 let tasksDir;
 
