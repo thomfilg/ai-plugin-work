@@ -74,7 +74,6 @@ plugins/work/scripts/workflows/work/lib/gherkin-task-refs.js
 plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-screenshot-validator.js
 plugins/work/scripts/workflows/work/engine/cli.js
 plugins/work/scripts/workflows/work/lib/work-actions.js
-plugins/work/scripts/workflows/lib/agent-detection.js
 plugins/work/scripts/workflows/lib/hooks/enforce-screenshot-requirement.js
 plugins/work/scripts/workflows/work/steps/implement.js
 plugins/work/scripts/workflows/work-tasks/lib/phases/draft.js

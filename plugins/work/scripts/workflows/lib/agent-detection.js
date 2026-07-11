@@ -11,6 +11,9 @@ const fs = require('fs');
 // scan). The claude scanning helpers below stay byte-for-byte — they are the
 // characterization-locked claude leg.
 const { sniffFormat, detectAgentContext } = require('./runtime/transcript');
+// Structural marker helpers + the GH-695 dispatched-agent predicate — moved
+// verbatim to ./transcript-markers (file-size burndown); re-exported below.
+const { readInitialMarkers, isDispatchedAgentContext } = require('./transcript-markers');
 
 /**
  * Normalize an agent name by stripping optional namespace prefixes and lowercasing.
@@ -239,66 +242,6 @@ function isRunningInAgent(transcriptPath, agentAliases, hookData) {
 }
 
 /**
- * Extract the prose text of a single system/user transcript entry.
- * Non-message entries and unknown content shapes yield an empty string.
- */
-function extractEntryText(entry) {
-  if (entry.type !== 'system' && entry.type !== 'user') {
-    return '';
-  }
-  const msgContent = entry.message?.content;
-  if (typeof msgContent === 'string') {
-    return msgContent;
-  }
-  if (Array.isArray(msgContent)) {
-    return msgContent.map((i) => i.text || '').join(' ');
-  }
-  return '';
-}
-
-/**
- * Read the structural subagent markers from early transcript lines.
- *
- * Mirrors the per-line JSON.parse-in-try/catch pattern used by
- * isSubagentFromTranscript. Untrusted fields are read defensively.
- *
- * @param {string[]} earlyLines - The first N raw transcript lines
- * @returns {{attributionAgent: string, isSidechain: boolean, promptText: string}}
- */
-function readInitialMarkers(earlyLines) {
-  let attributionAgent = '';
-  let isSidechain = false;
-  let promptText = '';
-
-  for (const line of earlyLines) {
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue; // skip non-JSON lines
-    }
-
-    // A sidechain flag on ANY early line marks this as a subagent transcript.
-    if (entry.isSidechain === true) {
-      isSidechain = true;
-    }
-
-    // First attributionAgent wins — it is the authoritative identity.
-    if (!attributionAgent && entry.attributionAgent) {
-      attributionAgent = String(entry.attributionAgent);
-    }
-
-    // Accumulate prose from system/user messages for the gated name check.
-    const text = extractEntryText(entry);
-    if (text) {
-      promptText = promptText ? `${promptText} ${text}` : text;
-    }
-  }
-
-  return { attributionAgent, isSidechain, promptText };
-}
-
-/**
  * Detect agent identity from the subagent's own transcript.
  *
  * A genuine Task-spawned subagent transcript carries positive structural
@@ -352,60 +295,6 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
 }
 
 /**
- * GH-695: True when the current hook context belongs to ANY dispatched
- * (sub)agent, regardless of which one — alias-agnostic, no allowlist to
- * maintain. Used by the terminal state-script bypasses, which are
- * orchestrator-only: a dispatched agent must report BLOCKED instead of
- * finishing the workflow itself.
- *
- * Signals (any one suffices):
- *   - hookData.agent_type set (any value — set by Claude Code inside a subagent)
- *   - CLAUDE_CURRENT_AGENT env var set (any value)
- *   - transcriptPath contains '/subagents/' (subagent transcript location)
- *   - structural markers (attributionAgent / isSidechain) in the first 10
- *     transcript lines, via the existing readInitialMarkers helper
- *
- * Fail direction: read/parse errors → false (fail-open at the hook). Failing
- * closed here would deadlock the terminal step with no in-band repair; the
- * completeWork script-side precondition is the backstop.
- *
- * @param {string} [transcriptPath] - Path to the session transcript
- * @param {object} [hookData] - Hook payload from Claude Code
- * @returns {boolean} true when this context is a dispatched agent
- */
-function isDispatchedAgentContext(transcriptPath, hookData) {
-  if (hookData?.agent_type) {
-    debugLog('dispatchedContext', `agent_type=${hookData.agent_type}`);
-    return true;
-  }
-  if (process.env.CLAUDE_CURRENT_AGENT) {
-    debugLog('dispatchedContext', `CLAUDE_CURRENT_AGENT=${process.env.CLAUDE_CURRENT_AGENT}`);
-    return true;
-  }
-  if (!transcriptPath) return false;
-  if (String(transcriptPath).includes('/subagents/')) {
-    debugLog('dispatchedContext', 'transcript path contains /subagents/');
-    return true;
-  }
-  try {
-    if (!fs.existsSync(transcriptPath)) return false;
-    const content = fs.readFileSync(transcriptPath, 'utf8');
-    const lines = content.trim().split('\n');
-    const { attributionAgent, isSidechain } = readInitialMarkers(lines.slice(0, 10));
-    if (attributionAgent || isSidechain === true) {
-      debugLog(
-        'dispatchedContext',
-        attributionAgent ? `attributionAgent=${attributionAgent}` : 'isSidechain marker'
-      );
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Word-boundary match of any agent alias name within sidechain prompt text.
  * Boundaries avoid incidental substring hits (e.g. "qa" inside "quality").
  */
@@ -429,6 +318,6 @@ module.exports = {
   isRunningInAgent,
   isSubagentFromTranscript,
   isSubagentFromInitialPrompt,
-  isDispatchedAgentContext,
+  isDispatchedAgentContext, // GH-695 — lives in ./transcript-markers, re-exported
   normalizeAgentName,
 };
