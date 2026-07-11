@@ -197,6 +197,15 @@ Prevents concurrent `/work` sessions:
 - Cleans up on PreCompact/Stop events
 - Controlled by `SESSION_GUARD_ENABLED` env var
 
+The guard banner prints on state transitions only (GH-540): the first claim,
+a cwd/owner update, or any change to the persisted announce-state fingerprint.
+Repeat `init` calls with unchanged state are silent — pass `--show-guard` to
+`init` to print the current guard status on demand:
+
+```bash
+node session-guard.js init TICKET-123 /work --show-guard
+```
+
 ## Error Logging
 
 **File:** `scripts/workflows/lib/hook-error-log.js`

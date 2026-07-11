@@ -77,25 +77,77 @@ test('emit blocks on missing required sections', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+const FULL_REPORT_MD = [
+  '## Overview',
+  'x',
+  '## Brief / Spec / Tasks',
+  'y',
+  '## QA',
+  'z',
+  '## Code review',
+  'a',
+  '## Completion',
+  'b',
+  '## CI / Follow-up',
+  'c',
+  '',
+  'Status: COMPLETE',
+].join('\n');
+
 test('emit passes when all sections + Status present', () => {
-  const md = [
-    '## Overview',
-    'x',
-    '## Brief / Spec / Tasks',
-    'y',
-    '## QA',
-    'z',
-    '## Code review',
-    'a',
-    '## Completion',
-    'b',
-    '## CI / Follow-up',
-    'c',
-    '',
-    'Status: COMPLETE',
-  ].join('\n');
-  const { root, tasksDir } = makeTasksDir({ 'reports.md': md });
+  const { root, tasksDir } = makeTasksDir({ 'reports.md': FULL_REPORT_MD });
   const r = emit.validate({ tasksDir });
   assert.equal(r.ok, true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// GH-318: learnings.md is a pure observability companion — never gates emit.
+test('emit stays ok when learnings.md is absent, with a warning', () => {
+  const { root, tasksDir } = makeTasksDir({ 'reports.md': FULL_REPORT_MD });
+  const r = emit.validate({ tasksDir });
+  assert.equal(r.ok, true);
+  assert.ok((r.warnings || []).some((w) => w.includes('learnings.md')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('emit stays ok when learnings.md is malformed, with a warning', () => {
+  const { root, tasksDir } = makeTasksDir({
+    'reports.md': FULL_REPORT_MD,
+    'learnings.md': '# Learnings — ECHO-7777\n\n## Decisions\n- only decisions\n',
+  });
+  const r = emit.validate({ tasksDir });
+  assert.equal(r.ok, true);
+  assert.ok((r.warnings || []).some((w) => w.includes('learnings.md')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('emit accepts a well-formed learnings.md with no warning', () => {
+  const learnings = [
+    '# Learnings — ECHO-7777',
+    '',
+    '## Decisions',
+    '- a',
+    '',
+    '## Lessons Learned',
+    '- b',
+    '',
+    '## Patterns Discovered',
+    '- c',
+    '',
+    '## Surprises',
+    '- d',
+    '',
+    '## Metrics',
+    '- e',
+    '',
+  ].join('\n');
+  const { root, tasksDir } = makeTasksDir({
+    'reports.md': FULL_REPORT_MD,
+    'learnings.md': learnings,
+  });
+  const r = emit.validate({ tasksDir });
+  assert.equal(r.ok, true);
+  assert.equal((r.warnings || []).length, 0);
+  assert.ok(r.summary.includes('learnings.md'));
   fs.rmSync(root, { recursive: true, force: true });
 });
