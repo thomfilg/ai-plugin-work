@@ -41,7 +41,8 @@ function instructions(ctx) {
     `Memory: **${ctx.memory.name}**`,
     '',
     `1. Call \`${ctx.memory.rememberTool}\` with: ticket id, final status, brief outcome summary.`,
-    `2. \`touch ${path.join(ctx.tasksDir, SENTINEL)}\`.`,
+    '2. If `learnings.md` exists, include its headline Decisions/Surprises in the same call (GH-318).',
+    `3. \`touch ${path.join(ctx.tasksDir, SENTINEL)}\`.`,
     '',
   ].join('\n');
 }

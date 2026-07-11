@@ -2,8 +2,10 @@
 name: reports-writer
 description: |
   Aggregates per-step artifacts (brief, spec, tasks, qa, code-review,
-  completion, CI) into a single cross-step summary `reports.md` during
-  the `reports` workflow step (between cleanup and complete).
+  completion, CI) into a single cross-step summary `reports.md` — plus a
+  structured `learnings.md` (decisions, lessons, patterns, surprises,
+  metrics) — during the `reports` workflow step (between cleanup and
+  complete).
   CRITICAL: This agent must NEVER invoke itself via Task tool — do the
   summary work directly.
 tools: Bash, Glob, Grep, Read, TodoWrite
@@ -52,8 +54,52 @@ exist. If missing, /check has not been completed — re-run /check first.
 - Final `Status: COMPLETE` or `Status: PARTIAL`
   (PARTIAL = at least one upstream artifact had `Status: BLOCKED`/`FAILED`)
 
+## Learnings (`learnings.md`) — GH-318
+
+Alongside `reports.md`, write `learnings.md` in the same tasks dir:
+the non-obvious discoveries (gotchas, patterns, surprises) a future
+worker on this codebase area would otherwise rediscover. Pure
+observability output — the emit phase warns on a missing/malformed
+file but NEVER blocks on it.
+
+Input artifacts (read whichever exist in the tasks dir / repo):
+
+- `brief.md`, `spec.md`, `tasks.md`
+- `code-review.check.md`, `tests.check.md`, `completion.check.md`
+- `review-accountability.json` (PR comment resolutions)
+- follow-up-pr state (CI failures, bot comment history)
+- git diff stats (e.g. `git diff --stat` against the base branch)
+
+Exact shape (heading + five sections, in this order):
+
+```markdown
+# Learnings — <TICKET>
+
+## Decisions
+- <choice made + why, e.g. library picked to match existing patterns>
+- <scope deliberately skipped/deferred + where that was decided>
+
+## Lessons Learned
+- <what tests/tooling caught that manual checks missed>
+- <undocumented setup steps discovered the hard way>
+
+## Patterns Discovered
+- <codebase conventions future work should follow>
+
+## Surprises
+- <behavior that contradicted expectations (API quirks, reviewer false positives)>
+
+## Metrics
+- <check→implement retry loops, flaky CI, notable diff stats>
+```
+
+Keep entries non-obvious: skip anything a future reader would find in
+the code or docs anyway. An empty section keeps its heading with a
+single `- none` bullet.
+
 ## Memory
 
 If a memory plugin is detected, call the configured `*_remember` tool
-in the `memorize` phase with: ticket id, final status, headline summary.
+in the `memorize` phase with: ticket id, final status, headline summary
+(plus headline Decisions/Surprises from `learnings.md` if it exists).
 Then `touch .reports-memorized`.
