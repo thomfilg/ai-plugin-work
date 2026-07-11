@@ -16,6 +16,7 @@ const path = require('path');
 const { computeTaskNum, runTransitionGates, cleanStaleTddEvidence } = require(
   path.join(__dirname, 'transition-gates')
 );
+const { computeGateInputHashes } = require(path.join(__dirname, '..', 'lib', 'gate-input-hashes'));
 
 /** Fresh work state for a first-ever transition. */
 function initialTransitionState(deps, safeTicket) {
@@ -75,10 +76,12 @@ function completeSkippedSteps(ctx, currentIdx, targetIdx) {
  * GH-398 Task 7: Record gateFingerprint when transitioning a gate step to
  * completed. The current step (which gets marked completed) is the gate;
  * we fingerprint it with the plugin version + ISO timestamp.
+ * GH-419: plus sha256 content hashes of the gate's input artifacts
+ * (write-only audit data — nothing reads or enforces on it).
  * Back-compat: existing state files without gateFingerprints continue to
  * load — the field is created lazily here.
  */
-function recordGateFingerprint(ws, currentStep) {
+function recordGateFingerprint(ws, currentStep, tasksDir) {
   if (
     !currentStep ||
     !currentStep.endsWith('_gate') ||
@@ -99,6 +102,7 @@ function recordGateFingerprint(ws, currentStep) {
   ws.gateFingerprints[currentStep] = {
     pluginVersion,
     satisfiedAt: new Date().toISOString(),
+    inputs: computeGateInputHashes(currentStep, tasksDir),
   };
 }
 
@@ -124,7 +128,7 @@ function applyTransition(ctx) {
   }
 
   ws.lastTransitionTimestamp = new Date().toISOString();
-  recordGateFingerprint(ws, currentStep);
+  recordGateFingerprint(ws, currentStep, path.join(deps.TASKS_BASE, safeTicket));
   deps.saveWorkState(safeTicket, ws);
 
   const result = {
