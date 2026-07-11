@@ -201,7 +201,7 @@ describe('brief-gate step', () => {
     );
   });
 
-  it('RUN entry includes postResolveCommand referencing applyBriefResolutions', () => {
+  it('RUN entry postResolveCommand uses the file transport (GH-543: no argv-JSON)', () => {
     const dir = makeTmpTasksDir(BRIEF_ONE_BLOCKING_ARCH);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
@@ -216,29 +216,36 @@ describe('brief-gate step', () => {
     );
     assert.match(
       entry.postResolveCommand,
-      /applyBriefResolutions/,
-      'postResolveCommand must reference applyBriefResolutions'
+      /apply-brief-gate-answers\.js/,
+      'postResolveCommand must invoke the answers-file CLI'
     );
-    assert.match(
-      entry.postResolveCommand,
-      /brief-gate\.js/,
-      'postResolveCommand must require brief-gate.js'
+    assert.ok(
+      !entry.postResolveCommand.includes('$RESOLUTIONS_JSON'),
+      'postResolveCommand must not interpolate answer JSON on the command line'
     );
-    assert.match(
-      entry.postResolveCommand,
-      /\$RESOLUTIONS_JSON/,
-      'postResolveCommand must reference $RESOLUTIONS_JSON placeholder'
-    );
-    assert.match(
-      entry.postResolveCommand,
-      /node -e/,
-      'postResolveCommand must be a node -e one-liner'
+    assert.ok(
+      !entry.postResolveCommand.includes('node -e'),
+      'postResolveCommand must not be a node -e one-liner'
     );
     // Verify the path includes the actual briefPath (tasks dir + brief.md)
     const expectedBriefPath = path.join(dir, 'brief.md');
     assert.ok(
       entry.postResolveCommand.includes(expectedBriefPath),
       `postResolveCommand must include briefPath: ${expectedBriefPath}`
+    );
+  });
+
+  it('tags every payload question with kind and applyKey (GH-543 envelope routing)', () => {
+    const dir = makeTmpTasksDir(BRIEF_ONE_BLOCKING_ARCH);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    const questions = entries[0].askUserQuestionPayload.questions;
+    assert.equal(questions.length, 1);
+    assert.equal(questions[0].kind, 'open-question');
+    assert.equal(
+      questions[0].applyKey,
+      'Which queue backend should we adopt for cross-service jobs?'
     );
   });
 
@@ -340,6 +347,56 @@ describe('brief-gate step', () => {
       // brief.md must be byte-equal — no partial write, no crash.
       const after = fs.readFileSync(briefPath, 'utf8');
       assert.equal(after, before, 'brief.md must remain byte-identical after write failure');
+    });
+
+    it('refuses outside brief_gate when .work-state.json exists (GH-543 step guard)', () => {
+      const dir = makeTmpTasksDir(BRIEF_ONE_BLOCKING_ARCH);
+      createdDirs.push(dir);
+      const briefPath = path.join(dir, 'brief.md');
+      fs.writeFileSync(
+        path.join(dir, '.work-state.json'),
+        JSON.stringify({ stepStatus: { brief_gate: 'completed', spec: 'in_progress' } }),
+        'utf8'
+      );
+      const before = fs.readFileSync(briefPath, 'utf8');
+
+      const result = applyBriefResolutions(
+        briefPath,
+        new Map([
+          [
+            'Which queue backend should we adopt for cross-service jobs?',
+            'Use SQS for all cross-service jobs.',
+          ],
+        ])
+      );
+
+      assert.equal(result, false, 'wrapper must refuse when another step is in_progress');
+      const after = fs.readFileSync(briefPath, 'utf8');
+      assert.equal(after, before, 'brief.md must be untouched on refusal');
+    });
+
+    it('still applies when .work-state.json shows brief_gate in_progress', () => {
+      const dir = makeTmpTasksDir(BRIEF_ONE_BLOCKING_ARCH);
+      createdDirs.push(dir);
+      const briefPath = path.join(dir, 'brief.md');
+      fs.writeFileSync(
+        path.join(dir, '.work-state.json'),
+        JSON.stringify({ stepStatus: { brief: 'completed', brief_gate: 'in_progress' } }),
+        'utf8'
+      );
+
+      const result = applyBriefResolutions(
+        briefPath,
+        new Map([
+          [
+            'Which queue backend should we adopt for cross-service jobs?',
+            'Use SQS for all cross-service jobs.',
+          ],
+        ])
+      );
+
+      assert.equal(result, true);
+      assert.match(fs.readFileSync(briefPath, 'utf8'), /\*\*Resolution:\*\*\s*Use SQS/);
     });
 
     it('returns false without touching brief.md for non-object resolutions (number/string/boolean)', () => {

@@ -82,6 +82,15 @@ describe('buildDiscrepancyQuestions', () => {
   it('returns [] for null comparison', () => {
     assert.deepEqual(buildDiscrepancyQuestions(null, 'a', 'b'), []);
   });
+
+  it('tags both question shapes with kind/applyKey for envelope routing (GH-543)', () => {
+    const cmp = { missingInLower: ['x.ts'], extraInLower: ['y.ts'] };
+    const qs = buildDiscrepancyQuestions(cmp, 'user prompt', 'brief');
+    assert.equal(qs[0].kind, 'discrepancy');
+    assert.equal(qs[0].applyKey, 'x.ts');
+    assert.equal(qs[1].kind, 'discrepancy');
+    assert.equal(qs[1].applyKey, 'y.ts');
+  });
 });
 
 describe('extractRecordedDecisions + filterUnresolved', () => {
