@@ -64,6 +64,43 @@ function buildRelatedTicketsBlocker(ticket, tasksDir, pathMod, fs, providerConfi
   };
 }
 
+/**
+ * Blocked instruction for cross-ticket/user questions (GH-543 file
+ * transport): answers travel via a consume-once JSON envelope file, so
+ * quotes/backticks/newlines in an answer can never break (or execute on) a
+ * shell command line the way the old inline '<JSON_MAP>' argv did.
+ */
+function buildUserQuestionsBlocker(userQs, localQs, briefPath, ctx) {
+  const { tasksDir, workDir, path: pathMod } = ctx;
+  const answersPath = pathMod.join(tasksDir, '.brief-gate-answers.json');
+  const applyCliPath = pathMod.join(workDir, 'scripts', 'apply-brief-gate-answers.js');
+  return {
+    type: 'work_instruction',
+    action: 'blocked',
+    reason: 'brief_gate requires user input for cross-ticket questions',
+    userQuestions: userQs.map((q, i) => ({
+      index: i + 1,
+      question: q.questionText,
+      rationale: q.rationale || '',
+      scope: q.scope,
+      // Envelope routing keys (GH-543). Questions from producers that
+      // predate tagging default to the open-question lane.
+      kind: q.kind || 'open-question',
+      applyKey: q.applyKey || q.questionText,
+      ...(Array.isArray(q.options) ? { options: q.options } : {}),
+    })),
+    localQuestions: localQs.map((q) => q.questionText),
+    applyCommand: `node "${applyCliPath}" "${briefPath}"`,
+    hint:
+      `Ask the userQuestions, then Write the answers to ${answersPath} as a JSON envelope ` +
+      `routed by each question's kind: {"openQuestions": {"<applyKey>": "<answer>", ...}, ` +
+      `"siblingGaps": [{"surface": "<applyKey>", "decision": "implement-here|wait-for-sibling"}, ...], ` +
+      `"discrepancies": [{"claim": "<applyKey>", "decision": "<answer>"}, ...]}. ` +
+      'Then run the applyCommand (it persists every kind into brief.md and consumes the ' +
+      'answers file on full apply) and re-run work-next.js after.',
+  };
+}
+
 module.exports = function registerBriefGate(register) {
   register('brief_gate', (entry, ctx) => {
     const { tasksDir, ticket, workDir, path, fs } = ctx;
@@ -128,19 +165,6 @@ module.exports = function registerBriefGate(register) {
     entry._briefPath = briefPath;
 
     // Return a blocked instruction instead — the orchestrator must ask the user
-    entry._overrideInstruction = {
-      type: 'work_instruction',
-      action: 'blocked',
-      reason: 'brief_gate requires user input for cross-ticket questions',
-      userQuestions: userQs.map((q, i) => ({
-        index: i + 1,
-        question: q.questionText,
-        rationale: q.rationale || '',
-        scope: q.scope,
-      })),
-      localQuestions: localQs.map((q) => q.questionText),
-      applyCommand: `node -e "require('${briefGatePath}').applyBriefResolutions('${briefPath}', JSON.parse(process.argv[1]))" '<JSON_MAP>'`,
-      hint: 'Answer the userQuestions, then run the applyCommand with a JSON map of questionText → answer. Re-run work-next.js after.',
-    };
+    entry._overrideInstruction = buildUserQuestionsBlocker(userQs, localQs, briefPath, ctx);
   });
 };

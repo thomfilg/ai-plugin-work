@@ -97,4 +97,14 @@ describe('buildSiblingGapQuestions', () => {
   it('returns [] for non-array input', () => {
     assert.deepEqual(buildSiblingGapQuestions(null, 'X'), []);
   });
+
+  it('tags each question with kind/applyKey/options for envelope routing (GH-543)', () => {
+    const r = findUnresolvedSiblingGaps(fixture());
+    const qs = buildSiblingGapQuestions(r.unresolved, 'ECHO-4553');
+    for (const q of qs) {
+      assert.equal(q.kind, 'sibling-gap');
+      assert.deepEqual(q.options, ['implement-here', 'wait-for-sibling']);
+    }
+    assert.equal(qs[0].applyKey, r.unresolved[0].surface);
+  });
 });

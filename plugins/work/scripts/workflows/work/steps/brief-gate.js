@@ -16,16 +16,20 @@
  * The RUN payload instructs the orchestrator to invoke AskUserQuestion
  * inline (hooks are non-interactive — the gate step is a planning-time
  * declaration, not a runtime prompt). Once the orchestrator has collected
- * answers, it calls the exported `applyBriefResolutions(briefPath, resolutions)`
- * post-resolve handler, which delegates to `openQuestions.applyResolutions`
- * and writes the result back to `brief.md`. Cancellations (undefined/empty
- * resolutions) are no-ops so the next planner pass re-prompts.
+ * answers, it writes them to the answers file and runs `postResolveCommand`
+ * (the apply-brief-gate-answers.js CLI — GH-543 file transport, so answer
+ * content never rides a shell command line). The exported
+ * `applyBriefResolutions(briefPath, resolutions)` handler is kept as a thin
+ * wrapper delegating to `applyGateResolutions` (kind-routing persistence +
+ * brief_gate step guard). Cancellations (undefined/empty resolutions) are
+ * no-ops so the next planner pass re-prompts.
  */
 
 'use strict';
 
 const fs = require('fs');
 const openQuestions = require('../lib/open-questions');
+const { applyGateResolutions } = require('../lib/apply-gate-resolutions');
 const { T, renderQuestionText, getRuntime } = require('../../lib/instruction-vocab');
 
 /**
@@ -42,6 +46,10 @@ function buildAskUserQuestionPayload(blocking) {
       questionText: q.questionText,
       scope: q.scope,
       rationale: q.rationale,
+      // Envelope routing key (GH-543): the driver files the answer under
+      // `openQuestions[applyKey]` in the answers-file envelope.
+      kind: 'open-question',
+      applyKey: q.questionText,
       // Orchestrator-facing hint: the answer must be persisted back into
       // the brief.md block identified by `questionText`.
       persistTo: 'brief.md',
@@ -108,7 +116,9 @@ function briefGateStep(add, s, ctx) {
       ),
       askUserQuestionPayload: buildAskUserQuestionPayload(blocking),
       onResolve: 'rewrite brief.md',
-      postResolveCommand: `node -e "var r=process.argv[3];if(!r)process.exit(0);require(process.argv[1]).applyBriefResolutions(process.argv[2],JSON.parse(r))" "${path.join(__dirname, 'brief-gate.js')}" "${briefPath}" "$RESOLUTIONS_JSON"`,
+      // GH-543 file transport: the CLI reads the default answers file
+      // (<tasksDir>/.brief-gate-answers.json) — no answer JSON on the argv.
+      postResolveCommand: `node "${path.join(__dirname, '..', 'scripts', 'apply-brief-gate-answers.js')}" "${briefPath}"`,
     }
   );
 }
@@ -133,9 +143,12 @@ function hasResolutionData(resolutions) {
 
 /**
  * Post-resolve handler — invoked by the orchestrator after AskUserQuestion
- * returns. Rewrites `brief.md` in place with the user-supplied resolutions,
- * delegating all parsing/idempotency/injection-escape invariants to
- * `openQuestions.applyResolutions`.
+ * returns. Thin wrapper (GH-543): delegates to `applyGateResolutions`,
+ * which coerces the flat questionText→answer map to an `{ openQuestions }`
+ * envelope, keeps all parsing/idempotency/injection-escape invariants, and
+ * adds the brief_gate step guard — when `.work-state.json` exists next to
+ * brief.md and a step other than brief_gate is positively in_progress, the
+ * write is refused (returns false).
  *
  * Cancellation path: if the caller passes `undefined`, `null`, or an empty
  * map/object, the handler is a no-op — brief.md is unchanged and the next
@@ -143,29 +156,11 @@ function hasResolutionData(resolutions) {
  *
  * @param {string} briefPath
  * @param {Map<string,string>|Record<string,string>|null|undefined} resolutions
- * @returns {boolean} true if brief.md was rewritten, false if skipped.
+ * @returns {boolean} true if brief.md was rewritten, false if skipped/refused.
  */
 function applyBriefResolutions(briefPath, resolutions) {
   if (!hasResolutionData(resolutions)) return false;
-
-  let markdown;
-  try {
-    markdown = fs.readFileSync(briefPath, 'utf8');
-  } catch (_e) {
-    return false;
-  }
-
-  const rewritten = openQuestions.applyResolutions(markdown, resolutions);
-  if (rewritten === markdown) return false;
-
-  try {
-    fs.writeFileSync(briefPath, rewritten, 'utf8');
-  } catch (_e) {
-    // Fail-closed: mirror the read-failure contract so EACCES/ENOSPC/etc
-    // never propagate as an uncaught exception to the orchestrator.
-    return false;
-  }
-  return true;
+  return applyGateResolutions(briefPath, resolutions).changed === true;
 }
 
 module.exports = briefGateStep;
