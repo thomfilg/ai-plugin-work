@@ -268,4 +268,12 @@ function validateMessage(message, ctx) {
   return { ok: true };
 }
 
-module.exports = { rules, validateMessage, ALLOWED_TYPES, PASS, AI_TOOL_NAMES };
+module.exports = {
+  rules,
+  validateMessage,
+  ALLOWED_TYPES,
+  PASS,
+  AI_TOOL_NAMES,
+  MAX_TITLE_LEN,
+  MAX_BODY_LINE_LEN,
+};
