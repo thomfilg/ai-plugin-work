@@ -86,12 +86,20 @@ function resolveRules(argvRules, env = process.env) {
 function applyAgentPermissions(worktree, rules) {
   const dir = path.join(worktree, '.claude');
   const file = path.join(dir, 'settings.local.json');
+  // Single read, no exists-then-read (js/file-system-race): a missing file is
+  // a fresh worktree, anything else unreadable/corrupt is the operator's —
+  // never overwrite it.
   let settings = {};
-  if (fs.existsSync(file)) {
+  let raw = null;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') return { file, added: [], skipped: 'unreadable-settings' };
+  }
+  if (raw !== null) {
     try {
-      settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+      settings = JSON.parse(raw);
     } catch {
-      // A corrupt/hand-edited file is the operator's — never overwrite it.
       return { file, added: [], skipped: 'unparsable-settings' };
     }
   }
@@ -115,7 +123,9 @@ function main(argv) {
     console.error('usage: agent-permissions.js <worktree> [rule ...]');
     return 1;
   }
-  if (!fs.existsSync(worktree)) {
+  try {
+    fs.statSync(worktree);
+  } catch {
     console.error(`[maestro] agent-permissions: worktree not found: ${worktree} — skipping`);
     return 0; // fail-open: bootstrap already reported the worktree failure
   }
