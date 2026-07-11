@@ -175,6 +175,14 @@ function stuckActive(mk, cfg, nowSec) {
   return Boolean(mk) && freshTs(mk.firstSeenAt, cfg.stuckSanitySec, nowSec);
 }
 
+// idle-blocked mirrors stuck-input's presence semantics: the runner clears the
+// alert marker the moment the pane is busy/owned again (idle-blocked-runner.js),
+// so its presence means "confirmed idle-blocked incident". Same orphan sanity
+// cap; the marker's timestamps are lastAt/firstAlertAt.
+function idleBlockedActive(mk, cfg, nowSec) {
+  return Boolean(mk) && freshTs(mk.firstAlertAt || mk.lastAt, cfg.stuckSanitySec, nowSec);
+}
+
 // Ordered marker rules — first matching predicate wins, so each agent shows
 // exactly one status, highest-severity-first. Each predicate is its own function
 // (ctx = { m, nowSec, nudge, cfg }) so the dispatcher stays flat. PR state is
@@ -195,7 +203,12 @@ const STATUS_RULES = [
       freshTs(c.m.question.lastAlertAt || c.m.question.startedAt, c.cfg.overlayFreshSec, c.nowSec),
   },
   { key: 'prBroken', test: (c) => c.m.prStatus && c.m.prStatus.lastState === 'pr-broken' },
-  { key: 'stuck', test: (c) => stuckActive(c.m.stuckInput, c.cfg, c.nowSec) },
+  {
+    key: 'stuck',
+    test: (c) =>
+      stuckActive(c.m.stuckInput, c.cfg, c.nowSec) ||
+      idleBlockedActive(c.m.idleBlockedAlert, c.cfg, c.nowSec),
+  },
   { key: 'nudge2', test: (c) => c.nudge === 2 },
   { key: 'nudge1', test: (c) => c.nudge === 1 },
   { key: 'prReady', test: (c) => c.m.prStatus && c.m.prStatus.lastState === 'pr-ready' },
@@ -284,6 +297,7 @@ module.exports = {
   elapsedMinutes,
   nudgeLevelOf,
   stuckActive,
+  idleBlockedActive,
   livenessStatus,
   resolveTicketStatus,
   renderTicketCell,

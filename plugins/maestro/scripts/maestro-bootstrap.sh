@@ -396,6 +396,18 @@ for TICKET in "$@"; do
     node "$BOOTSTRAP_HELPER" "$WT" "$TICKET" || true
   fi
 
+  # GH-698 (rm-prompt friction): --dangerously-skip-permissions does NOT cover
+  # the destructive-command backstop — benign `rm -f` cleanups (e.g. the /work
+  # check/reports writability probes) still raise a blocking confirmation
+  # prompt that has stalled unattended agents for ~1h. The operator already
+  # accepted destructive risk at launch, so pre-authorize the standing
+  # allowlist in the agent worktree's local settings. MAESTRO_AGENT_PERMISSIONS
+  # overrides the default rules (set it EMPTY to disable). Claude runtime only
+  # (codex bypasses approvals via its own flags). Fail-open: never blocks launch.
+  if [ "$TICKET_RUNTIME" = "claude" ]; then
+    node "$_MAESTRO_SCRIPT_DIR/lib/agent-permissions.js" "$WT" || true
+  fi
+
   SESSION="${NS_SEG}$TICKET-work"
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"

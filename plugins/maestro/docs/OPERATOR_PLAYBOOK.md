@@ -28,6 +28,7 @@ canonical Monitor regex.
 | `AUTO-RESTART skipped: non-work helper` | Throttled log when an idle `-listen` or `-dev` pane was checked | Ignore — informational |
 | `ACTION … kind=spinner-hang` | Spinner ran ≥threshold with NO worktree change. Alert-only by default (`SPINNER_AUTO_INTERRUPT=1` restores the old blind Esc) | Read paneTail. Legit long op (build, calibration run) → do nothing. Confirmed hang → `tmux send-keys -t <S> Escape`, then tell the agent what to retry |
 | `ACTION … kind=stuck-input` | Text sat unsubmitted in an IDLE agent's composer ≥5m (the Enter was swallowed) | Intended text → submit: `tmux send-keys -t <S> C-m`. Stale/unwanted → clear: `tmux send-keys -t <S> C-u`. Unsubmitted directives have silently stalled agents for hours — never ignore |
+| `ACTION … kind=idle-blocked` | Empty composer + no spinner + no tool subprocess for `Q_IDLE_CONFIRM_TICKS` consecutive ticks mid-workflow — usually a prompt the question detector cannot parse (permission/trust/login dialog) or a turn that ended without the workflow advancing (GH-698 A1) | Capture the pane and READ it. Visible prompt → answer it. No prompt → nudge the agent to continue. Never kill/restart on this signal alone — the daemon holds silence auto-restart `IDLE_BLOCKED_HOLD_MIN` (30m) from the first alert, then self-heal resumes |
 | `ACTION … kind=no-progress` | Worktree unchanged ≥45m while the pane LOOKS active (tail -f / polling / spinner redraws defeat pane-hash silence detection) | Inspect paneTail; ask the agent for a one-line status; recover with kill + `claude --continue` in its worktree only if unresponsive |
 | `DEAD-END-HOLD` | Rotation suppressed: no queued work to rotate to (question-pending), or the worktree is still progressing | Answer the agent's prompt / let it work |
 | `ACTION … kind=dead-end-probe` | First dead-end of a lifecycle: the agent got a diagnostic prompt ("what step, what's blocking, what do you need"). A probe is NOT a strike | Wait the grace window, `tmux capture-pane` to read the reply, then intervene — or let the next re-emit rotate |
@@ -74,37 +75,40 @@ is a comma-separated allowlist of event kinds that wake the model on the stderr
 wake channel; every other emitted event still updates the state file, logfile, and
 `_heartbeat.json` marker but does **not** cost a model turn.
 
-- **Default (all 15 kinds, explicit):** `question-pending`, `nudges-exhausted`,
+- **Default (all 17 kinds, explicit):** `question-pending`, `nudges-exhausted`,
   `wedged`, `dead-end`, `dead-end-probe`, `pr-ready`, `pr-broken`,
-  `pr-comments-stuck`, `comment-loop`, `stuck-input`, `auth-broken`,
-  `spinner-hang`, `no-progress`, `kill-during-ci`, `stop-condition-met`.
+  `pr-comments-stuck`, `comment-loop`, `stuck-input`, `idle-blocked`,
+  `auth-broken`, `spinner-hang`, `no-progress`, `kill-during-ci`,
+  `stop-condition-met`, `commit-stall`.
 - **What does NOT wake:** `HEARTBEAT` (every beat, state-change beats included),
   `log-only` info chatter (NUDGE, AUTO-RESTART announces and skip diagnostics,
   POOL-FILL, SLOT-FREED, DEAD-END-HOLD, phase-advance, the per-tick empty-fleet
   line, …), and the `pr-pending` / `phase-stall` / `commit-stall` intermediates —
   their escalations (`nudges-exhausted`, `pr-comments-stuck`) DO wake.
-- **Re-wake backoff:** the FIRST emission of an alert key
-  (`session|kind|sha-or-phase`) always wakes immediately; repeats of the same key
-  re-wake only after `PENDING_REWAKE_MIN` (default 30m), doubling per re-wake up
-  to `PENDING_REWAKE_MAX_MIN` (default 240m). Nothing is lost: throttled repeats
+- **Re-wake backoff (tiered, GH-698):** the FIRST emission of an alert key
+  always wakes immediately. Repeats of a BLOCKING kind (action-required — the
+  agent is idle-waiting on the operator) re-wake on a flat `BLOCKING_REWAKE_MIN`
+  cadence (default 5m, never doubles); cosmetic kinds re-wake only after
+  `PENDING_REWAKE_MIN` (default 30m), doubling per re-wake up to
+  `PENDING_REWAKE_MAX_MIN` (default 240m). Nothing is lost: throttled repeats
   still land in `maestro-alerts.jsonl` + the tmux alert pane, and every wake's
   UserPromptSubmit banner re-surfaces ALL pending alerts. `PENDING_REWAKE_MIN=0`
-  disables the throttle.
+  disables the throttle for every tier.
 - **Validation:** input is comma-split + trimmed; unknown kinds never match
   (fail-closed to "does not wake" for that kind).
 - **Custom lists REPLACE the default.** `CONDUCT_WAKE_EVENTS=pr-ready,wedged`
-  silences the other 13 kinds — the daemon never merges your list with the
-  default, and unknown/misspelled kinds fail closed. Start from the full 15-kind
+  silences the other 15 kinds — the daemon never merges your list with the
+  default, and unknown/misspelled kinds fail closed. Start from the full 17-kind
   default and add/remove.
 - **Escape hatch:** `CONDUCT_WAKE_EVENTS=all` (or `*`) restores the pre-GH-680
   always-wake behavior — every beat, including benign HEARTBEATs, wakes the model.
   Use it only when debugging the wake channel itself.
 
 > **Upgrade note.** If you ran `/maestro:configure` before this change, your
-> `.envrc` has the OLD 11-kind default pinned in `CONDUCT_WAKE_EVENTS`. Re-run
-> `/maestro:configure` (or update the variable manually) — otherwise
-> `spinner-hang`, `no-progress`, `kill-during-ci`, and `stop-condition-met`
-> stay silent.
+> `.envrc` has an OLD default pinned in `CONDUCT_WAKE_EVENTS`. Re-run
+> `/maestro:configure` (or update the variable manually) — otherwise the
+> later-added kinds (`spinner-hang`, `no-progress`, `kill-during-ci`,
+> `stop-condition-met`, `commit-stall`, `idle-blocked`) stay silent.
 
 ### The 12-hour context budget
 

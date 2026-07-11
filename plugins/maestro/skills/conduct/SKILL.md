@@ -24,9 +24,10 @@ Runs `node plugins/maestro/scripts/maestro-conduct.js --daemon` in the backgroun
 Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs through this detector pipeline (per-phase via `phase-registry.js`):
 
 - **Question** — pane shows `Do you want to proceed?` / menu prompt / a `❯ 1.` option cursor → emit an `ACTION` alert with `kind=question-pending`. Always wins; no nudges while the agent is waiting on the operator. Re-alerts on a `Q_RE_NUDGE_MIN` cooldown; rotation only after `Q_DEAD_END_MIN` AND only when queued work exists.
-- **Silence / auto-restart** — pane content is static for `SILENCE_LIMIT_SEC` (default 300s) AND the worktree isn't changing AND no live tool subprocess runs under the pane AND the agent isn't waiting on a human → kill + relaunch (fresh `/skill <TICKET>` for work/follow-up; `claude --continue` for generic commands). Only `-work` sessions are restart-eligible.
+- **Silence / auto-restart** — pane content is static for `SILENCE_LIMIT_SEC` (default 300s) AND the worktree isn't changing AND no live tool subprocess runs under the pane AND the agent isn't waiting on a human AND no idle-blocked alert is inside its `IDLE_BLOCKED_HOLD_MIN` grace window → kill + relaunch (fresh `/skill <TICKET>` for work/follow-up; `claude --continue` for generic commands). Only `-work` sessions are restart-eligible.
 - **Spinner hang** — spinner past threshold with NO worktree change → `spinner-hang` alert (Esc only with `SPINNER_AUTO_INTERRUPT=1`).
 - **Stuck input** — text sitting unsubmitted in an idle composer ≥5m → `stuck-input` alert (auto End+C-m with `STUCK_INPUT_AUTO_SUBMIT=1`).
+- **Idle blocked** — empty composer + no spinner + no tool subprocess for `Q_IDLE_CONFIRM_TICKS` (3) consecutive ticks mid-workflow → `idle-blocked` alert: the pattern-negative backstop for prompts the question detector can't parse (GH-698 A1). Alert-only; silence auto-restart is held `IDLE_BLOCKED_HOLD_MIN` (30m) from the first alert so the prompt survives long enough to be read.
 - **No progress** — worktree unchanged ≥45m while the pane looks active → `no-progress` alert (the backstop for panes that defeat silence detection).
 - **Phase budget stall** — the skill's phase has been current longer than `phaseFor(phase).budgetMin` AND the worktree isn't changing → soft → interrupt → alert escalation, in the agent's own skill vocabulary. Generic commands (qc-work…) have no /work phases and are never phase-coached.
 - **Commit stall** (implement phase only) — no commits in N min, surfaces as info log.
@@ -83,7 +84,7 @@ See the wake-filter and anti-pattern notes in `docs/OPERATOR_PLAYBOOK.md`.
   Restarts resume via `codex exec resume` (probe:
   `transcript.listSessionsForCwd(worktree)`).
 - **Codex TUI panes** (no exec stream) run the `codex-tui-conservative`
-  dialect: spinner/question/stuck-input detectors report
+  dialect: spinner/question/stuck-input/idle-blocked detectors report
   unsupported-capability instead of guessing, and the session is NEVER
   auto-killed or auto-restarted on pane-glyph evidence (DEAD-END-HOLD keeps it
   alive for the operator).

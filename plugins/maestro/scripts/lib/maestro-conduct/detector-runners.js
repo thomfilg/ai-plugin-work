@@ -18,13 +18,12 @@ const state = require('./state');
 const alerts = require('./alerts');
 const actions = require('./actions');
 const progress = require('./progress');
-const paneBusy = require('./pane-busy');
 const waitMute = require('./wait-mute');
+const silenceRunner = require('./silence-runner');
 const { phaseFor, escalationFor } = require('./phase-registry');
 const { isHaltedWaitingForUser } = require('./halted-waiting');
 
 const spinnerDetector = require('./detectors/spinner');
-const silenceDetector = require('./detectors/silence');
 const stuckInputDetector = require('./detectors/stuck-input');
 const authBrokenDetector = require('./detectors/auth-broken');
 
@@ -49,6 +48,7 @@ const STUCK_INPUT_RE_EMIT_MIN = parseInt(process.env.STUCK_INPUT_RE_EMIT_MIN || 
 // for NO_PROGRESS_ALERT_MIN while the session is supposedly working.
 const NO_PROGRESS_ALERT_MIN = parseInt(process.env.NO_PROGRESS_ALERT_MIN || '45', 10);
 const NO_PROGRESS_RE_EMIT_MIN = parseInt(process.env.NO_PROGRESS_RE_EMIT_MIN || '60', 10);
+// Mirrored by IDLE_BLOCKED_EXEMPT_PHASES in idle-blocked-runner.js — keep in sync.
 const NO_PROGRESS_EXEMPT_PHASES = new Set(['complete', 'wait_merge', 'ci', 'cleanup', 'reports']);
 
 // Nudge-storm cap: past 2× the phase's nudge ladder the escalation has
@@ -128,80 +128,8 @@ function runSpinnerDetector(ctx) {
 }
 
 // ── Silence ─────────────────────────────────────────────────────────────────
-
-function refreshSilenceMarker(session) {
-  state.write(session, 'silence', { hash: null, tokens: null, lastActiveAt: state.now() });
-}
-
-/**
- * True when the silent pane must NOT be treated as dead:
- *   - the agent announced it is waiting on a human (merge etc.) — restarting
- *     wipes in-flight gate answers and loops the same questions forever;
- *   - a live tool subprocess (docker build, test run) is working under the
- *     pane — "working quietly" is not "frozen". Operators used to raise
- *     SILENCE_LIMIT_SEC to a day to protect builds, which also disabled all
- *     dead-agent recovery.
- */
-function silenceSuppressed(ctx, sHit) {
-  if (sHit.kind === 'session-gone') return false;
-  if (isHaltedWaitingForUser(ctx.pane)) {
-    refreshSilenceMarker(ctx.session);
-    waitMute.noteWaitingForUser({ session: ctx.session, phase: ctx.phase, state, alerts });
-    return true;
-  }
-  if (paneBusy.paneHasLiveSubprocess(ctx.session)) {
-    refreshSilenceMarker(ctx.session);
-    const busyMark = state.read(ctx.session, 'busy-quiet') || {};
-    if (!busyMark.loggedAt || state.minutesSince(busyMark.loggedAt) >= 15) {
-      alerts.log(
-        `${ctx.session} silence deferred: live tool subprocess under the pane (agent working quietly)`,
-        { kind: 'log-only' }
-      );
-      state.write(ctx.session, 'busy-quiet', { loggedAt: state.now() });
-    }
-    return true;
-  }
-  return false;
-}
-
-// Silence = "session dead"; on hit, auto-restart -work and clear markers.
-// Returns true when handled so the tick skips remaining detectors.
-function runSilenceDetector(ctx, { restartEligible }) {
-  const sHit = silenceDetector.detect(ctx);
-  if (!sHit.hit) return false;
-  if (silenceSuppressed(ctx, sHit)) return false;
-  if (!restartEligible(ctx.session)) {
-    // Helper sessions (-listen / -dev) are inert by design; their idleness
-    // carries zero information for the operator. Refresh the marker so the
-    // detector doesn't re-fire each tick, but emit nothing.
-    refreshSilenceMarker(ctx.session);
-    return false;
-  }
-  const ok = actions.autoRestart({
-    session: ctx.session,
-    ticket: ctx.ticket,
-    worktree: ctx.worktree,
-    silenceSec: sHit.silenceSec,
-    runtime: ctx.runtime,
-  });
-  if (ok) {
-    // After a restart, wipe both per-SESSION markers (silence/spinner/question
-    // — keyed by session) AND per-TICKET markers (phase/pr-comments/dead-end —
-    // keyed by ticket because the workflow state belongs to the ticket, not
-    // the pane). Clearing `dead-end` restores the probe entitlement: every
-    // lifecycle gets a diagnostic probe before any kill, and an autoRestart
-    // starts a new lifecycle just like an operator bootstrap does. (A
-    // `killed` dead-end never reaches here — checkDeadEndGuard blocks the
-    // restart first — so only stale `diagnosed` markers are wiped.)
-    ['silence', 'spinner', 'question'].forEach((k) => state.clear(ctx.session, k));
-    ['phase', 'pr-comments', 'dead-end'].forEach((k) => state.clear(ctx.ticket, k));
-    return true;
-  }
-  // autoRestart skipped (wedged quiet window, ci-gate-freed, dead-end, fresh
-  // progress, or missing worktree) — pane is still alive and listed, so let
-  // downstream detectors (notably prStatus) keep emitting state transitions.
-  return false;
-}
+// Runner + suppression gates live in silence-runner.js (max-lines gate);
+// re-exported below so the historical module surface survives.
 
 // ── Stuck input ─────────────────────────────────────────────────────────────
 
@@ -383,12 +311,12 @@ function handlePhaseStall(ctx, stallHit, { maybeEscalateToDeadEnd }) {
 
 module.exports = {
   runSpinnerDetector,
-  runSilenceDetector,
+  runSilenceDetector: silenceRunner.runSilenceDetector,
   runStuckInputDetector,
   runAuthBrokenDetector,
   runNoProgressCheck,
   handlePhaseStall,
   bumpMarker,
   phaseStallSuppressed,
-  silenceSuppressed,
+  silenceSuppressed: silenceRunner.silenceSuppressed,
 };

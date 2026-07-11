@@ -38,6 +38,7 @@ const questionHandler = require('./lib/maestro-conduct/question-handler');
 const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
 const fleetEmpty = require('./lib/maestro-conduct/fleet-empty');
 const commitStallRunner = require('./lib/maestro-conduct/commit-stall-runner');
+const idleBlockedRunner = require('./lib/maestro-conduct/idle-blocked-runner');
 const progress = require('./lib/maestro-conduct/progress');
 const runners = require('./lib/maestro-conduct/detector-runners');
 const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
@@ -52,6 +53,7 @@ const DETECTORS = {
   prComments: require('./lib/maestro-conduct/detectors/pr-comments'),
   prStatus: require('./lib/maestro-conduct/detectors/pr-status'),
   stuckInput: require('./lib/maestro-conduct/detectors/stuck-input'),
+  idleBlocked: require('./lib/maestro-conduct/detectors/idle-blocked'),
 };
 
 // Re-emit escalation: when the same (session, kind, sha/phase) alert fires
@@ -228,6 +230,10 @@ function tickSession(session) {
   const qHit = DETECTORS.question.detect(ctx);
   if (qHit.hit) {
     state.clear(ctx.session, 'question-absent'); // re-arm the reset debounce
+    // The early return below means idle-blocked's own detect() never runs
+    // this tick — break its consecutive-idle streak explicitly, or a stale
+    // count could complete across a question interlude (GH-698 A1).
+    idleBlockedRunner.noteSiblingOwned(ctx.session, 'question prompt visible');
     handleQuestion(ctx, qHit);
     return;
   }
@@ -247,6 +253,12 @@ function tickSession(session) {
   }
   state.write(ctx.session, 'question-absent', { ticks: absent });
 
+  // Question detection is pattern-POSITIVE: a prompt whose grammar the regex
+  // doesn't know reads hit:false forever (GH-698 A1 — an rm permission prompt
+  // sat 44+ min unseen). idle-blocked is the pattern-NEGATIVE backstop: an
+  // idle empty composer with no spinner/subprocess for N ticks is blocked on
+  // SOMETHING, recognized or not.
+  idleBlockedRunner.runIdleBlockedDetector(ctx, { restartEligible });
   runners.runStuckInputDetector(ctx, { restartEligible });
   runners.runAuthBrokenDetector(ctx, { restartEligible });
 
