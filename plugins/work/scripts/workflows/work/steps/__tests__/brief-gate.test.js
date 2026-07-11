@@ -86,6 +86,37 @@ const BRIEF_ONE_BLOCKING_ARCH = [
   '',
 ].join('\n');
 
+// GH-543: five blocking questions — one over the AskUserQuestion 4-cap.
+const BRIEF_FIVE_BLOCKING = [
+  '# Brief',
+  '',
+  '## Open Questions',
+  '',
+  ...[1, 2, 3, 4, 5].flatMap((i) => [
+    `- **Question:** Cross-ticket question ${i}?`,
+    '  - `scope: cross-ticket`',
+    `  - \`rationale: affects sibling ${i}\``,
+    '  - `resolved: false`',
+    '',
+  ]),
+].join('\n');
+
+// GH-543: no open questions, one undecided sibling-gap entry.
+const BRIEF_ONE_SIBLING_GAP = [
+  '# Brief',
+  '',
+  '## Out of scope (sibling-owned)',
+  '- `lib/x.ts` — owned by GH-100 (status: Open, PR: none). Reason: shared surface.',
+  '',
+].join('\n');
+
+const BRIEF_SIBLING_GAP_DECIDED = [
+  BRIEF_ONE_SIBLING_GAP,
+  '## Sibling-gap decisions',
+  '- `lib/x.ts` — decision: wait-for-sibling; timestamp: 2026-07-11T00:00:00Z',
+  '',
+].join('\n');
+
 function makeTmpTasksDir(briefContent) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brief-gate-test-'));
   if (briefContent !== null) {
@@ -247,6 +278,54 @@ describe('brief-gate step', () => {
       questions[0].applyKey,
       'Which queue backend should we adopt for cross-service jobs?'
     );
+  });
+
+  it('appends the batching suffix to the prompt when more than 4 questions block (GH-543)', () => {
+    const dir = makeTmpTasksDir(BRIEF_FIVE_BLOCKING);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'RUN');
+    assert.match(entries[0].agentPrompt, /\(in batches of at most 4\)/);
+  });
+
+  it('does NOT append the batching suffix for 4 or fewer blocking questions (pin: byte-identical prompt)', () => {
+    const dir = makeTmpTasksDir(BRIEF_ONE_BLOCKING_ARCH);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.ok(!entries[0].agentPrompt.includes('(in batches of at most 4)'));
+  });
+
+  describe('sibling-gap RUN extension (GH-543 trailing-batch delivery)', () => {
+    it('stays RUN when open questions are resolved but sibling gaps remain undecided', () => {
+      const dir = makeTmpTasksDir(BRIEF_ONE_SIBLING_GAP);
+      createdDirs.push(dir);
+      const { add, entries } = makeAdd();
+      briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+      assert.equal(entries.length, 1);
+      const entry = entries[0];
+      assert.equal(entry.action, 'RUN', 'undecided sibling gaps must keep the gate RUN');
+      assert.match(entry.reason, /1 .*sibling-gap/i);
+      // Same delegate shape as the open-question branch so enrichAndReturn
+      // executes the enrichment chain (injector → question-router).
+      assert.equal(entry.agentType, 'general-purpose');
+      assert.equal(typeof entry.agentPrompt, 'string');
+      assert.ok(entry.askUserQuestionPayload, 'RUN entry must carry askUserQuestionPayload');
+      assert.equal(entry.onResolve, 'rewrite brief.md');
+      assert.match(entry.postResolveCommand, /apply-brief-gate-answers\.js/);
+    });
+
+    it('DEFERs when every sibling gap has a recorded decision', () => {
+      const dir = makeTmpTasksDir(BRIEF_SIBLING_GAP_DECIDED);
+      createdDirs.push(dir);
+      const { add, entries } = makeAdd();
+      briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].action, 'DEFER');
+      assert.match(entries[0].reason, /resolved/i);
+    });
   });
 
   it('emits RUN (not SKIP) when brief.md is unreadable so planner shows gate needs attention', () => {

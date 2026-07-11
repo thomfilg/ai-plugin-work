@@ -128,6 +128,20 @@ If the instruction has `parallel: true` with `delegates` array: launch ALL agent
 
 - The **only** command you run directly is `work-next.js`. Everything else comes from its instructions.
 - If `action: "blocked"` → show the reason to the user and wait. Do NOT re-run automatically.
+- **Question gates** (`action: "blocked"` with `userQuestions`): AskUserQuestion
+  accepts at most 4 questions per call and the instruction is pre-batched —
+  `userQuestions` never carries more than 4 (`questionProgress` shows
+  total/thisBatch/remaining for the pending set). The loop:
+  (0) if the answers file (`.brief-gate-answers.json` next to `brief.md`)
+  already exists from a crash, run the `applyCommand` first and re-run
+  `work-next.js`; (1) ask exactly the questions in `userQuestions` via ONE
+  AskUserQuestion call — never merge in extra questions; (2) Write the answers
+  envelope `{"openQuestions": {"<applyKey>": "<answer>"}, "siblingGaps":
+  [{"surface": "<applyKey>", "decision": "implement-here|wait-for-sibling"}],
+  "discrepancies": [{"claim": "<applyKey>", "decision": "<answer>"}]}` to the
+  answers file; (3) run the `applyCommand` (persists every kind into brief.md
+  and consumes the file on full apply); (4) re-run `work-next.js` — it
+  presents the next batch until none remain.
 - **Some steps take a long time (CI monitoring can take 20+ minutes). This is normal. Do NOT cancel, interrupt, or give up.**
 - Never stop until `action: "complete"`.
 
@@ -156,5 +170,10 @@ only the dispatch surface changes:
   does not exist. Interactive sessions use `request_user_input`; unattended
   exec parks the gate — answers arrive via the maestro `/signal` inbox or
   `codex exec resume --last "<answer>"` (verified; `--last` is cwd-filtered — run it from the agent worktree, or pass the session id).
+  The ≤4 batch loop from the Rules section applies identically: ask only the
+  pre-batched `userQuestions` (via `request_user_input` or the parked-gate
+  channel), persist each batch through the same answers file + `applyCommand`,
+  then re-run the driver for the next batch — including crash-recovery step 0
+  when a leftover `.brief-gate-answers.json` exists.
 - Instructions carrying `[work:codex-degraded]` notices are informational —
   they explain the fallback in effect, not an error.

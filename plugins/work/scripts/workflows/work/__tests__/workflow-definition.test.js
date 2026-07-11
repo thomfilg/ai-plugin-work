@@ -237,6 +237,37 @@ describe('workflow-definition: verify[STEPS.brief_gate]', () => {
     assert.equal(verify(ticketId), true);
   });
 
+  it('returns false when the brief has an undecided sibling-gap entry (GH-543)', () => {
+    writeBrief(
+      [
+        '# Brief',
+        '',
+        '## Out of scope (sibling-owned)',
+        '- `lib/x.ts` — owned by GH-100 (status: Open, PR: none). Reason: shared surface.',
+        '',
+      ].join('\n')
+    );
+    const verify = getBriefGateVerify();
+    assert.equal(verify(ticketId), false);
+  });
+
+  it('returns true when every sibling-gap entry has a recorded decision (GH-543)', () => {
+    writeBrief(
+      [
+        '# Brief',
+        '',
+        '## Out of scope (sibling-owned)',
+        '- `lib/x.ts` — owned by GH-100 (status: Open, PR: none). Reason: shared surface.',
+        '',
+        '## Sibling-gap decisions',
+        '- `lib/x.ts` — decision: wait-for-sibling; timestamp: 2026-07-11T00:00:00Z',
+        '',
+      ].join('\n')
+    );
+    const verify = getBriefGateVerify();
+    assert.equal(verify(ticketId), true);
+  });
+
   it('returns false for a malformed brief read error (fail-closed)', () => {
     // Remove the brief and place a directory at its path so read/parse fails.
     removeBrief();
