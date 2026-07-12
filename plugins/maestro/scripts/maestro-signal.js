@@ -12,16 +12,16 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require('../lib/safeSubprocess');
 const { INBOX_DIR, validateChannelOrExit, ensureChannelFile } = require('../lib/inbox');
 const namespace = require('./lib/maestro-conduct/namespace');
 
 function listListeners(channel) {
-  // Best-effort: list pids holding <inbox>/<channel>.log open. Use spawnSync
+  // Best-effort: list pids holding <inbox>/<channel>.log open. Use safeSpawnSync
   // argv (no shell) so the INBOX_DIR path (which can carry MAESTRO_NS) and the
   // channel can never be interpreted by a shell (js/indirect-command-line-injection).
   try {
-    const res = spawnSync('lsof', ['-t', path.join(INBOX_DIR, `${channel}.log`)], {
+    const res = safeSpawnSync('lsof', ['-t', path.join(INBOX_DIR, `${channel}.log`)], {
       encoding: 'utf8',
       timeout: 2000,
     });
@@ -77,7 +77,7 @@ function buildMismatchWarning({ channel, inboxDir, ownNs, sessionNames }) {
 
 function tmuxSessionNames() {
   try {
-    const res = spawnSync('tmux', ['ls', '-F', '#{session_name}'], {
+    const res = safeSpawnSync('tmux', ['ls', '-F', '#{session_name}'], {
       encoding: 'utf8',
       timeout: 2000,
     });
