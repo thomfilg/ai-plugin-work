@@ -15,7 +15,7 @@
 
 'use strict';
 
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require('../../lib/safeSubprocess');
 
 const { fileMatchesScope } = require('../../lib/task-scope');
 
@@ -92,16 +92,16 @@ function detectChangedTestFilesInScope(repoRoot, scope) {
   // misleading "No *.test.* file under scope has changes" message.
   let gitFailed = false;
   try {
-    const r1 = spawnSync('git', ['diff', '--name-only'], { cwd: repoRoot, encoding: 'utf8' });
+    const r1 = safeSpawnSync('git', ['diff', '--name-only'], { cwd: repoRoot, encoding: 'utf8' });
     if (r1.status !== 0) gitFailed = true;
     diff = r1.stdout || '';
-    const r2 = spawnSync('git', ['diff', '--cached', '--name-only'], {
+    const r2 = safeSpawnSync('git', ['diff', '--cached', '--name-only'], {
       cwd: repoRoot,
       encoding: 'utf8',
     });
     if (r2.status !== 0) gitFailed = true;
     staged = r2.stdout || '';
-    const r3 = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], {
+    const r3 = safeSpawnSync('git', ['ls-files', '--others', '--exclude-standard'], {
       cwd: repoRoot,
       encoding: 'utf8',
     });
