@@ -91,8 +91,9 @@ function writeState(ticket, stepName) {
 }
 
 /**
- * Write a transcript JSONL whose per-turn `usage` blocks sum to `tokens`
- * (a single input-token turn is enough — context-usage sums input+output).
+ * Write a transcript JSONL whose last-turn occupancy is `tokens` (a single
+ * turn is both the first and the last, so its input+output IS the current
+ * occupancy that context-usage reports).
  */
 function writeTranscript(ticket, tokens) {
   const dir = path.join(TASKS_BASE, ticket);

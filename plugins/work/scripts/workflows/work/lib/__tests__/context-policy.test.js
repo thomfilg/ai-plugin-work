@@ -67,46 +67,40 @@ test('parseThresholds: returned default is a copy, not a shared mutable referenc
   assert.deepEqual(policy().parseThresholds(undefined), [60, 70, 80]);
 });
 
-// ─── modelContextLimit (R8 model→limit map + override) ───────────────────────
+// ─── resolveContextLimit (R8 override > transcript window > default) ──────────
 
-test('modelContextLimit: Opus → 200000', () => {
-  assert.equal(policy().modelContextLimit('claude-opus-4-8'), 200000);
+test('resolveContextLimit: WORK_CONTEXT_LIMIT override wins over the window', () => {
+  assert.equal(policy().resolveContextLimit(500000, 258400), 500000);
 });
 
-test('modelContextLimit: Sonnet → 200000', () => {
-  assert.equal(policy().modelContextLimit('claude-sonnet-4-5'), 200000);
+test('resolveContextLimit: uses the transcript window when there is no override', () => {
+  assert.equal(policy().resolveContextLimit(undefined, 258400), 258400);
 });
 
-test('modelContextLimit: Haiku → 200000', () => {
-  assert.equal(policy().modelContextLimit('claude-haiku-4'), 200000);
+test('resolveContextLimit: no override and no window → safe default 200000', () => {
+  assert.equal(policy().resolveContextLimit(undefined, 0), 200000);
+  assert.equal(policy().resolveContextLimit(undefined, undefined), 200000);
 });
 
-test('modelContextLimit: unknown model → safe default 200000', () => {
-  assert.equal(policy().modelContextLimit('some-unknown-model'), 200000);
+test('resolveContextLimit: invalid (non-numeric) override is ignored, falls back to the window', () => {
+  assert.equal(policy().resolveContextLimit('not-a-number', 258400), 258400);
 });
 
-test('modelContextLimit: undefined model → safe default 200000', () => {
-  assert.equal(policy().modelContextLimit(undefined), 200000);
+test('resolveContextLimit: zero/negative override is ignored, falls back to the window', () => {
+  assert.equal(policy().resolveContextLimit(0, 258400), 258400);
+  assert.equal(policy().resolveContextLimit(-5, 258400), 258400);
 });
 
-test('modelContextLimit: integer override honored over the map', () => {
-  assert.equal(policy().modelContextLimit('claude-opus-4-8', 500000), 500000);
+test('resolveContextLimit: invalid override AND invalid window → default 200000', () => {
+  assert.equal(policy().resolveContextLimit('nope', 'also-nope'), 200000);
+  assert.equal(policy().resolveContextLimit(-1, -1), 200000);
 });
 
-test('modelContextLimit: override honored even for an unknown model', () => {
-  assert.equal(policy().modelContextLimit('mystery', 123456), 123456);
+test('resolveContextLimit: a large window (>200k) is honored, not clamped to the default', () => {
+  assert.equal(policy().resolveContextLimit(undefined, 1000000), 1000000);
 });
 
-test('modelContextLimit: invalid (non-numeric) override is ignored, falls back to map', () => {
-  assert.equal(policy().modelContextLimit('claude-opus-4-8', 'not-a-number'), 200000);
-});
-
-test('modelContextLimit: zero/negative override is ignored, falls back to map', () => {
-  assert.equal(policy().modelContextLimit('claude-opus-4-8', 0), 200000);
-  assert.equal(policy().modelContextLimit('claude-opus-4-8', -5), 200000);
-});
-
-test('modelContextLimit: DEFAULT_CONTEXT_LIMIT constant is 200000', () => {
+test('resolveContextLimit: DEFAULT_CONTEXT_LIMIT constant is 200000', () => {
   assert.equal(policy().DEFAULT_CONTEXT_LIMIT, 200000);
 });
 
