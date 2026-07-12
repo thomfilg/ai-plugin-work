@@ -861,3 +861,151 @@ test.describe('GH-607 — normalizeRepoPath canonicalization', () => {
     assert.equal(phase.normalizeRepoPath('../hooks.json'), '../hooks.json');
   });
 });
+
+// --- GH-607 review fix: P0.1 in-place extension under REAL git ---------------
+//
+// The tmpdir fixtures in buildCtx are NOT git repos, so `readAddedLines`
+// returns null and the phase satisfies a MUST-reuse symbol via the LEGACY
+// full-blob proxy (`symbolPresentInBlobs`) — the P0.1 `isInPlaceExtension`
+// branch never executes there. These tests build a real git repo so
+// `readAddedLines` yields a genuine `main...HEAD` diff whose added lines do
+// NOT contain the symbol token (the declaration sits on a context line),
+// forcing `symbolPresentInAdded` to return false and making
+// `isInPlaceExtension` the ONLY thing that can pass the audit.
+
+test.describe('GH-607 P0.1 — in-place extension under real git', () => {
+  const childProcess = require('node:child_process');
+
+  function git(cwd, args) {
+    const r = childProcess.spawnSync('git', args, { cwd, encoding: 'utf8' });
+    if (r.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${r.stderr || r.stdout}`);
+    }
+    return r.stdout;
+  }
+
+  // `files` maps repo-relative path → { base, head }. The base commit lands on
+  // `main`; the working change lands on a `feature` commit so `main...HEAD` is a
+  // real ahead-diff. Only `changedFiles` are recorded in pr-context.json.
+  function buildInPlaceGitCtx({ spec, files, changedFiles }) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gh607-inplace-'));
+    git(root, ['init', '-q', '-b', 'main']);
+    git(root, ['config', 'user.email', 'test@example.com']);
+    git(root, ['config', 'user.name', 'Test']);
+    for (const [rel, { base }] of Object.entries(files)) {
+      const abs = path.join(root, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, base, 'utf8');
+    }
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'base']);
+    git(root, ['checkout', '-q', '-b', 'feature']);
+    for (const [rel, { head }] of Object.entries(files)) {
+      fs.writeFileSync(path.join(root, rel), head, 'utf8');
+    }
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'work']);
+
+    const tasksDir = path.join(root, 'tasks', 'GH-607');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, 'spec.md'), spec, 'utf8');
+    fs.writeFileSync(
+      path.join(tasksDir, 'pr-context.json'),
+      JSON.stringify({ files: changedFiles }, null, 2),
+      'utf8'
+    );
+    return {
+      ctx: { tasksDir, worktreeRoot: root, failures: [] },
+      cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  }
+
+  const spec = [
+    '# Spec',
+    '',
+    '## Reuse Audit',
+    '',
+    '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+    '',
+  ].join('\n');
+
+  test('symbol on a context line of a genuinely-modified .js file passes via isInPlaceExtension', async () => {
+    // Base already declares MATCHED_LABELS across multiple lines; the feature
+    // commit only ADDS a new array element. `git diff -U0` therefore contains no
+    // MATCHED_LABELS token on a `+` line, so symbolPresentInAdded is false and
+    // ONLY the P0.1 branch (declaring file modified + scoped blob) can pass it.
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec,
+      changedFiles: ['lib/labels.js'],
+      files: {
+        'lib/labels.js': {
+          base: "const MATCHED_LABELS = [\n  'a',\n  'b',\n];\n",
+          head: "const MATCHED_LABELS = [\n  'a',\n  'b',\n  'c',\n];\n",
+        },
+      },
+    });
+    try {
+      // Guard: prove the symbol is NOT on an added line, so a green result can
+      // only come from isInPlaceExtension — not the primary added-line check.
+      const added = phase.symbolPresentInAdded(
+        'MATCHED_LABELS',
+        // reproduce what validate() passes: the scoped added lines for the file
+        require('node:child_process')
+          .spawnSync('git', ['diff', '-U0', 'main...HEAD', '--', 'lib/labels.js'], {
+            cwd: ctx.worktreeRoot,
+            encoding: 'utf8',
+          })
+          .stdout.split('\n')
+          .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+          .map((l) => l.slice(1))
+          .join('\n')
+      );
+      assert.equal(added, false, 'guard: MATCHED_LABELS must NOT appear on an added line');
+
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, true, 'in-place extension under real git must pass via P0.1');
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record for a genuine in-place extension'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('symbol only in an UNMODIFIED declaring file still fails under real git (anti-gaming)', async () => {
+    // lib/labels.js is unchanged (base === head) so git omits it from the diff
+    // and it is NOT in changedFiles; only an unrelated file changed. The P0.1
+    // relaxation must NOT fire and the audit must fail — anti-gaming holds even
+    // when git IS available (the exact condition the tmpdir negative control
+    // could not reach).
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec,
+      changedFiles: ['src/unrelated.js'],
+      files: {
+        'lib/labels.js': {
+          base: "const MATCHED_LABELS = ['a', 'b'];\n",
+          head: "const MATCHED_LABELS = ['a', 'b'];\n",
+        },
+        'src/unrelated.js': {
+          base: 'const base = 0;\n',
+          head: 'const base = 0;\nconst extra = 1;\n',
+        },
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'unmodified declaring file must still fail under real git');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the unmodified-only symbol');
+      assert.match(
+        rec.observed,
+        /unmodified file/i,
+        'observed must name the unmodified-file miss class'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+});
