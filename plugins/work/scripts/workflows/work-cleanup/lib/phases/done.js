@@ -5,8 +5,14 @@
 'use strict';
 
 const { CLEANUP_PHASES } = require('../../cleanup-phase-registry');
+const { completionGateBlock } = require('../completion-evidence');
 
-function validate() {
+function validate(ctx) {
+  // GH-283: the terminal phase still fails closed if persisted cleanup state
+  // resumed past completion_check without completion evidence — a rogue saved
+  // state at `done` must not let cleanup finalize without **Status:** COMPLETE.
+  const gate = completionGateBlock(ctx && ctx.tasksDir, 'done');
+  if (gate) return gate;
   return { ok: true, summary: 'cleanup terminal phase' };
 }
 

@@ -8,10 +8,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { CLEANUP_PHASES } = require('../../cleanup-phase-registry');
+const { completionGateBlock } = require('../completion-evidence');
 
 const SENTINEL = '.cleanup-memorized';
 
 function validate(ctx) {
+  // GH-283: fail closed if persisted cleanup state resumed past completion_check
+  // without completion evidence — memorize must not finalize cleanup on an
+  // unproven-complete ticket, even when no memory plugin is configured.
+  const gate = completionGateBlock(ctx.tasksDir, 'memorize');
+  if (gate) return gate;
+
   if (!ctx.memory) return { ok: true, summary: 'no memory plugin detected — skipping' };
   const p = path.join(ctx.tasksDir, SENTINEL);
   if (!fs.existsSync(p)) {

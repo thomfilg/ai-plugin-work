@@ -11,6 +11,8 @@ const pr_merged_check = require('../lib/phases/pr_merged_check');
 const branch_cleanup = require('../lib/phases/branch_cleanup');
 const tmux_cleanup = require('../lib/phases/tmux_cleanup');
 const state_archive = require('../lib/phases/state_archive');
+const memorize = require('../lib/phases/memorize');
+const done = require('../lib/phases/done');
 
 function makeTasksDir(files = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanup-phases-'));
@@ -226,6 +228,69 @@ test('state_archive fails closed when completion.check.md is ABSENT (resume past
   assert.equal(r.ok, false);
   assert.ok(r.errors[0].includes('completion.check.md'));
   assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// Resume-past-gate must extend to EVERY phase after completion_check —
+// memorize and done included. A rogue saved state pointing at memorize/done
+// under the old (no completion_check) order resumes straight into the tail of
+// the pipeline; each phase re-asserts completion evidence and fails closed.
+test('memorize fails closed when completion.check.md is ABSENT even if sentinel exists (resume past gate)', () => {
+  const { root, tasksDir } = makeTasksDir();
+  // Old-flow resume: the memorized sentinel is already present, so only the
+  // completion gate stands between a rogue state and a finalized cleanup.
+  fs.writeFileSync(path.join(tasksDir, '.cleanup-memorized'), 'ok');
+  const r = memorize.validate({
+    tasksDir,
+    ticket: 'ECHO-7777',
+    memory: { name: 'cortex', rememberTool: 'remember' },
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
+  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('memorize fails closed with NO memory plugin when evidence is absent (resume past gate)', () => {
+  const { root, tasksDir } = makeTasksDir();
+  // No memory plugin would normally auto-pass; the completion gate must block
+  // first so a rogue resume cannot finalize memorize without evidence.
+  const r = memorize.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('memorize passes (no memory plugin) when completion evidence is present', () => {
+  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
+  const r = memorize.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('done fails closed when completion.check.md is ABSENT (rogue resume-at-done)', () => {
+  const { root, tasksDir } = makeTasksDir();
+  const r = done.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
+  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
+  assert.ok(r.errors[0].includes('re-run the check step'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('done fails closed when completion.check.md is NEEDS_WORK (rogue resume-at-done)', () => {
+  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** NEEDS_WORK\n' });
+  const r = done.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('done passes when completion evidence is present', () => {
+  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
+  const r = done.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, true);
+  assert.ok(r.summary.includes('terminal'));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
