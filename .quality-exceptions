@@ -88,7 +88,6 @@ plugins/work/scripts/workflows/work/lib/work-enforcement-context.js
 plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-pretooluse-hooks.js
 plugins/work/scripts/workflows/work-spec/lib/component-shape.js
 plugins/work/scripts/workflows/check/scripts/write-code-review.js
-plugins/work/scripts/workflows/work/hooks/enforce-screenshot-gate.js
 plugins/work/scripts/workflows/work/lib/pr-mergeable.js
 plugins/work/scripts/workflows/work-brief/lib/memory-plugin-config.js
 plugins/work/scripts/workflows/lib/related-tickets.js
