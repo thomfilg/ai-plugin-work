@@ -1008,4 +1008,55 @@ test.describe('GH-607 P0.1 — in-place extension under real git', () => {
       cleanup();
     }
   });
+
+  // Greptile P1 (reuse_audit_enforcement.js:282): for a config-path entry the
+  // primary symbol check ran against the COMBINED diff before the scoped config
+  // check, so the config symbol text added in an UNRELATED file made present=true
+  // and skipped isConfigEntryReused(). Here `my-hook` is added in src/other.js
+  // while the declared config file hooks.json is UNTOUCHED (byte-identical, not in
+  // the change set) — it must stay non-reused; config entries are judged only
+  // against their own declared file.
+  test('config symbol text in an unrelated changed file does NOT satisfy an untouched config entry (P1)', async () => {
+    const cfgSpec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec: cfgSpec,
+      changedFiles: ['src/other.js'],
+      files: {
+        'hooks.json': { base: '{\n}\n', head: '{\n}\n' },
+        'src/other.js': {
+          base: 'const base = 0;\n',
+          head: 'const base = 0;\nconst wire = "my-hook";\n',
+        },
+      },
+    });
+    try {
+      // Guard: the combined diff DOES contain the symbol text (the exact bait the
+      // pre-fix primary check swallowed), so it is the per-file SCOPING — not an
+      // absent needle — that fails the entry.
+      const combined = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'src/other.js']);
+      assert.match(
+        combined,
+        /my-hook/,
+        'guard: unrelated file added lines must contain the symbol'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'config entry must NOT pass when the symbol text is only in an unrelated changed file'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
 });

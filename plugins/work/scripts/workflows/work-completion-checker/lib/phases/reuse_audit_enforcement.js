@@ -252,21 +252,29 @@ function isInPlaceExtension(entry, changedSet, blobs) {
   );
 }
 
-// GH-607 (R2/P0.2): config-file entry — declared path is a non-JS/TS file and
-// its block genuinely appears in the added lines of THAT declared file.
-//
-// Review fix (GH-607): re-read the added lines scoped to `entry.path` alone
-// (not the repo-wide `addedLines`) so a needle appearing only in some other
-// changed file cannot satisfy this config entry. `readAddedLines` returns:
-//   - a string (possibly empty) → git ran; authoritative scoped result
-//   - null                      → git could not run; fall back to the repo-wide
-//     `addedLines` proxy so we don't fail-closed on missing tooling. The
-//     `changedSet.has(entry.path)` gate inside `configEntryPresent` still holds.
-function isConfigEntryReused(ctx, entry, addedLines, changedSet) {
+// GH-607 (R2/P0.2): config-file entry — declared path is a non-JS/TS file whose
+// block genuinely appears in the change of THAT declared file. Scoped per-file:
+// git available → the declared file's own added lines; git unavailable → its own
+// blob content (never the combined diff / all-blobs set, so a needle in an
+// UNRELATED changed file cannot satisfy the entry — Greptile P1).
+function isConfigEntryReused(ctx, entry, blobs, changedSet) {
   if (!isConfigPath(entry.path)) return false;
-  const scoped = readAddedLines(ctx, [normalizeRepoPath(entry.path)]);
-  const effective = scoped === null ? addedLines : scoped;
+  const norm = normalizeRepoPath(entry.path);
+  const scoped = readAddedLines(ctx, [norm]);
+  const effective = scoped === null ? (blobs.find((b) => b.rel === norm)?.content ?? '') : scoped;
   return configEntryPresent(entry, effective, changedSet);
+}
+
+// Returns true when `entry` counts as reused. Config-path entries are judged
+// SOLELY by their declared file (above); the primary combined-diff / all-blobs
+// symbol check must NOT run for them, or the config symbol text in an unrelated
+// changed file would leak a false pass (Greptile P1). Importable-symbol entries
+// use the added-line check (B3) + legacy full-content fallback + in-place relax.
+function isReuseEntrySatisfied(ctx, entry, blobs, addedLines, changedSet) {
+  if (isConfigPath(entry.path)) return isConfigEntryReused(ctx, entry, blobs, changedSet);
+  const addedHit = symbolPresentInAdded(entry.symbol, addedLines);
+  const present = addedHit === null ? symbolPresentInBlobs(entry.symbol, blobs) : addedHit;
+  return present || isInPlaceExtension(entry, changedSet, blobs);
 }
 
 function checkMustReuseEntries(ctx, entries, blobs, joined, addedLines, failures, changedSet) {
@@ -275,16 +283,7 @@ function checkMustReuseEntries(ctx, entries, blobs, joined, addedLines, failures
   for (const entry of entries) {
     if (!entry || entry.mustReuse !== true) continue;
     mustChecked += 1;
-    // Prefer added-line match (B3). If git was unavailable, fall back to the
-    // legacy full-content proxy so we don't fail-closed on missing tooling.
-    const addedHit = symbolPresentInAdded(entry.symbol, addedLines);
-    const present = addedHit === null ? symbolPresentInBlobs(entry.symbol, blobs) : addedHit;
-    if (present) continue;
-    // GH-607 guarded relaxations (only reachable when the strict added-line
-    // check missed): in-place extension of a modified file, or a config-file
-    // block present in the change.
-    if (isInPlaceExtension(entry, changedSet, blobs)) continue;
-    if (isConfigEntryReused(ctx, entry, addedLines, changedSet)) continue;
+    if (isReuseEntrySatisfied(ctx, entry, blobs, addedLines, changedSet)) continue;
     mustMissing += 1;
     failures.push(
       buildMissingFailure(entry, joined, declaredInUnmodifiedFile(ctx, entry, changedSet))
