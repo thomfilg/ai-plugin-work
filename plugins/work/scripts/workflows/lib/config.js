@@ -12,7 +12,7 @@
  *   console.log(config.REPO_NAME);        // e.g., 'my-project'
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -273,9 +273,12 @@ config.getExplicitBase = (options = {}) => {
   if (sanitized) {
     const candidate = `origin/${sanitized}`;
     try {
-      const out = execSync(`git rev-parse --verify ${candidate} 2>/dev/null`, {
+      // execFileSync array args (no shell) + --end-of-options: an
+      // env-derived ref can never be parsed as a git option.
+      const out = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', candidate], {
         encoding: 'utf8',
         cwd: options.cwd || undefined,
+        stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
       if (out) ref = candidate;
     } catch {

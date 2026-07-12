@@ -10,7 +10,7 @@
  * If both true, blocks and requires screenshots before marking complete.
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
@@ -86,12 +86,18 @@ async function main() {
   let tsxChanged = [];
   try {
     const baseBranch = config ? config.getBaseBranch({ cwd: gitRoot }) : 'origin/main';
-    const diff = execSync(`git diff --name-only ${baseBranch}...HEAD -- "*.tsx" "*.jsx"`, {
-      encoding: 'utf8',
-      timeout: 10000,
-      cwd: gitRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    // execFileSync array args (no shell): the env-derived base branch can
+    // never be parsed as a git option or shell metacharacters.
+    const diff = execFileSync(
+      'git',
+      ['diff', '--name-only', `${baseBranch}...HEAD`, '--', '*.tsx', '*.jsx'],
+      {
+        encoding: 'utf8',
+        timeout: 10000,
+        cwd: gitRoot,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    ).trim();
 
     if (diff) {
       tsxChanged = diff
