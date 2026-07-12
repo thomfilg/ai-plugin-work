@@ -65,6 +65,31 @@ function claudeTurn({ input = 0, output = 0, cacheRead = 0, cacheCreate = 0 } = 
   };
 }
 
+/**
+ * A codex-shaped `token_count` record. `total_token_usage` is CUMULATIVE (a
+ * running total re-emitted each turn), mirroring
+ * tests/fixtures/runtime/codex/rollout.jsonl.
+ */
+function codexTokenCount({ input = 0, output = 0, cached = 0, reasoning = 0, total } = {}) {
+  const totalTokens = total === undefined ? input + output : total;
+  return {
+    type: 'event_msg',
+    payload: {
+      type: 'token_count',
+      info: {
+        total_token_usage: {
+          input_tokens: input,
+          cached_input_tokens: cached,
+          output_tokens: output,
+          reasoning_output_tokens: reasoning,
+          total_tokens: totalTokens,
+        },
+        model_context_window: 258400,
+      },
+    },
+  };
+}
+
 // ─── R1: cumulative per-turn usage summation ─────────────────────────────────
 
 test('readCumulativeUsage: sums input+output across turns to the expected total (124000)', () => {
@@ -144,4 +169,56 @@ test('readCumulativeUsage: blank lines are ignored', () => {
     )}\n`
   );
   assert.equal(usage().readCumulativeUsage(file), 40);
+});
+
+// ─── Codex leg: cumulative token_count snapshots (last wins, no double-count) ─
+
+test('readCumulativeUsage: codex takes the LAST token_count cumulative total, not the sum', () => {
+  // total_token_usage is CUMULATIVE — summing the two snapshots (13043 + 20100)
+  // would over-count. The reader must return only the last snapshot (20100).
+  const file = writeTranscript([
+    { type: 'session_meta', payload: { session_id: 'x' } },
+    codexTokenCount({ input: 12950, output: 93, total: 13043 }),
+    { type: 'response_item', payload: { type: 'message', role: 'assistant' } },
+    codexTokenCount({ input: 19000, output: 1100, total: 20100 }),
+  ]);
+  assert.equal(usage().readCumulativeUsage(file), 20100);
+});
+
+test('readCumulativeUsage: codex prefers total_tokens over summing the fields', () => {
+  // total_tokens (13043) is authoritative even though input+output (13000+43) differ.
+  const file = writeTranscript([
+    { type: 'session_meta', payload: { session_id: 'x' } },
+    codexTokenCount({ input: 13000, output: 43, total: 13043 }),
+  ]);
+  assert.equal(usage().readCumulativeUsage(file), 13043);
+});
+
+test('readCumulativeUsage: codex falls back to summing input+output when total_tokens is absent', () => {
+  const rec = codexTokenCount({ input: 8000, output: 500 });
+  delete rec.payload.info.total_token_usage.total_tokens;
+  const file = writeTranscript([{ type: 'session_meta', payload: { session_id: 'x' } }, rec]);
+  assert.equal(usage().readCumulativeUsage(file), 8500);
+});
+
+test('readCumulativeUsage: codex with no token_count records → 0', () => {
+  const file = writeTranscript([
+    { type: 'session_meta', payload: { session_id: 'x' } },
+    { type: 'response_item', payload: { type: 'message', role: 'user' } },
+  ]);
+  assert.equal(usage().readCumulativeUsage(file), 0);
+});
+
+test('readCumulativeUsage: codex skips a malformed line and still returns the last valid total', () => {
+  const file = writeTranscript([
+    { type: 'session_meta', payload: { session_id: 'x' } },
+    codexTokenCount({ input: 100, output: 10, total: 110 }),
+    '{ not valid json',
+    codexTokenCount({ input: 200, output: 20, total: 220 }),
+  ]);
+  let result;
+  assert.doesNotThrow(() => {
+    result = usage().readCumulativeUsage(file);
+  });
+  assert.equal(result, 220);
 });
