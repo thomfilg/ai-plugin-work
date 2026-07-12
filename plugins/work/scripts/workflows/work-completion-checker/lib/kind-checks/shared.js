@@ -192,11 +192,19 @@ function readReuseAudit(specDir) {
     // `` `Symbol` from `path` MUST be reused `` ordering spec-writer also
     // emits (GH-282 follow-up: the canonical shape puts `from \`path\``
     // AFTER the verb, but the parser must accept either side).
+    //
+    // GH-607 (R7): the declared source path is additionally CAPTURED (not just
+    // tolerated) into an additive `path` field so downstream consumers can
+    // classify config-file entries without re-parsing. Three path orderings
+    // are captured — pre-verb `from \`path\`` (group 2), pre-verb
+    // parenthesized `(\`path\`)` (group 3), and post-verb `from \`path\``
+    // (group 4) — falling back to `null` when the bullet declares no path.
     const m = raw.match(
-      /^\s*[-*]\s+`([^`]+)`\s*(?:from\s+`[^`]+`\s*|\([^)]*\)\s*)?(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
+      /^\s*[-*]\s+`([^`]+)`\s*(?:from\s+`([^`]+)`\s*|\(`([^`]+)`\)\s*|\([^)]*\)\s*)?(?:MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)(?:\s+from\s+`([^`]+)`)?/i
     );
     if (!m) continue;
-    const mustReuse = /MUST/i.test(m[2]);
+    const mustReuse = /MUST/i.test(m[0]);
+    const declaredPath = m[2] || m[3] || m[4] || null;
     entries.push({
       symbol: m[1],
       // headingLine is the 1-indexed line of `## Reuse Audit`; sliceSection
@@ -206,6 +214,9 @@ function readReuseAudit(specDir) {
       // line above its actual location in spec.md (review feedback).
       line: headingLine + 1 + i,
       mustReuse,
+      // GH-607 (R7): declared source path (or `null`). Additive — no existing
+      // field is renamed or removed; existing consumers are unaffected.
+      path: declaredPath,
       // Self-evident, per-entry identifier — Reuse Audit entries in spec.md
       // have no explicit R-ID, so we synthesize one. Used by failure records
       // in lieu of the previously hard-pinned 'R1'.

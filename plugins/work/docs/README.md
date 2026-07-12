@@ -69,6 +69,46 @@ follow_up → ci → cleanup → reports → complete
 | `tasks.md` | `TASKS_BASE/<ticket>/` | Task decomposition |
 | `*.check.md` | `TASKS_BASE/<ticket>/` | Quality reports |
 
+## Completion-Checker Reuse Audit
+
+The completion-checker's `reuse_audit_enforcement` phase verifies that every
+`MUST be reused` symbol declared in a spec's `## Reuse Audit` section is actually
+reused by the change. The strict default requires the symbol to appear on a line
+the PR **added** (`git diff -U0` scoped to the changed files), so incidental
+mentions in pre-existing/unmodified code cannot satisfy the gate.
+
+Two guarded relaxations (GH-607) cover false-negative classes the strict
+added-line check missed. Each fires **only** when the change genuinely touches
+the declaring surface, so the fail-closed / anti-gaming guarantee is preserved:
+
+- **In-place extension of a modified symbol (P0.1).** When a MUST-reuse symbol is
+  absent from the added lines but its declaring `.js`/`.ts` file was modified in
+  this change (present in the change set with non-empty content), a blob check
+  **scoped to that single declaring file** counts it as reused. A symbol present
+  only in some *other* modified file does not satisfy the audit.
+- **Config-file (non-JS/TS) reuse entries (P0.2).** When the declared path is a
+  non-`.js`/`.ts` file (e.g. a `.json` config), the importable-symbol heuristic is
+  bypassed and the entry is matched by its declared path/block literally appearing
+  on the added lines — gated on that path being in the change set.
+
+**Fail-closed / anti-gaming preserved.** The relaxations never turn the gate into
+a rubber-stamp: a symbol present **only** in a pre-existing, unmodified file still
+fails (the negative-control guarantee), deletion-only/no-op changes still fail, and
+any parser/IO error still fails closed with a `REUSE-PARSER` failure record.
+Failure `observed` messages distinguish a symbol "declared in an unmodified file
+(not reused here)" from one that "no changed file references."
+
+**Additive `path` field.** `readReuseAudit` records now expose the declared source
+`path` (or `null` when absent) — additively; no existing field was renamed or
+removed. The config-file branch consumes this to classify non-JS/TS entries without
+re-parsing.
+
+**Deferred: R6 auditable override.** An optional sanctioned, evidence-gated
+override path (an audited `.work-actions.json` row that lets an operator waive a
+reuse miss) is **deferred** per the spec's Open Questions default — only the two
+relaxations above (P0.1 + P0.2) ship in GH-607. R6 is recorded here (not silently
+dropped) and would only be revisited if a residual false-negative class remains.
+
 ## Troubleshooting
 
 ### `gh` calls fail with "Could not resolve to a Repository"

@@ -121,22 +121,78 @@ function symbolPresentInAdded(symbol, addedLines) {
   return re.test(addedLines);
 }
 
+// GH-607: shared word-boundary matcher so `symbolPresentInBlobs` and
+// `symbolPresentInBlobsScoped` cannot drift in how they detect a symbol.
+function wordBoundaryRe(symbol) {
+  return new RegExp(`\\b${escapeRegex(symbol)}\\b`);
+}
+
 function symbolPresentInBlobs(symbol, fileBlobs) {
-  const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`);
+  const re = wordBoundaryRe(symbol);
   return fileBlobs.some((f) => re.test(f.content));
+}
+
+// GH-607 (R1): scoped blob check — the symbol must appear in the blob whose
+// `rel` matches `relPath`. Used for the P0.1 in-place-extension relaxation so
+// a symbol present only in some OTHER modified file cannot satisfy the audit.
+function symbolPresentInBlobsScoped(symbol, fileBlobs, relPath) {
+  const re = wordBoundaryRe(symbol);
+  return fileBlobs.some((f) => f.rel === relPath && re.test(f.content));
+}
+
+// GH-607 (R2): non-JS/TS declared paths are treated as config-file entries and
+// matched by path/block presence rather than the importable-symbol heuristic.
+const JS_TS_EXTENSIONS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs']);
+
+function isConfigPath(p) {
+  if (!p || typeof p !== 'string') return false;
+  const ext = path.extname(p).toLowerCase();
+  if (ext === '') return false;
+  return !JS_TS_EXTENSIONS.has(ext);
+}
+
+// GH-607 (R2): a config-file MUST-reuse entry counts as reused only when its
+// declared path is in the change set AND its declared path or symbol block
+// literally appears on the added lines of this change.
+function configEntryPresent(entry, addedLines, changedSet) {
+  if (!entry || !entry.path || !changedSet || !changedSet.has(entry.path)) return false;
+  if (addedLines === null || addedLines === undefined || addedLines === '') return false;
+  const needles = [entry.symbol, entry.path].filter((s) => typeof s === 'string' && s.length > 0);
+  return needles.some((needle) => new RegExp(escapeRegex(needle)).test(addedLines));
 }
 
 function errMessage(err) {
   return err && err.message ? err.message : String(err);
 }
 
-function buildMissingFailure(entry, joined) {
+// GH-607 (R5/P1.1): distinguish the two miss classes when there is no
+// suffix-candidate "did you mean to extend X?" hint — a symbol whose declaring
+// file exists on disk with the symbol but was NOT modified in this change
+// ("unmodified file") vs a symbol no changed file references at all.
+function missClassMessage(symbol, declaredInUnmodifiedFile) {
+  return declaredInUnmodifiedFile
+    ? `${symbol} not found in diff — declared in an unmodified file (not reused here)`
+    : `${symbol} not found in diff — no changed file references it`;
+}
+
+// GH-607 (R5): the symbol's declaring file exists on disk and contains the
+// symbol, yet that file was NOT modified in this change (not in `changedSet`).
+// This is the "declared in an unmodified file" miss class.
+function declaredInUnmodifiedFile(ctx, entry, changedSet) {
+  if (!entry.path || (changedSet && changedSet.has(entry.path))) return false;
+  const root = ctx.worktreeRoot || process.cwd();
+  const abs = path.isAbsolute(entry.path) ? entry.path : path.join(root, entry.path);
+  const content = readFileSafe(abs);
+  return content !== '' && wordBoundaryRe(entry.symbol).test(content);
+}
+
+function buildMissingFailure(entry, joined, declaredElsewhere) {
   const symbol = entry.symbol;
   const candidates = extractSuffixCandidates(symbol, joined);
   const observed =
     candidates.length > 0
       ? `found ${candidates[0]} in diff — did you mean to extend ${symbol}?`
-      : `${symbol} not found in diff — imported instead by no changed file`;
+      : missClassMessage(symbol, declaredElsewhere);
   return makeFailure({
     // requirementId is synthesized by readReuseAudit() as `REUSE-<n>` so each
     // MUST-reuse entry has a stable, self-evident identifier rather than the
@@ -150,7 +206,32 @@ function buildMissingFailure(entry, joined) {
   });
 }
 
-function checkMustReuseEntries(entries, blobs, joined, addedLines, failures) {
+// GH-607: does the declaring file for `entry` appear in the change set with
+// non-empty content? Gate for the P0.1 in-place-extension relaxation and for
+// the refined "unmodified file" miss message.
+function declaringFileModified(entry, changedSet, blobs) {
+  if (!entry.path || !changedSet || !changedSet.has(entry.path)) return false;
+  return blobs.some((b) => b.rel === entry.path && b.content !== '');
+}
+
+// GH-607 (R1/P0.1): in-place extension — the symbol is not on an added line,
+// but its declaring file WAS modified in this change, so a scoped blob check
+// on that single file counts it as reused (anti-gaming: only fires when the
+// declaring file was genuinely modified).
+function isInPlaceExtension(entry, changedSet, blobs) {
+  return (
+    declaringFileModified(entry, changedSet, blobs) &&
+    symbolPresentInBlobsScoped(entry.symbol, blobs, entry.path)
+  );
+}
+
+// GH-607 (R2/P0.2): config-file entry — declared path is a non-JS/TS file and
+// its block genuinely appears in the change set's added lines.
+function isConfigEntryReused(entry, addedLines, changedSet) {
+  return isConfigPath(entry.path) && configEntryPresent(entry, addedLines, changedSet);
+}
+
+function checkMustReuseEntries(ctx, entries, blobs, joined, addedLines, failures, changedSet) {
   let mustChecked = 0;
   let mustMissing = 0;
   for (const entry of entries) {
@@ -161,8 +242,15 @@ function checkMustReuseEntries(entries, blobs, joined, addedLines, failures) {
     const addedHit = symbolPresentInAdded(entry.symbol, addedLines);
     const present = addedHit === null ? symbolPresentInBlobs(entry.symbol, blobs) : addedHit;
     if (present) continue;
+    // GH-607 guarded relaxations (only reachable when the strict added-line
+    // check missed): in-place extension of a modified file, or a config-file
+    // block present in the change.
+    if (isInPlaceExtension(entry, changedSet, blobs)) continue;
+    if (isConfigEntryReused(entry, addedLines, changedSet)) continue;
     mustMissing += 1;
-    failures.push(buildMissingFailure(entry, joined));
+    failures.push(
+      buildMissingFailure(entry, joined, declaredInUnmodifiedFile(ctx, entry, changedSet))
+    );
   }
   return { mustChecked, mustMissing };
 }
@@ -210,15 +298,18 @@ function validate(ctx) {
 
   try {
     const changed = readChangedFiles(ctx) || [];
+    const changedSet = new Set(changed);
     const blobs = loadChangedContents(ctx, changed);
     const joined = blobs.map((b) => b.content).join('\n');
     const addedLines = readAddedLines(ctx, changed);
     const { mustChecked, mustMissing } = checkMustReuseEntries(
+      ctx,
       entries,
       blobs,
       joined,
       addedLines,
-      failures
+      failures,
+      changedSet
     );
     ctx.reuseAuditChecked = mustChecked;
     appendForCheckType(ctx.tasksDir, 'reuse_audit', failures.slice(startLen), {
@@ -262,3 +353,6 @@ module.exports.instructions = instructions;
 module.exports.extractSuffixCandidates = extractSuffixCandidates;
 module.exports.symbolPresentInAdded = symbolPresentInAdded;
 module.exports.symbolPresentInBlobs = symbolPresentInBlobs;
+module.exports.symbolPresentInBlobsScoped = symbolPresentInBlobsScoped;
+module.exports.isConfigPath = isConfigPath;
+module.exports.configEntryPresent = configEntryPresent;

@@ -374,3 +374,271 @@ test.describe('readReuseAudit grammar (#629)', () => {
     }
   });
 });
+
+// --- GH-607 Task 2: in-place extension + config-file relaxations -------------
+
+test.describe('GH-607 Task 2 — pure helpers (2.1)', () => {
+  test('isConfigPath: config extension true; JS/TS extensions and nullish false', () => {
+    assert.equal(typeof phase.isConfigPath, 'function', 'isConfigPath must be exported');
+    assert.equal(phase.isConfigPath('hooks.json'), true, '.json is a config path');
+    assert.equal(phase.isConfigPath('config/settings.yaml'), true, '.yaml is a config path');
+    for (const js of ['a.js', 'b.ts', 'c.jsx', 'd.tsx', 'e.mjs', 'f.cjs']) {
+      assert.equal(phase.isConfigPath(js), false, `${js} must NOT be a config path`);
+    }
+    assert.equal(phase.isConfigPath(null), false, 'null is not a config path');
+    assert.equal(phase.isConfigPath(undefined), false, 'undefined is not a config path');
+    assert.equal(phase.isConfigPath(''), false, 'empty string is not a config path');
+  });
+
+  test('symbolPresentInBlobsScoped: matches only in the blob whose rel === relPath', () => {
+    assert.equal(
+      typeof phase.symbolPresentInBlobsScoped,
+      'function',
+      'symbolPresentInBlobsScoped must be exported'
+    );
+    const blobs = [
+      { rel: 'a.js', content: 'const MATCHED_LABELS = [];\n' },
+      { rel: 'b.js', content: 'nothing here\n' },
+    ];
+    assert.equal(
+      phase.symbolPresentInBlobsScoped('MATCHED_LABELS', blobs, 'a.js'),
+      true,
+      'symbol present in the scoped file returns true'
+    );
+    const otherOnly = [
+      { rel: 'a.js', content: 'nothing here\n' },
+      { rel: 'b.js', content: 'const MATCHED_LABELS = [];\n' },
+    ];
+    assert.equal(
+      phase.symbolPresentInBlobsScoped('MATCHED_LABELS', otherOnly, 'a.js'),
+      false,
+      'symbol present ONLY in another modified file must NOT satisfy the scoped check'
+    );
+    assert.equal(
+      phase.symbolPresentInBlobsScoped('MATCHED_LABELS', otherOnly, 'missing.js'),
+      false,
+      'no blob matching relPath returns false'
+    );
+  });
+});
+
+test.describe('GH-607 Task 2 — configEntryPresent + guarded branches (2.2)', () => {
+  test('configEntryPresent: true only when entry.path in changedSet AND its block on addedLines', () => {
+    assert.equal(
+      typeof phase.configEntryPresent,
+      'function',
+      'configEntryPresent must be exported'
+    );
+    const entry = { symbol: 'my-hook', path: 'hooks.json' };
+    const addedLines = '  "my-hook": { "command": "node x.js" }\n';
+    const changedSet = new Set(['hooks.json']);
+    assert.equal(
+      phase.configEntryPresent(entry, addedLines, changedSet),
+      true,
+      'present when path in changedSet and block on added lines'
+    );
+    assert.equal(
+      phase.configEntryPresent(entry, addedLines, new Set(['other.json'])),
+      false,
+      'absent when entry.path not in changedSet'
+    );
+    assert.equal(
+      phase.configEntryPresent(entry, 'unrelated added content\n', changedSet),
+      false,
+      'absent when in changedSet but block not on added lines'
+    );
+  });
+
+  test('validate: in-place extension of a modified .js symbol (context line) ⇒ 0 missing', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+      '',
+    ].join('\n');
+    // The declaration line is a CONTEXT line (already-present), but the file
+    // WAS modified in this change (added a new element). symbolPresentInAdded
+    // returns false for the symbol, yet the declaring file is in changedSet
+    // with non-empty content → P0.1 relaxation must fire.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['lib/labels.js'],
+      fileContents: {
+        'lib/labels.js': "const MATCHED_LABELS = ['a', 'b', 'newlyAdded'];\n",
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        true,
+        'in-place extension of a modified .js symbol must pass the audit'
+      );
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record for in-place extension'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('validate: hooks.json config MUST-reuse entry present in the change ⇒ 0 missing', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['hooks.json'],
+      fileContents: {
+        'hooks.json': '{\n  "my-hook": { "command": "node x.js" }\n}\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, true, 'config-file entry present in change must pass');
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record for present config entry'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+test.describe('GH-607 Task 2 — refined message + regression + negative control (2.3)', () => {
+  test('config MUST-reuse entry ABSENT from the change fails', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    // hooks.json is NOT in the changed set; an unrelated file changed instead.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['src/other.js'],
+      fileContents: {
+        'src/other.js': 'const x = 1;\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'config entry absent from change must fail');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for absent config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('NEGATIVE CONTROL: symbol present only in an unmodified file still fails (anti-gaming)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+      '',
+    ].join('\n');
+    // The symbol lives in lib/labels.js, but that file is NOT in the changed
+    // set (an unrelated file was modified). The P0.1 relaxation must NOT fire
+    // because the declaring file was not modified — anti-gaming guarantee.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['src/unrelated.js'],
+      fileContents: {
+        'src/unrelated.js': 'const y = 2;\n',
+        'lib/labels.js': "const MATCHED_LABELS = ['a', 'b'];\n",
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'symbol only in an unmodified file must STILL fail (anti-gaming)'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for unmodified-only symbol');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('refined observed: "unmodified file" wording when declaring path NOT in changedSet', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+      '',
+    ].join('\n');
+    // Declaring file lib/labels.js is NOT modified; a different file changed.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['src/unrelated.js'],
+      fileContents: {
+        'src/unrelated.js': 'const y = 2;\n',
+        'lib/labels.js': "const MATCHED_LABELS = ['a', 'b'];\n",
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false);
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record exists');
+      assert.match(
+        rec.observed,
+        /unmodified file/i,
+        'observed must distinguish the unmodified-file miss class'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('refined observed: "no changed file references" wording when no changed file references the symbol', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `ContentPageToolbar` MUST be reused from `apps/web/src/components/ContentPageToolbar.tsx`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['apps/web/src/pages/Other.tsx'],
+      fileContents: {
+        'apps/web/src/pages/Other.tsx': 'import { SomethingElse } from "./x";\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false);
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record exists');
+      assert.match(
+        rec.observed,
+        /no changed file references/i,
+        'observed must distinguish the no-changed-file-reference miss class'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+});
