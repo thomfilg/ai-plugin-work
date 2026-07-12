@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { isCompletionComplete } = require('../lib/completion-evidence');
 const pr_merged_check = require('../lib/phases/pr_merged_check');
 const branch_cleanup = require('../lib/phases/branch_cleanup');
 const tmux_cleanup = require('../lib/phases/tmux_cleanup');
@@ -60,9 +61,10 @@ test('pr_merged_check HARD-BLOCKS when state=OPEN (not WAITs)', () => {
   }
 });
 
-test('branch_cleanup blocks without sentinel', () => {
+test('branch_cleanup blocks without sentinel (completion evidence present)', () => {
   const { root, tasksDir } = makeTasksDir({
     'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
+    'completion.check.md': '**Status:** COMPLETE\n',
   });
   const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
   assert.equal(r.ok, false);
@@ -70,13 +72,42 @@ test('branch_cleanup blocks without sentinel', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('branch_cleanup passes with sentinel present', () => {
+test('branch_cleanup passes with sentinel present AND completion evidence', () => {
+  const { root, tasksDir } = makeTasksDir({
+    'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
+    'completion.check.md': '**Status:** COMPLETE\n',
+    '.branch-cleaned': 'ok',
+  });
+  const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// Resume-skip case: persisted state from the old (no completion_check) flow
+// resumes straight at branch_cleanup with the .branch-cleaned sentinel already
+// present. The completion gate must still fail closed BEFORE the sentinel check.
+test('branch_cleanup fails closed when completion.check.md is ABSENT even if sentinel exists', () => {
   const { root, tasksDir } = makeTasksDir({
     'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
     '.branch-cleaned': 'ok',
   });
   const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
+  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
+  assert.ok(r.errors[0].includes('re-run the check step'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('branch_cleanup fails closed when completion.check.md is NEEDS_WORK (sentinel present)', () => {
+  const { root, tasksDir } = makeTasksDir({
+    'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
+    'completion.check.md': '**Status:** NEEDS_WORK\n',
+    '.branch-cleaned': 'ok',
+  });
+  const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -190,5 +221,35 @@ test('completion_check passes when the canonical **Status:** COMPLETE line is pr
   const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
   assert.equal(r.ok, true);
   assert.ok(r.summary.includes('**Status:** COMPLETE'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('isCompletionComplete returns true for **Status:** COMPLETE', () => {
+  const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': 'preamble\n**Status:** COMPLETE\ntrailing\n',
+  });
+  assert.equal(isCompletionComplete(tasksDir), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('isCompletionComplete fails closed when completion.check.md is absent', () => {
+  const { root, tasksDir } = makeTasksDir();
+  assert.equal(isCompletionComplete(tasksDir), false);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('isCompletionComplete returns false for NEEDS_WORK', () => {
+  const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': '**Status:** NEEDS_WORK\n',
+  });
+  assert.equal(isCompletionComplete(tasksDir), false);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('isCompletionComplete rejects the APPROVED alias', () => {
+  const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': '**Status:** APPROVED\n',
+  });
+  assert.equal(isCompletionComplete(tasksDir), false);
   fs.rmSync(root, { recursive: true, force: true });
 });

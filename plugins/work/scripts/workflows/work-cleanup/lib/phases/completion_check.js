@@ -16,13 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { CLEANUP_PHASES } = require('../../cleanup-phase-registry');
-
-const CHECK_FILE = 'completion.check.md';
-
-// Strict, canonical-only status matcher. Intentionally rejects the `APPROVED`
-// and `NOT_APPLICABLE` aliases that `validateCheckReportStatus` would accept —
-// destructive cleanup requires the exact `**Status:** COMPLETE` marker.
-const STATUS_COMPLETE_RE = /^\s*\*\*Status:\*\*\s*COMPLETE\b/im;
+const { isCompletionComplete, CHECK_FILE } = require('../completion-evidence');
 
 function validate(ctx) {
   const checkPath = path.join(ctx.tasksDir, CHECK_FILE);
@@ -38,20 +32,10 @@ function validate(ctx) {
     };
   }
 
-  let contents;
-  try {
-    contents = fs.readFileSync(checkPath, 'utf8');
-  } catch {
-    return {
-      ok: false,
-      errors: [
-        `Cannot read ${CHECK_FILE}. Cleanup fails closed on an unreadable completion report. ` +
-          'Repair: re-run the check step to regenerate the report, or restore the archived report.',
-      ],
-    };
-  }
-
-  if (!STATUS_COMPLETE_RE.test(contents)) {
+  // The shared helper is the single source of truth for the marker test: it
+  // reads the file and applies the strict canonical-only regex, failing closed
+  // on an unreadable file or a present-but-wrong/absent status line.
+  if (!isCompletionComplete(ctx.tasksDir)) {
     return {
       ok: false,
       errors: [
