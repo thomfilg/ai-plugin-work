@@ -560,6 +560,34 @@ describe('workflow-definition: verify[STEPS.implement] (GH-694)', () => {
     fs.mkdirSync(path.join(dir, STATE_FILE));
     assert.equal(verifyImplement('T-694F'), false);
   });
+
+  it('fails closed when tasksMeta exists but tasks is missing or non-array', () => {
+    // Valid JSON, multi-task marker present, statuses unavailable — must
+    // block rather than downgrade to single-task mode.
+    const dir = seed('T-694G', null);
+    fs.writeFileSync(
+      path.join(dir, STATE_FILE),
+      JSON.stringify({ ticketId: 'T-694G', tasksMeta: { totalTasks: 4 } })
+    );
+    assert.equal(verifyImplement('T-694G'), false);
+
+    fs.writeFileSync(
+      path.join(dir, STATE_FILE),
+      JSON.stringify({ ticketId: 'T-694G', tasksMeta: { tasks: 'not-an-array' } })
+    );
+    assert.equal(verifyImplement('T-694G'), false);
+  });
+
+  it('null tasksMeta still counts as single-task mode', () => {
+    // Repo-wide idiom (work-state tasks.js, task-readiness.js): falsy
+    // tasksMeta means "no task tracking initialized", not a broken state.
+    const dir = seed('T-694H', null);
+    fs.writeFileSync(
+      path.join(dir, STATE_FILE),
+      JSON.stringify({ ticketId: 'T-694H', tasksMeta: null })
+    );
+    assert.equal(verifyImplement('T-694H'), true);
+  });
 });
 
 // ─── GH-219: brief.md contentGuard ───────────────────────────────────────────

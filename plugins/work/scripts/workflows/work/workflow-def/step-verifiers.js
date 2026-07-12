@@ -158,13 +158,19 @@ function tasksMetaAllCompleted(deps, ticketId) {
     if (err && err.code === 'ENOENT') return true; // single-task mode / no state file
     return false; // EXISTING but unreadable state file — refuse to vouch
   }
-  let tasks;
+  let parsed;
   try {
-    tasks = JSON.parse(raw)?.tasksMeta?.tasks;
+    parsed = JSON.parse(raw);
   } catch {
     return false; // EXISTING but corrupt state file — refuse to vouch
   }
-  if (!Array.isArray(tasks)) return true;
+  if (!parsed || typeof parsed !== 'object' || !parsed.tasksMeta) {
+    return true; // falsy tasksMeta — single-task mode (repo-wide idiom), unchanged
+  }
+  // Once tasksMeta exists this IS a multi-task ticket: statuses must be
+  // present and checkable — a missing/non-array tasks field blocks.
+  const tasks = parsed.tasksMeta.tasks;
+  if (!Array.isArray(tasks)) return false;
   return tasks.every((t) => t && t.status === 'completed');
 }
 
