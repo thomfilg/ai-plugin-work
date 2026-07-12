@@ -113,7 +113,7 @@ test('branch_cleanup fails closed when completion.check.md is NEEDS_WORK (sentin
 
 test('tmux_cleanup auto-passes when no sessions match ticket', () => {
   const original = tmux_cleanup.listSessionsMatching;
-  const { root, tasksDir } = makeTasksDir();
+  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
   tmux_cleanup.listSessionsMatching = () => [];
   try {
     const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
@@ -127,7 +127,7 @@ test('tmux_cleanup auto-passes when no sessions match ticket', () => {
 
 test('tmux_cleanup blocks when matching sessions exist without sentinel', () => {
   const original = tmux_cleanup.listSessionsMatching;
-  const { root, tasksDir } = makeTasksDir();
+  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
   tmux_cleanup.listSessionsMatching = () => ['ECHO-7777-dev', 'ECHO-7777-listen'];
   try {
     const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
@@ -141,6 +141,7 @@ test('tmux_cleanup blocks when matching sessions exist without sentinel', () => 
 
 test('state_archive blocks on missing required sections', () => {
   const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': '**Status:** COMPLETE\n',
     'cleanup-summary.md': '## Branch\nx\nStatus: DONE\n',
   });
   const r = state_archive.validate({ tasksDir });
@@ -160,9 +161,71 @@ test('state_archive passes when all sections + Status present', () => {
     '',
     'Status: PARTIAL',
   ].join('\n');
-  const { root, tasksDir } = makeTasksDir({ 'cleanup-summary.md': md });
+  const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': '**Status:** COMPLETE\n',
+    'cleanup-summary.md': md,
+  });
   const r = state_archive.validate({ tasksDir });
   assert.equal(r.ok, true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// Resume-past-gate (GH-283): persisted cleanup state saved at a phase LATER
+// than branch_cleanup under the old (no completion_check) order resumes
+// straight into that destructive phase, skipping completion_check entirely.
+// Every post-gate destructive phase must re-assert completion evidence and
+// fail closed when it is absent or non-COMPLETE — mirroring the branch_cleanup
+// resume-skip guard so the persisted-state bypass is closed everywhere.
+test('tmux_cleanup fails closed when completion.check.md is ABSENT (resume past gate)', () => {
+  const original = tmux_cleanup.listSessionsMatching;
+  const { root, tasksDir } = makeTasksDir();
+  // Even on the no-matching-sessions auto-pass path, the completion gate must
+  // block first so a stale-state resume cannot finalize tmux teardown.
+  tmux_cleanup.listSessionsMatching = () => [];
+  try {
+    const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
+    assert.equal(r.ok, false);
+    assert.ok(r.errors[0].includes('completion.check.md'));
+    assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
+    assert.ok(r.errors[0].includes('re-run the check step'));
+  } finally {
+    tmux_cleanup.listSessionsMatching = original;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('tmux_cleanup fails closed when completion.check.md is NEEDS_WORK (resume past gate)', () => {
+  const original = tmux_cleanup.listSessionsMatching;
+  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** NEEDS_WORK\n' });
+  tmux_cleanup.listSessionsMatching = () => ['ECHO-7777-dev'];
+  try {
+    const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
+    assert.equal(r.ok, false);
+    assert.ok(r.errors[0].includes('completion.check.md'));
+  } finally {
+    tmux_cleanup.listSessionsMatching = original;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('state_archive fails closed when completion.check.md is ABSENT (resume past gate)', () => {
+  // A fully-populated cleanup-summary.md would otherwise pass; the completion
+  // gate must still block a stale-state resume that skipped completion_check.
+  const md = [
+    '## Branch',
+    'deleted feature/x',
+    '## Tmux sessions',
+    'killed ECHO-7777-dev',
+    '## Worktree',
+    'removed',
+    '',
+    'Status: DONE',
+  ].join('\n');
+  const { root, tasksDir } = makeTasksDir({ 'cleanup-summary.md': md });
+  const r = state_archive.validate({ tasksDir });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
+  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
   fs.rmSync(root, { recursive: true, force: true });
 });
 

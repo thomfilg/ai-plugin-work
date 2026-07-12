@@ -11,6 +11,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { CLEANUP_PHASES } = require('../../cleanup-phase-registry');
+const { completionGateBlock } = require('../completion-evidence');
 
 const SENTINEL = '.tmux-cleaned';
 
@@ -28,6 +29,13 @@ function listSessionsMatching(ticketId) {
 }
 
 function validate(ctx) {
+  // GH-283: fail closed if persisted cleanup state resumed past completion_check
+  // (e.g. saved under the old phase order) without completion evidence — killing
+  // the dev tmux session is destructive teardown that must not run on an
+  // unproven-complete ticket.
+  const gate = completionGateBlock(ctx.tasksDir, 'tmux_cleanup');
+  if (gate) return gate;
+
   const p = path.join(ctx.tasksDir, SENTINEL);
   // Indirect via module.exports so tests can monkey-patch listSessionsMatching.
   const sessions = module.exports.listSessionsMatching(ctx.ticket);

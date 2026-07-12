@@ -46,4 +46,39 @@ function isCompletionComplete(tasksDir) {
   return STATUS_COMPLETE_RE.test(contents);
 }
 
-module.exports = { isCompletionComplete, STATUS_COMPLETE_RE, CHECK_FILE };
+/**
+ * Shared fail-closed guard for the destructive cleanup phases (GH-283).
+ *
+ * `completion_check` only protects runs that reach it via the FORWARD phase
+ * order. A ticket whose persisted cleanup state was saved at `branch_cleanup`
+ * or a LATER phase under the old (pre-`completion_check`) order resumes straight
+ * at that saved phase and never re-enters `completion_check` — so every
+ * destructive phase at/after the gate re-asserts completion evidence on entry,
+ * closing the "persisted state skips the gate" bypass. This is the "re-validate
+ * saved state" repair the gate demands, applied per phase rather than by
+ * migrating the persisted phase pointer.
+ *
+ * Returns a phase BLOCK object (`{ ok:false, errors }`) when evidence is absent
+ * (fail closed), or `null` when `**Status:** COMPLETE` is present so the caller
+ * proceeds with its own checks.
+ *
+ * @param {string} tasksDir absolute path to the ticket's tasks dir
+ * @param {string} phaseLabel calling phase name, surfaced in the block message
+ * @returns {{ ok: false, errors: string[] }|null}
+ */
+function completionGateBlock(tasksDir, phaseLabel) {
+  if (isCompletionComplete(tasksDir)) return null;
+  return {
+    ok: false,
+    errors: [
+      'Cannot verify ticket completion: completion.check.md does not read ' +
+        `**Status:** COMPLETE. ${phaseLabel} refuses destructive cleanup without ` +
+        'completion evidence — persisted cleanup state resumed past the ' +
+        'completion_check gate (e.g. state saved under the old phase order). ' +
+        'Repair: re-run the check step until it reports **Status:** COMPLETE, ' +
+        'or restore the archived report, then re-run cleanup.',
+    ],
+  };
+}
+
+module.exports = { isCompletionComplete, completionGateBlock, STATUS_COMPLETE_RE, CHECK_FILE };

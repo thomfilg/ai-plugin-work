@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { CLEANUP_PHASES } = require('../../cleanup-phase-registry');
-const { isCompletionComplete } = require('../completion-evidence');
+const { completionGateBlock } = require('../completion-evidence');
 
 const SENTINEL = '.branch-cleaned';
 
@@ -32,19 +32,10 @@ function validate(ctx) {
   // the branch-delete instructions without completion evidence. In the normal
   // forward flow completion_check already passed immediately before this phase,
   // so this guard is a no-op; it only bites a resumed old-state ticket or a
-  // tampered/clobbered report.
-  if (!isCompletionComplete(ctx.tasksDir)) {
-    return {
-      ok: false,
-      errors: [
-        'Cannot verify ticket completion: completion.check.md does not read ' +
-          '**Status:** COMPLETE. branch_cleanup refuses destructive branch delete ' +
-          'without completion evidence. ' +
-          'Repair: re-run the check step until it reports **Status:** COMPLETE, ' +
-          'or restore the archived report, then re-run cleanup.',
-      ],
-    };
-  }
+  // tampered/clobbered report. Shared with the other post-gate destructive
+  // phases via completionGateBlock (GH-283).
+  const gate = completionGateBlock(ctx.tasksDir, 'branch_cleanup');
+  if (gate) return gate;
 
   const p = path.join(ctx.tasksDir, SENTINEL);
   if (!fs.existsSync(p)) {
