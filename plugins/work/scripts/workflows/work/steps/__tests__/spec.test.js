@@ -155,4 +155,51 @@ describe('spec step (GH-253)', () => {
     specStep(add, makeState({ hasSpec: false }), makeCtx());
     assert.equal(entries[0].agentType, 'spec-writer');
   });
+
+  // GH-696: spec.md present but spec-phase.json mid-flight → re-dispatch the
+  // spec-writer with a resume-oriented prompt (deadlock-free repair route).
+  it('RUNs the spec-writer in resume mode when spec exists but the ledger is mid-flight (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    specStep(
+      add,
+      makeState({ hasSpec: true, specPhaseMidFlight: true, specPhase: 'surface_audit' }),
+      makeCtx()
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.spec);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.agentType, 'spec-writer');
+    assert.match(entry.agentPrompt, /spec-phase\.json/);
+    assert.match(entry.agentPrompt, /"surface_audit"/);
+    assert.match(entry.agentPrompt, /spec-next\.js/);
+    assert.match(entry.agentPrompt, /resume/i);
+  });
+
+  it('DEFERs when spec exists and the ledger flag is explicitly false (GH-696 regression)', () => {
+    const { add, entries } = makeAdd();
+    specStep(add, makeState({ hasSpec: true, specPhaseMidFlight: false }), makeCtx());
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'DEFER');
+  });
+
+  // GH-696 (PR #718): an unparseable ledger cannot be repaired by re-dispatching
+  // the writer — spec-next.js dies reading the same corrupt file ("Could not
+  // init phase state"). Route to the operator instead.
+  it('escalates via AskUserQuestion when the ledger is unparseable — never re-dispatches the writer (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    specStep(
+      add,
+      makeState({ hasSpec: true, specPhaseMidFlight: true, specPhase: 'unparseable' }),
+      makeCtx()
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.spec);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.command, 'AskUserQuestion');
+    assert.notEqual(entry.agentType, 'spec-writer');
+    assert.match(entry.agentPrompt, /spec-phase\.json/);
+    assert.match(entry.agentPrompt, /delete/i);
+  });
 });

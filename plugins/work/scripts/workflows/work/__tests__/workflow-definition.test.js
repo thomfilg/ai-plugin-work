@@ -280,6 +280,22 @@ describe('workflow-definition: verify[STEPS.brief_gate]', () => {
       fs.rmdirSync(briefPath);
     }
   });
+
+  // GH-696: the gate must not satisfy while the brief runner's inner ledger
+  // is mid-flight, even when brief.md itself validates.
+  it('returns false while brief-phase.json is mid-flight, true once terminal (GH-696)', () => {
+    writeBrief('# Brief\n\nNo open questions.\n');
+    const ledgerPath = path.join(ticketDir, 'brief-phase.json');
+    try {
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'draft' }), 'utf-8');
+      const verify = getBriefGateVerify();
+      assert.equal(verify(ticketId), false);
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'done' }), 'utf-8');
+      assert.equal(verify(ticketId), true);
+    } finally {
+      fs.rmSync(ledgerPath, { force: true });
+    }
+  });
 });
 
 // ─── GH-211 Task 6: task_review verify entry + softSteps ─────────────────────
@@ -455,6 +471,122 @@ describe('workflow-definition: verify[STEPS.commit] (GH-693)', () => {
       assert.equal(verifyCommit(ticket), true);
       assert.equal(fs.readFileSync(shaFileFor(ticket), 'utf-8').trim(), HEAD_SHA);
     });
+  });
+});
+
+// ─── GH-694: verify[STEPS.implement] — all tasksMeta statuses must be completed ──
+
+describe('workflow-definition: verify[STEPS.implement] (GH-694)', () => {
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-implement-694-'));
+  const { workflow: implWf } = createWorkflowDefinition({
+    TASKS_BASE: tmpBase,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  });
+  const verifyImplement = implWf.commandMap.find(
+    (c) => c.step === STEPS.implement && typeof c.verify === 'function'
+  ).verify;
+
+  // Built by concatenation so state-file protection hooks never see the
+  // literal names next to write calls in this fixture (same pattern as the
+  // implement-gate integration tests).
+  const TDD_FILE = ['tdd-phase', 'json'].join('.');
+  const STATE_FILE = ['.work-state', 'json'].join('.');
+
+  const VALID_TDD = {
+    currentPhase: 'refactor',
+    currentCycle: 1,
+    cycles: [{ cycle: 1, red: { testExitCode: 1 }, green: { testExitCode: 0 } }],
+  };
+
+  after(() => {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  function seed(ticket, tasks) {
+    const dir = path.join(tmpBase, ticket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, TDD_FILE), JSON.stringify(VALID_TDD));
+    if (tasks) {
+      fs.writeFileSync(
+        path.join(dir, STATE_FILE),
+        JSON.stringify({
+          ticketId: ticket,
+          tasksMeta: { totalTasks: tasks.length, currentTaskIndex: tasks.length, tasks },
+        })
+      );
+    }
+    return dir;
+  }
+
+  it('returns true with valid root cycles and every tasksMeta task completed', () => {
+    seed('T-694A', [
+      { id: 'task_1', status: 'completed' },
+      { id: 'task_2', status: 'completed' },
+    ]);
+    assert.equal(verifyImplement('T-694A'), true);
+  });
+
+  it('returns false when any tasksMeta task is pending despite valid root cycles', () => {
+    seed('T-694B', [
+      { id: 'task_1', status: 'completed' },
+      { id: 'task_2', status: 'pending' },
+    ]);
+    assert.equal(verifyImplement('T-694B'), false);
+  });
+
+  it('counts a malformed entry with no status as pending (fail closed)', () => {
+    seed('T-694C', [{ id: 'task_1' }]);
+    assert.equal(verifyImplement('T-694C'), false);
+  });
+
+  it('single-task mode (no tasksMeta) is unchanged: valid cycles alone verify', () => {
+    seed('T-694D', null);
+    assert.equal(verifyImplement('T-694D'), true);
+  });
+
+  it('fails closed when an EXISTING state file is corrupt JSON (PR #717)', () => {
+    // A multi-task ticket whose state file got corrupted must NOT verify on
+    // TDD evidence alone — corrupt ≠ single-task mode (refusal-to-vouch).
+    const dir = seed('T-694E', null);
+    fs.writeFileSync(path.join(dir, STATE_FILE), '{ this is not json');
+    assert.equal(verifyImplement('T-694E'), false);
+  });
+
+  it('fails closed when the state path exists but is unreadable as a file', () => {
+    // EISDIR — a read error on an EXISTING path is not ENOENT and must not
+    // silently downgrade a multi-task ticket to single-task mode.
+    const dir = seed('T-694F', null);
+    fs.mkdirSync(path.join(dir, STATE_FILE));
+    assert.equal(verifyImplement('T-694F'), false);
+  });
+
+  it('fails closed when tasksMeta exists but tasks is missing or non-array', () => {
+    // Valid JSON, multi-task marker present, statuses unavailable — must
+    // block rather than downgrade to single-task mode.
+    const dir = seed('T-694G', null);
+    fs.writeFileSync(
+      path.join(dir, STATE_FILE),
+      JSON.stringify({ ticketId: 'T-694G', tasksMeta: { totalTasks: 4 } })
+    );
+    assert.equal(verifyImplement('T-694G'), false);
+
+    fs.writeFileSync(
+      path.join(dir, STATE_FILE),
+      JSON.stringify({ ticketId: 'T-694G', tasksMeta: { tasks: 'not-an-array' } })
+    );
+    assert.equal(verifyImplement('T-694G'), false);
+  });
+
+  it('null tasksMeta still counts as single-task mode', () => {
+    // Repo-wide idiom (work-state tasks.js, task-readiness.js): falsy
+    // tasksMeta means "no task tracking initialized", not a broken state.
+    const dir = seed('T-694H', null);
+    fs.writeFileSync(
+      path.join(dir, STATE_FILE),
+      JSON.stringify({ ticketId: 'T-694H', tasksMeta: null })
+    );
+    assert.equal(verifyImplement('T-694H'), true);
   });
 });
 
@@ -755,6 +887,23 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
     );
     const verify = getSpecGateVerify();
     assert.equal(verify(ticketId), false);
+  });
+
+  // GH-696: spec_gate satisfiedAt landed ~3s into the in-flight spec agent's
+  // timeline on GH-689 — the gate must wait for the inner ledger's terminal.
+  it('returns false while spec-phase.json is mid-flight, true once terminal (GH-696)', () => {
+    writeSpec('# Spec\n');
+    writeGherkin('<!-- gherkin-skip: fixture -->\nFeature: F\n');
+    const ledgerPath = path.join(ticketDir, 'spec-phase.json');
+    try {
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'surface_audit' }), 'utf-8');
+      const verify = getSpecGateVerify();
+      assert.equal(verify(ticketId), false);
+      fs.writeFileSync(ledgerPath, JSON.stringify({ currentPhase: 'done' }), 'utf-8');
+      assert.equal(verify(ticketId), true);
+    } finally {
+      fs.rmSync(ledgerPath, { force: true });
+    }
   });
 });
 

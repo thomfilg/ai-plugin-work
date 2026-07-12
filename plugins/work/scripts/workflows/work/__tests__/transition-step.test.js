@@ -1024,3 +1024,89 @@ describe('transition-step.js (GH-693): commit-evidence gate', () => {
     }
   });
 });
+
+describe('transition-step.js (GH-694): multiTaskGate all-statuses', () => {
+  const TICKET = 'TEST-694';
+
+  function depsWithTasks(tasks, currentTaskIndex) {
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+    const deps = createDeps({ workflowCanTransition: () => true });
+    const ws = deps.loadWorkState(TICKET);
+    ws.currentStep = ALL_STEPS.indexOf(STEPS.implement) + 1;
+    ws.stepStatus[STEPS.implement] = 'in_progress';
+    if (tasks) {
+      ws.tasksMeta = { totalTasks: tasks.length, currentTaskIndex, tasks };
+    }
+    deps._savedStates[TICKET] = ws;
+    return deps;
+  }
+
+  it('blocks implement -> commit with the pointer AT a pending last task (off-by-one pin)', () => {
+    // GH-689 shape: currentTaskIndex points at the last task, which is still
+    // pending — the old pointer-only check (currentIdx >= totalTasks - 1)
+    // returned null here and let implement close over the dangling task.
+    const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
+    const deps = depsWithTasks(
+      [
+        { id: 'task_1', status: 'completed' },
+        { id: 'task_2', status: 'completed' },
+        { id: 'task_3', status: 'pending' },
+      ],
+      2
+    );
+    const result = transitionStep(TICKET, STEPS.commit, deps);
+    assert.equal(result.error, true, 'pending last task must block leaving implement');
+    assert.equal(result.gate, 'multi-task');
+    assert.match(result.message, /task_3/, 'message must list the pending task id');
+    assert.match(result.message, /work-next\.js/, 'message must name the work-next repair');
+  });
+
+  it('blocks implement -> commit with a pending checkpoint task (checkpoints NOT exempt)', () => {
+    const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
+    const deps = depsWithTasks(
+      [
+        { id: 'task_1', status: 'completed' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint' },
+      ],
+      2
+    );
+    const result = transitionStep(TICKET, STEPS.commit, deps);
+    assert.equal(result.error, true, 'pending checkpoint task must block leaving implement');
+    assert.equal(result.gate, 'multi-task');
+    assert.match(result.message, /task_2/, 'message must list the pending checkpoint id');
+  });
+
+  it('treats a malformed entry with no status as pending (fail closed)', () => {
+    const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
+    const deps = depsWithTasks([{ id: 'task_1' }], 1);
+    const result = transitionStep(TICKET, STEPS.commit, deps);
+    assert.equal(result.error, true, 'missing status must count as pending');
+    assert.equal(result.gate, 'multi-task');
+    assert.match(result.message, /task_1/);
+  });
+
+  it('passes when every task status is completed', () => {
+    const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
+    const deps = depsWithTasks(
+      [
+        { id: 'task_1', status: 'completed' },
+        { id: 'task_2', status: 'completed' },
+      ],
+      2
+    );
+    const result = transitionStep(TICKET, STEPS.commit, deps);
+    assert.equal(result.success, true, `expected success, got ${JSON.stringify(result)}`);
+  });
+
+  it('single-task mode (no tasksMeta) is unchanged', () => {
+    const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
+    const deps = depsWithTasks(null);
+    const result = transitionStep(TICKET, STEPS.commit, deps);
+    assert.equal(result.success, true, `expected success, got ${JSON.stringify(result)}`);
+  });
+});
