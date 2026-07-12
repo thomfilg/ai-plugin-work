@@ -6,9 +6,9 @@
 'use strict';
 
 const fs = require('node:fs');
-const path = require('node:path');
 
 const { REPORTS_PHASES } = require('../../reports-phase-registry');
+const { writePhaseContext } = require('../../../lib/write-phase-context');
 
 const ARTIFACT_PATTERNS = [
   /^brief\.md$/,
@@ -36,18 +36,7 @@ function listArtifacts(tasksDir) {
 }
 
 function writeContext(ctx, files) {
-  const p = path.join(ctx.tasksDir, 'reports-context.json');
-  const payload = {
-    ticket: ctx.ticket,
-    fileCount: files.length,
-    files,
-    capturedAt: new Date().toISOString(),
-  };
-  try {
-    fs.writeFileSync(p, JSON.stringify(payload, null, 2));
-  } catch {
-    /* hook-gated; non-fatal */
-  }
+  writePhaseContext(ctx.tasksDir, 'reports-context.json', files, { ticket: ctx.ticket });
 }
 
 function validate(ctx) {

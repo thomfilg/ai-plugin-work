@@ -364,6 +364,100 @@ describe('workflow-definition: softSteps includes task_review', () => {
   });
 });
 
+// ─── GH-693: verify[STEPS.commit] — commits ahead of base is the sole proof ──
+
+describe('workflow-definition: verify[STEPS.commit] (GH-693)', () => {
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-commit-693-'));
+  const { workflow: commitWf } = createWorkflowDefinition({
+    TASKS_BASE: tmpBase,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  });
+  const verifyCommit = commitWf.commandMap.find((c) => c.step === STEPS.commit).verify;
+  const HEAD_SHA = 'e'.repeat(40);
+
+  after(() => {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  function shaFileFor(ticketId) {
+    return path.join(tmpBase, ticketId, '.last-commit-sha');
+  }
+
+  /**
+   * Mock git for verifyCommit:
+   *   - log: `git log --oneline base..HEAD` output ('' = zero commits ahead)
+   *   - branch: `git branch --show-current` output
+   *   - twoDotDiff: `git diff --shortstat <a> <b>` output (two-dot / pairwise)
+   *   - threeDotDiff: `git diff --shortstat base...HEAD` output (merge-base)
+   */
+  function withGit(responses, fn) {
+    const cp = require('child_process');
+    const orig = cp.execFileSync;
+    cp.execFileSync = (cmd, args, opts) => {
+      if (cmd !== 'git') return orig(cmd, args, opts);
+      if (args[0] === 'rev-parse') return `${HEAD_SHA}\n`;
+      if (args[0] === 'log') return responses.log ?? '';
+      if (args[0] === 'branch') return responses.branch ?? '';
+      if (args[0] === 'diff') {
+        const threeDot = args.some((a) => typeof a === 'string' && a.includes('...'));
+        return threeDot ? (responses.threeDotDiff ?? '') : (responses.twoDotDiff ?? '');
+      }
+      return orig(cmd, args, opts);
+    };
+    try {
+      return fn();
+    } finally {
+      cp.execFileSync = orig;
+    }
+  }
+
+  it('returns false at 0 commits ahead even when the branch name matches the ticket and the two-dot diff is non-empty (GH-191 fallback deleted)', () => {
+    const ticket = 'T-693A';
+    fs.mkdirSync(path.join(tmpBase, ticket), { recursive: true });
+    withGit({ log: '', branch: `fix/${ticket}-thing\n`, twoDotDiff: ' 3 files changed\n' }, () => {
+      assert.equal(verifyCommit(ticket), false);
+      assert.equal(
+        fs.existsSync(shaFileFor(ticket)),
+        false,
+        '.last-commit-sha must NOT be written on a false path'
+      );
+    });
+  });
+
+  it('returns true with >=1 commit ahead and a non-empty merge-base (three-dot) diff, recording .last-commit-sha', () => {
+    const ticket = 'T-693B';
+    fs.mkdirSync(path.join(tmpBase, ticket), { recursive: true });
+    withGit({ log: 'abc123 fix: work\n', threeDotDiff: ' 1 file changed\n' }, () => {
+      assert.equal(verifyCommit(ticket), true);
+      assert.equal(fs.readFileSync(shaFileFor(ticket), 'utf-8').trim(), HEAD_SHA);
+    });
+  });
+
+  it('returns false for an empty commit atop a moved base (three-dot diff empty, two-dot non-empty)', () => {
+    const ticket = 'T-693C';
+    fs.mkdirSync(path.join(tmpBase, ticket), { recursive: true });
+    withGit({ log: 'abc123 empty\n', threeDotDiff: '', twoDotDiff: ' 2 files changed\n' }, () => {
+      assert.equal(verifyCommit(ticket), false);
+      assert.equal(
+        fs.existsSync(shaFileFor(ticket)),
+        false,
+        '.last-commit-sha must NOT be written for an empty commit'
+      );
+    });
+  });
+
+  it('saved-SHA path unchanged: new commit after the saved SHA with a non-empty diff passes', () => {
+    const ticket = 'T-693D';
+    fs.mkdirSync(path.join(tmpBase, ticket), { recursive: true });
+    fs.writeFileSync(shaFileFor(ticket), 'a'.repeat(40));
+    withGit({ twoDotDiff: ' 1 file changed\n' }, () => {
+      assert.equal(verifyCommit(ticket), true);
+      assert.equal(fs.readFileSync(shaFileFor(ticket), 'utf-8').trim(), HEAD_SHA);
+    });
+  });
+});
+
 // ─── GH-219: brief.md contentGuard ───────────────────────────────────────────
 
 describe('workflow-definition: brief.md contentGuard', () => {

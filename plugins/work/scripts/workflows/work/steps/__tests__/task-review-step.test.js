@@ -59,6 +59,14 @@ describe('task-review step', () => {
   let taskReviewStep;
   const savedEnv = {};
 
+  // GH-693: computeTaskDiff shells out to git (rev-list/merge-base) when no
+  // .last-commit-sha exists. Stub the dynamic execFileSync so step planning
+  // stays hermetic — the host repo's real commits-ahead count must not leak
+  // into these tests. Defaults simulate one commit ahead (review proceeds).
+  const cp = require('child_process');
+  let gitMock;
+  let origExecFileSync;
+
   before(() => {
     taskReviewStep = require(path.join(__dirname, '..', 'task-review.js'));
   });
@@ -68,9 +76,22 @@ describe('task-review step', () => {
     savedEnv.TASK_REVIEW_MAX_FIXES = process.env.TASK_REVIEW_MAX_FIXES;
     delete process.env.TASK_REVIEW_ENABLED;
     delete process.env.TASK_REVIEW_MAX_FIXES;
+    gitMock = { revList: '1\n', mergeBase: `${'f'.repeat(40)}\n` };
+    origExecFileSync = cp.execFileSync;
+    cp.execFileSync = (cmd, args, opts) => {
+      if (cmd === 'git' && args[0] === 'rev-list' && args[1] === '--count') {
+        if (gitMock.revList instanceof Error) throw gitMock.revList;
+        return gitMock.revList;
+      }
+      if (cmd === 'git' && args[0] === 'merge-base' && args[1] !== '--is-ancestor') {
+        return gitMock.mergeBase;
+      }
+      return origExecFileSync(cmd, args, opts);
+    };
   });
 
   afterEach(() => {
+    cp.execFileSync = origExecFileSync;
     if (savedEnv.TASK_REVIEW_ENABLED === undefined) delete process.env.TASK_REVIEW_ENABLED;
     else process.env.TASK_REVIEW_ENABLED = savedEnv.TASK_REVIEW_ENABLED;
     if (savedEnv.TASK_REVIEW_MAX_FIXES === undefined) delete process.env.TASK_REVIEW_MAX_FIXES;
@@ -309,6 +330,110 @@ describe('task-review step', () => {
     assert.equal(entries.length, 1);
     // Default max is 2, fix rounds is 1, so should NOT escalate
     assert.notEqual(entries[0].command, 'AskUserQuestion');
+  });
+
+  // ─── GH-693: blocked commit evidence — escalate, never schedule ───────────
+
+  function makeIntermediateFixture() {
+    const taskData = [
+      { num: 1, title: 'Task A', isCheckpoint: false },
+      { num: 2, title: 'Task B', isCheckpoint: false },
+      { num: 3, title: 'Task C', isCheckpoint: false },
+    ];
+    const s = makeState({
+      hasTasks: true,
+      workState: {
+        tasksMeta: {
+          currentTaskIndex: 0,
+          tasks: [{ id: 'task-1', taskReviewFixRounds: 0 }, { id: 'task-2' }, { id: 'task-3' }],
+        },
+      },
+    });
+    return { taskData, s };
+  }
+
+  it('escalates via AskUserQuestion instead of scheduling review when commit evidence is missing', () => {
+    gitMock.revList = '0\n'; // zero commits ahead -> computeTaskDiff blocks
+    const { add, entries } = makeAdd();
+    const { taskData, s } = makeIntermediateFixture();
+    const ctx = makeCtx({ _taskData: taskData, _currentTaskIdx: 0 });
+    taskReviewStep(add, s, ctx);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].step, STEPS.task_review);
+    assert.equal(entries[0].action, 'RUN');
+    assert.equal(entries[0].command, 'AskUserQuestion');
+    assert.match(entries[0].reason, /commit evidence/i);
+    assert.match(entries[0].agentPrompt, /AskUserQuestion/);
+    assert.doesNotMatch(
+      entries[0].agentPrompt,
+      /tests-review/,
+      'a vacuous review must NOT be scheduled'
+    );
+  });
+
+  it('escalates when git fails while checking commit evidence (fail closed)', () => {
+    gitMock.revList = new Error('git failed');
+    const { add, entries } = makeAdd();
+    const { taskData, s } = makeIntermediateFixture();
+    const ctx = makeCtx({ _taskData: taskData, _currentTaskIdx: 0 });
+    taskReviewStep(add, s, ctx);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].command, 'AskUserQuestion');
+    assert.match(entries[0].reason, /commit evidence/i);
+  });
+
+  it('escalates when computeTaskDiff throws — exceptions fail closed (PR #716)', () => {
+    // computeTaskDiff catches git/fs failures internally, so a throw is an
+    // unverifiable state — it must route to the blocked escalation, never
+    // schedule a review with no valid diff range. Simulate by making the
+    // shared config module's getBaseBranch throw (same require-cache
+    // instance task-review-gate.js holds).
+    const config = require(path.join(__dirname, '..', '..', '..', 'lib', 'config'));
+    const origGetBaseBranch = config.getBaseBranch;
+    config.getBaseBranch = () => {
+      throw new Error('config exploded');
+    };
+    try {
+      const { add, entries } = makeAdd();
+      const { taskData, s } = makeIntermediateFixture();
+      const ctx = makeCtx({ _taskData: taskData, _currentTaskIdx: 0 });
+      taskReviewStep(add, s, ctx);
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].action, 'RUN');
+      assert.equal(entries[0].command, 'AskUserQuestion');
+      assert.match(entries[0].reason, /commit evidence/i);
+      assert.match(entries[0].reason, /config exploded/, 'reason must carry the failure detail');
+      assert.doesNotMatch(
+        entries[0].agentPrompt,
+        /tests-review/,
+        'a review with an unverifiable range must NOT be scheduled'
+      );
+    } finally {
+      config.getBaseBranch = origGetBaseBranch;
+    }
+  });
+
+  it('appends a blocked audit row when commit evidence is missing', () => {
+    const fs = require('fs');
+    const getConfig = require(path.join(__dirname, '..', '..', '..', 'lib', 'get-config'));
+    const TASKS_BASE = getConfig.require('TASKS_BASE');
+    const ticket = 'TEST-693-AUDIT';
+    gitMock.revList = '0\n';
+    const { add } = makeAdd();
+    const { taskData, s } = makeIntermediateFixture();
+    const ctx = makeCtx({ ticket, _taskData: taskData, _currentTaskIdx: 0 });
+    try {
+      taskReviewStep(add, s, ctx);
+      const rows = JSON.parse(
+        fs.readFileSync(path.join(TASKS_BASE, ticket, '.work-actions.json'), 'utf-8')
+      );
+      assert.ok(
+        rows.some((r) => r.step === STEPS.task_review && /commit evidence/i.test(r.what || '')),
+        `expected a blocked audit row, got ${JSON.stringify(rows)}`
+      );
+    } finally {
+      fs.rmSync(path.join(TASKS_BASE, ticket), { recursive: true, force: true });
+    }
   });
 
   // ─── GH-259: reportFolder in plan entry metadata ─────────────────────────

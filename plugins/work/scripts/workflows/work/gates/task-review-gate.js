@@ -52,18 +52,64 @@ function isAncestorOfHead(sha) {
   }
 }
 
+/**
+ * Count commits ahead of the base branch (`git rev-list --count base..HEAD`).
+ * Uses dynamic require to allow test mocking of child_process.execFileSync.
+ * @param {string} baseBranch
+ * @returns {number|null} commit count, or null when git fails
+ */
+function countCommitsAhead(baseBranch) {
+  try {
+    const out = require('child_process')
+      .execFileSync('git', ['rev-list', '--count', `${baseBranch}..HEAD`], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      .trim();
+    const count = Number.parseInt(out, 10);
+    return Number.isFinite(count) ? count : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-derive the review base as the merge-base of the base branch and HEAD,
+ * keeping the range direction-correct when the per-task SHA was lost.
+ * Uses dynamic require to allow test mocking of child_process.execFileSync.
+ * @param {string} baseBranch
+ * @returns {string|null} merge-base SHA, or null when git fails
+ */
+function deriveMergeBase(baseBranch) {
+  try {
+    const out = require('child_process')
+      .execFileSync('git', ['merge-base', baseBranch, 'HEAD'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      .trim();
+    return SHA_REGEX.test(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── computeTaskDiff ────────────────────────────────────────────────────────
 
 /**
  * Compute the diff range for reviewing a task's changes.
  *
  * Reads `.last-commit-sha` from tasksDir, validates it as a 40-char hex SHA
- * that is an ancestor of HEAD. Falls back to the configured base branch
- * (e.g., origin/main) when the SHA is missing, invalid, or not an ancestor.
+ * that is an ancestor of HEAD. When the SHA is missing, invalid, or not an
+ * ancestor (GH-693): blocks when the branch has zero commits ahead of the
+ * configured base branch — "no SHA" must never become "pass on an empty
+ * diff" — and otherwise falls back to the merge-base of base and HEAD.
  *
  * @param {string} tasksDir - Path to the ticket's tasks directory
  * @param {string} ticketId - Ticket identifier (for logging)
- * @returns {{ base: string, head: string, fallback?: boolean }}
+ * @returns {{ base: string, head: string, fallback?: boolean } | { blocked: true, reason: string }}
  */
 function computeTaskDiff(tasksDir, ticketId) {
   const shaFile = path.join(tasksDir, LAST_COMMIT_SHA_FILE);
@@ -76,21 +122,31 @@ function computeTaskDiff(tasksDir, ticketId) {
       return { base: rawContent, head: 'HEAD' };
     }
     process.stderr.write(
-      `task-review-gate: SHA ${rawContent.slice(0, 8)}... is not an ancestor of HEAD for ${ticketId}, falling back to base branch\n`
+      `task-review-gate: SHA ${rawContent.slice(0, 8)}... is not an ancestor of HEAD for ${ticketId}, checking commits ahead of base\n`
     );
   } else if (rawContent) {
     process.stderr.write(
-      `task-review-gate: Invalid SHA format in ${LAST_COMMIT_SHA_FILE} for ${ticketId}, falling back to base branch\n`
+      `task-review-gate: Invalid SHA format in ${LAST_COMMIT_SHA_FILE} for ${ticketId}, checking commits ahead of base\n`
     );
   } else {
     process.stderr.write(
-      `task-review-gate: No ${LAST_COMMIT_SHA_FILE} found for ${ticketId}, falling back to base branch\n`
+      `task-review-gate: No ${LAST_COMMIT_SHA_FILE} found for ${ticketId}, checking commits ahead of base\n`
     );
   }
 
-  // Fallback to base branch
+  // GH-693: a review of base..HEAD with zero commits ahead is vacuous —
+  // block unless real commits exist (the legitimate lost-SHA recovery),
+  // then review the whole-branch diff from the merge-base.
   const baseBranch = config.getBaseBranch();
-  return { base: baseBranch, head: 'HEAD', fallback: true };
+  const commitsAhead = countCommitsAhead(baseBranch);
+  if (commitsAhead === null || commitsAhead < 1) {
+    return {
+      blocked: true,
+      reason: `no commits ahead of ${baseBranch} and no valid ${LAST_COMMIT_SHA_FILE} — commit the task work first (or git fetch the base ref)`,
+    };
+  }
+  const mergeBase = deriveMergeBase(baseBranch);
+  return { base: mergeBase || baseBranch, head: 'HEAD', fallback: true };
 }
 
 // ─── executeTaskReview ──────────────────────────────────────────────────────

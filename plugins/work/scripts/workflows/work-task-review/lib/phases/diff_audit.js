@@ -11,6 +11,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { TASK_REVIEW_PHASES } = require('../../task-review-phase-registry');
+const { writePhaseContext } = require('../../../lib/write-phase-context');
 
 let taskReviewGate;
 try {
@@ -64,18 +65,24 @@ function computeDiff(ctx) {
 }
 
 function writeContext(ctx, diff, files) {
-  const p = path.join(ctx.tasksDir, 'task-review-context.json');
-  const payload = {
+  writePhaseContext(ctx.tasksDir, 'task-review-context.json', files, {
     ticket: ctx.ticket,
     base: diff.base,
     head: diff.head,
     fallback: !!diff.fallback,
-    fileCount: files.length,
-    files,
-    capturedAt: new Date().toISOString(),
-  };
+  });
+}
+
+/**
+ * PR #716: a failed audit must not leave a previous snapshot behind — later
+ * phases (reuse_check, kind-checks shared.js) read task-review-context.json
+ * and would analyze the STALE file list on a retry after an earlier
+ * successful audit. Missing file = "no snapshot", which those readers
+ * already handle.
+ */
+function clearStaleContext(ctx) {
   try {
-    fs.writeFileSync(p, JSON.stringify(payload, null, 2));
+    fs.rmSync(path.join(ctx.tasksDir, 'task-review-context.json'), { force: true });
   } catch {
     /* hook-gated; non-fatal */
   }
@@ -83,9 +90,16 @@ function writeContext(ctx, diff, files) {
 
 function validate(ctx) {
   const diff = computeDiff(ctx);
+  if (diff && diff.blocked) {
+    // GH-693: surface the same blocked state as the plan-time gate instead
+    // of auditing an empty range (validator-unification invariant).
+    clearStaleContext(ctx);
+    return { ok: false, errors: [diff.reason] };
+  }
   const root = ctx.worktreeRoot || process.cwd();
   const files = gitDiffNameOnly(diff.base, diff.head, root);
   if (!files.length) {
+    clearStaleContext(ctx);
     return {
       ok: false,
       errors: [

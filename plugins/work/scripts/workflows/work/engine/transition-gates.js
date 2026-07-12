@@ -2,9 +2,9 @@
  * transition-gates.js
  *
  * The gate checks run by transition-step.js before a transition is applied:
- * TDD evidence, multi-task completion, DEFER re-evaluation, the check-to-PR
- * quality gate, check-drift detection (GH-299), and the generic step-verify
- * gate (GH-260).
+ * TDD evidence, multi-task completion, commit evidence (GH-693), DEFER
+ * re-evaluation, the check-to-PR quality gate, check-drift detection
+ * (GH-299), and the generic step-verify gate (GH-260).
  *
  * Each gate takes the shared transition context and returns an error result
  * to surface, or null to proceed. `runTransitionGates` chains them in order.
@@ -22,6 +22,10 @@ const { resolveTaskType } = require(path.join(__dirname, '..', 'lib', 'resolve-t
 const { validateTddEvidenceForType } = require(
   path.join(__dirname, '..', 'lib', 'tdd-enforcement')
 );
+// GH-693 commit-evidence gate (extracted module, PR #716): >=1 commit ahead
+// of the resolved base to leave commit/task_review; fails closed on git
+// errors AND on an explicitly configured but unresolvable BASE_BRANCH.
+const { commitEvidenceGate } = require(path.join(__dirname, 'commit-evidence-gate'));
 
 /**
  * Derive the set of steps that come after `check` in the workflow.
@@ -312,6 +316,7 @@ function runTransitionGates(ctx) {
   return (
     tddGate(ctx) ||
     multiTaskGate(ctx) ||
+    commitEvidenceGate(ctx) ||
     deferGate(ctx) ||
     checkToPrGate(ctx) ||
     checkDriftGate(ctx) ||

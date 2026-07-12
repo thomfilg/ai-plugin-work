@@ -12,7 +12,7 @@
  *   console.log(config.REPO_NAME);        // e.g., 'my-project'
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -245,6 +245,50 @@ config.webAppsMap = () => {
 };
 
 /**
+ * GH-693 (PR #716): resolve the EXPLICITLY configured base branch, reporting
+ * whether one is configured and whether `origin/<name>` actually resolves.
+ * Strict consumers (the commit-evidence gate) must fail closed on a
+ * configured-but-unresolvable base instead of silently counting commits
+ * against an auto-detected fallback (origin/main), which can fabricate
+ * commit evidence for a branch with zero commits ahead of its real base.
+ *
+ * Reads env dynamically, not via the cached config.BASE_BRANCH snapshot:
+ * a parent process may export BASE_BRANCH after this module is first
+ * loaded, and ECHO-4450 hit that case (BASE_BRANCH=dev was set but ignored).
+ *
+ * @param {object} [options] - Optional settings
+ * @param {string} [options.cwd] - Working directory for git commands
+ * @returns {{configured: false} | {configured: true, raw: string, sanitized: string, ref: string|null}}
+ */
+config.getExplicitBase = (options = {}) => {
+  const explicitBase = process.env.BASE_BRANCH || config.BASE_BRANCH;
+  if (!explicitBase) return { configured: false };
+  // Sanitize to prevent shell injection; strip ".."/"..." revspec operators.
+  const sanitized = explicitBase
+    .replace(/^refs\/remotes\//, '')
+    .replace(/^origin\//, '')
+    .replace(/[^a-zA-Z0-9._\-/]/g, '')
+    .replace(/\.{2,}/g, '');
+  let ref = null;
+  if (sanitized) {
+    const candidate = `origin/${sanitized}`;
+    try {
+      // execFileSync array args (no shell) + --end-of-options: an
+      // env-derived ref can never be parsed as a git option.
+      const out = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', candidate], {
+        encoding: 'utf8',
+        cwd: options.cwd || undefined,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      if (out) ref = candidate;
+    } catch {
+      /* unresolvable — caller decides whether to fall back or fail closed */
+    }
+  }
+  return { configured: true, raw: explicitBase, sanitized, ref };
+};
+
+/**
  * Detect the correct base branch for the repository.
  * Priority: repo config (BASE_BRANCH) → git symbolic-ref → probe common names → fallback
  * @param {object} [options] - Optional settings
@@ -260,23 +304,12 @@ config.getBaseBranch = (options = {}) => {
     }
   };
 
-  // 1. Explicit repo config (highest priority) — sanitize to prevent shell injection.
-  // Read env dynamically here, not via the cached config.BASE_BRANCH snapshot:
-  // a parent process may export BASE_BRANCH after this module is first loaded,
-  // and ECHO-4450 hit that case (BASE_BRANCH=dev was set but ignored).
-  const explicitBase = process.env.BASE_BRANCH || config.BASE_BRANCH;
-  if (explicitBase) {
-    const sanitized = explicitBase
-      .replace(/^refs\/remotes\//, '')
-      .replace(/^origin\//, '')
-      .replace(/[^a-zA-Z0-9._\-/]/g, '')
-      .replace(/\.{2,}/g, ''); // reject git revspec operators (.., ...)
-    if (sanitized) {
-      const ref = `origin/${sanitized}`;
-      if (safeExec(`git rev-parse --verify ${ref} 2>/dev/null`)) return ref;
-    }
-    // Invalid or non-existent BASE_BRANCH — fall through to auto-detection
-  }
+  // 1. Explicit repo config (highest priority). Invalid or non-existent
+  // BASE_BRANCH falls through to auto-detection here (lenient, historical
+  // behavior for scope-diff callers); strict consumers use getExplicitBase
+  // directly and fail closed instead (PR #716).
+  const explicit = config.getExplicitBase({ cwd });
+  if (explicit.configured && explicit.ref) return explicit.ref;
 
   // 2. Git symbolic ref detection
   const headRef = safeExec('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null');

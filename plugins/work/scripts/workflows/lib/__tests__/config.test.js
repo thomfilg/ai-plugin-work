@@ -315,6 +315,62 @@ describe('config', () => {
       assert.equal(branch, 'origin/main');
     });
 
+    // ─── getExplicitBase (GH-693 / PR #716) ─────────────────────────────────
+    // Strict consumers (the commit-evidence gate) must be able to tell
+    // "no explicit base configured" apart from "explicit base configured
+    // but unresolvable" — the latter must fail closed, never silently
+    // degrade to auto-detected origin/main.
+
+    it('getExplicitBase reports configured:false when BASE_BRANCH is unset', () => {
+      const config = freshRequire();
+      assert.deepEqual(config.getExplicitBase(), { configured: false });
+    });
+
+    it('getExplicitBase reports a null ref when the configured base does not resolve', () => {
+      const config = freshRequire({ BASE_BRANCH: 'nonexistent-branch-xyz-999' });
+      const res = config.getExplicitBase();
+      assert.equal(res.configured, true);
+      assert.equal(res.ref, null, 'unresolvable base must NOT be silently replaced');
+      assert.equal(res.sanitized, 'nonexistent-branch-xyz-999');
+    });
+
+    it('getExplicitBase resolves an explicit base that exists as origin/<name>', () => {
+      const cp = require('child_process');
+      const fs = require('fs');
+      const os = require('os');
+      const path = require('path');
+      const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gh716-explicit-'));
+      const git = (args) =>
+        cp.execFileSync('git', args, { cwd: repo, stdio: ['pipe', 'pipe', 'pipe'] });
+      try {
+        git(['init', '-q']);
+        git([
+          '-c',
+          'user.email=t@example.com',
+          '-c',
+          'user.name=t',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'x',
+          '-q',
+        ]);
+        git(['update-ref', 'refs/remotes/origin/stable', 'HEAD']);
+        const config = freshRequire({ BASE_BRANCH: 'stable' });
+        const res = config.getExplicitBase({ cwd: repo });
+        assert.equal(res.configured, true);
+        assert.equal(res.ref, 'origin/stable');
+      } finally {
+        fs.rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
+    it('getExplicitBase sanitizes an origin/-prefixed BASE_BRANCH like getBaseBranch', () => {
+      const config = freshRequire({ BASE_BRANCH: 'origin/nonexistent-branch-xyz-999' });
+      const res = config.getExplicitBase();
+      assert.equal(res.sanitized, 'nonexistent-branch-xyz-999');
+    });
+
     it('honors BASE_BRANCH set AFTER config module was loaded (ECHO-4450)', () => {
       // Load config with no BASE_BRANCH set — simulates the case where the
       // parent process exports BASE_BRANCH only later (or via a wrapper).
