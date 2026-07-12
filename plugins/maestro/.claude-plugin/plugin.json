@@ -1,6 +1,6 @@
 {
   "name": "maestro",
-  "version": "3.72.0",
+  "version": "3.74.2",
   "description": "Multi-agent orchestrator. Bootstraps per-ticket tmux sessions in isolated worktrees, conducts them (auto-restart on silence, surface real prompts to the operator), and exposes a file-mailbox signal channel.",
   "author": {
     "name": "Custom",
