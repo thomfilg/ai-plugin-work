@@ -230,21 +230,24 @@ const STATUS_COMPLETE_RE = /^\s*\*\*Status:\*\*\s*COMPLETE\b/im;
 
 /**
  * GH-283 R8: completion evidence is present iff `<tasksDir>/completion.check.md`
- * exists AND contains the canonical `**Status:** COMPLETE` line. Fail-OPEN
- * (returns `null`) only when the tasks-dir cannot be resolved — that is the one
- * unresolvable case where we fall back to the tmux-only invariant. A present
- * file with a wrong/absent status returns `false` (fail closed).
+ * exists AND contains the canonical `**Status:** COMPLETE` line. Fail-CLOSED on
+ * every failure mode: an unresolvable tasks-dir (`TASKS_BASE` unset or
+ * `safeTicketPath` throwing) means "completion evidence NOT proven" and returns
+ * `false`, exactly as a missing/wrong-status file does. This keeps the P1
+ * `verifyCleanup` backstop consistent with the primary `completion_check`
+ * phase, which already fails closed on an unresolvable dir — closing the
+ * residual cleanup bypass for a misconfigured/tampered runner (GH-283).
  * @param {StepDeps} deps
- * @returns {boolean|null} true=COMPLETE, false=present-but-wrong/missing, null=unresolvable dir
+ * @returns {boolean} true=COMPLETE, false=unresolvable-dir OR present-but-wrong/missing
  */
 function completionEvidencePresent(deps, ticketId) {
   let dir;
   try {
     dir = ticketDir(deps, ticketId);
   } catch {
-    return null; // tasks-dir unresolvable → fail open to tmux-only invariant
+    return false; // tasks-dir unresolvable → fail closed (evidence not proven)
   }
-  if (!dir) return null;
+  if (!dir) return false; // unresolvable dir → fail closed
   let raw;
   try {
     raw = fs.readFileSync(path.join(dir, 'completion.check.md'), 'utf-8');
@@ -258,8 +261,10 @@ function completionEvidencePresent(deps, ticketId) {
  * GH-283 R8: cleanup is proven only when BOTH the dev tmux session is gone
  * AND completion evidence (`**Status:** COMPLETE`) is present. This closes the
  * runner-bypass gap where skipping the completion_check phase left no marker
- * yet cleanup still verified on tmux-absence alone. Fail-open on an
- * unresolvable tasks-dir only (falls back to the tmux-only invariant).
+ * yet cleanup still verified on tmux-absence alone. Fail-CLOSED throughout:
+ * an unresolvable tasks-dir returns `false` (no tmux-only fallback), matching
+ * the primary completion_check phase and closing the residual bypass for a
+ * misconfigured/tampered runner (GH-283).
  * @param {StepDeps} deps
  */
 function verifyCleanup(deps, ticketId) {
@@ -278,10 +283,8 @@ function verifyCleanup(deps, ticketId) {
   }
   if (!tmuxGone) return false;
 
-  // 2) completion evidence must be present (fail-open only on unresolvable dir).
-  const evidence = completionEvidencePresent(deps, ticketId);
-  if (evidence === null) return true; // unresolvable dir → tmux-only invariant
-  return evidence;
+  // 2) completion evidence must be present (fail-closed on unresolvable dir).
+  return completionEvidencePresent(deps, ticketId);
 }
 
 /** @param {StepDeps} deps */

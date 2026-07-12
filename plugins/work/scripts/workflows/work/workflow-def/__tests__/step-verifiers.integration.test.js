@@ -87,4 +87,19 @@ describe('verifyCleanup asserts completion evidence (GH-283 R8)', () => {
     const { verifyCleanup } = createStepVerifiers(makeDeps(tasksBase));
     assert.equal(verifyCleanup(ticketId), true);
   });
+
+  it('returns false when the tasks-dir is unresolvable (fails closed, GH-283)', () => {
+    // Misconfigured/tampered runner: safeTicketPath throws → ticketDir throws.
+    // The P1 backstop must fail CLOSED, not fall open to the tmux-only
+    // invariant — matching the primary completion_check phase.
+    const deps = {
+      TASKS_BASE: makeTasksBase(),
+      safeTicketPath: () => {
+        throw new Error('TASKS_BASE unset / traversal rejected');
+      },
+      workRoot: path.join(__dirname, '..', '..'),
+    };
+    const { verifyCleanup } = createStepVerifiers(deps);
+    assert.equal(verifyCleanup(uniqueTicketId()), false);
+  });
 });
