@@ -252,17 +252,17 @@ function isInPlaceExtension(entry, changedSet, blobs) {
   );
 }
 
-// GH-607 (R2/P0.2): config-file entry — declared path is a non-JS/TS file whose
-// block genuinely appears in the change of THAT declared file. Scoped per-file:
-// git available → the declared file's own added lines; git unavailable → its own
-// blob content (never the combined diff / all-blobs set, so a needle in an
-// UNRELATED changed file cannot satisfy the entry — Greptile P1).
-function isConfigEntryReused(ctx, entry, blobs, changedSet) {
+// GH-607 (R2/P0.2): config-file entry — non-JS/TS declared path matched per-file AND
+// per-added-line: only the declared file's OWN `git diff -U0` added lines satisfy it
+// (never the combined/all-blobs set — Greptile P1). Fallback (Greptile P1): when the
+// diff is UNAVAILABLE (readAddedLines null) do NOT use full blob content — the symbol
+// trivially pre-exists in its own config file, so fail toward not-reused (no stale pass).
+function isConfigEntryReused(ctx, entry, changedSet) {
   if (!isConfigPath(entry.path)) return false;
   const norm = normalizeRepoPath(entry.path);
   const scoped = readAddedLines(ctx, [norm]);
-  const effective = scoped === null ? (blobs.find((b) => b.rel === norm)?.content ?? '') : scoped;
-  return configEntryPresent(entry, effective, changedSet);
+  if (scoped === null) return false;
+  return configEntryPresent(entry, scoped, changedSet);
 }
 
 // Returns true when `entry` counts as reused. Config-path entries are judged
@@ -271,7 +271,7 @@ function isConfigEntryReused(ctx, entry, blobs, changedSet) {
 // changed file would leak a false pass (Greptile P1). Importable-symbol entries
 // use the added-line check (B3) + legacy full-content fallback + in-place relax.
 function isReuseEntrySatisfied(ctx, entry, blobs, addedLines, changedSet) {
-  if (isConfigPath(entry.path)) return isConfigEntryReused(ctx, entry, blobs, changedSet);
+  if (isConfigPath(entry.path)) return isConfigEntryReused(ctx, entry, changedSet);
   const addedHit = symbolPresentInAdded(entry.symbol, addedLines);
   const present = addedHit === null ? symbolPresentInBlobs(entry.symbol, blobs) : addedHit;
   return present || isInPlaceExtension(entry, changedSet, blobs);

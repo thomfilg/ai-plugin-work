@@ -493,7 +493,18 @@ test.describe('GH-607 Task 2 — configEntryPresent + guarded branches (2.2)', (
     }
   });
 
-  test('validate: hooks.json config MUST-reuse entry present in the change ⇒ 0 missing', async () => {
+  // Greptile P1 (reuse_audit_enforcement.js isConfigEntryReused fallback): when the
+  // added-lines diff is UNAVAILABLE, a config MUST-reuse entry must NOT be satisfied
+  // by bare file-wide presence. The declared symbol pre-exists in its own config
+  // file, so an unrelated edit to that file (it IS in the change set) plus the
+  // symbol living anywhere in the full blob would otherwise falsely pass — stale
+  // config satisfying the audit. buildCtx is a NON-git tmpdir, so `readAddedLines`
+  // returns null (added portion unknowable); the conservative fallback must fail it.
+  //
+  // The positive path (config block on the declared file's OWN added lines ⇒ pass)
+  // is covered under REAL git by
+  //   'needle on the declared file’s own added lines DOES satisfy the config entry'.
+  test('config entry with the diff UNAVAILABLE does NOT count as reused (Greptile P1 stale-file guard)', async () => {
     const spec = [
       '# Spec',
       '',
@@ -502,20 +513,28 @@ test.describe('GH-607 Task 2 — configEntryPresent + guarded branches (2.2)', (
       '- `my-hook` MUST be reused from `hooks.json`',
       '',
     ].join('\n');
+    // hooks.json is in the change set (an unrelated edit touched it — `"touched"`)
+    // and `my-hook` PRE-EXISTS in the file; but the change never added the my-hook
+    // block. With the diff unavailable, this must fail-closed rather than pass on
+    // full-file presence.
     const { ctx, cleanup } = buildCtx({
       spec,
       changedFiles: ['hooks.json'],
       fileContents: {
-        'hooks.json': '{\n  "my-hook": { "command": "node x.js" }\n}\n',
+        'hooks.json': '{\n  "my-hook": { "command": "node x.js" },\n  "touched": true\n}\n',
       },
     });
     try {
       const result = await phase.validate(ctx);
-      assert.equal(result.ok, true, 'config-file entry present in change must pass');
       assert.equal(
-        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
-        0,
-        'no failure record for present config entry'
+        result.ok,
+        false,
+        'config entry must NOT pass on bare file-wide presence when the added-lines diff is unavailable'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(
+        rec,
+        'failure record must be pushed when the config entry cannot be verified from the diff'
       );
     } finally {
       cleanup();
