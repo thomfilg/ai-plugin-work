@@ -3,14 +3,18 @@
  *
  * Phases for the WORK orchestrator's `cleanup` step.
  *
- * Phases (linear):
- *   inputs → pr_merged_check → branch_cleanup → tmux_cleanup →
- *   state_archive → memorize → done
+ * Phases (linear, 8):
+ *   inputs → pr_merged_check → completion_check → branch_cleanup →
+ *   tmux_cleanup → state_archive → memorize → done
  *
  * `pr_merged_check` is a defensive duplicate of ci-step's wait_merge —
  * cleanup must NEVER run on a branch whose PR isn't merged. It blocks
  * (not WAITs) if the PR is OPEN/CLOSED since the workflow shouldn't have
  * reached cleanup at all in those states.
+ *
+ * `completion_check` is a hard block guarding branch cleanup: it refuses to
+ * advance unless `completion.check.md` reads `**Status:** COMPLETE`, so a
+ * destructive branch delete can never run on an incomplete workflow.
  */
 
 'use strict';
