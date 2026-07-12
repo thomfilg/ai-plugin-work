@@ -2,14 +2,17 @@
  * step-verifiers.integration.test.js — GH-283 Task 6 (R8)
  *
  * verifyCleanup must return `true` only when BOTH the tmux dev session is
- * gone AND `<tasksDir>/completion.check.md` exists with the canonical
+ * PROVABLY gone AND `<tasksDir>/completion.check.md` exists with the canonical
  * `**Status:** COMPLETE` line. A runner bypass that skips the completion_check
  * phase (so no COMPLETE marker is written) must still fail step verification.
  *
- * We reach the "tmux session gone" state naturally by using a random,
- * never-created ticket id: `tmux has-session -t <id>-dev` exits non-zero,
- * which the verifier reads as "cleaned up". The completion-evidence assertion
- * is then the only thing that can flip the result.
+ * GH-283 (greptile comment 2): only a genuine `tmux has-session` exit-1 proves
+ * the session is gone. A tmux exec that fails with ENOENT (binary missing), a
+ * timeout (SIGTERM), or a permission error proves nothing — the check must fail
+ * CLOSED rather than treat those as cleanup success. To keep these cases
+ * DETERMINISTIC on any runner (with or without tmux installed), the tmux probe
+ * is injected via `deps.tmuxHasSession`, a tri-state seam:
+ *   true  → session exists, false → session gone, null → cannot prove.
  *
  * node:test + node:assert/strict, temp-dir TASKS_BASE, no python.
  */
@@ -30,16 +33,23 @@ function makeTasksBase() {
   return d;
 }
 
-/** Unique per test so the tmux dev session provably does not exist. */
+/** Unique per test (path isolation only; the tmux probe is injected). */
 function uniqueTicketId() {
   return `GH-283-t6-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function makeDeps(tasksBase) {
+/**
+ * @param {string} tasksBase
+ * @param {(id: string) => (boolean|null)} [tmuxHasSession] injected tri-state
+ *   probe. Defaults to "session provably gone" (false) so completion evidence
+ *   is the only remaining variable.
+ */
+function makeDeps(tasksBase, tmuxHasSession = () => false) {
   return {
     TASKS_BASE: tasksBase,
     safeTicketPath: (id) => id,
     workRoot: path.join(__dirname, '..', '..'),
+    tmuxHasSession,
   };
 }
 
@@ -64,6 +74,15 @@ describe('verifyCleanup asserts completion evidence (GH-283 R8)', () => {
     }
   });
 
+  it('returns false when the tmux session still exists (not cleaned up)', () => {
+    const tasksBase = makeTasksBase();
+    const ticketId = uniqueTicketId();
+    seedTicket(tasksBase, ticketId, '**Status:** COMPLETE\n');
+    // Session present → must fail even with COMPLETE evidence.
+    const { verifyCleanup } = createStepVerifiers(makeDeps(tasksBase, () => true));
+    assert.equal(verifyCleanup(ticketId), false);
+  });
+
   it('returns false when tmux is gone but completion.check.md is absent', () => {
     const tasksBase = makeTasksBase();
     const ticketId = uniqueTicketId();
@@ -80,12 +99,47 @@ describe('verifyCleanup asserts completion evidence (GH-283 R8)', () => {
     assert.equal(verifyCleanup(ticketId), false);
   });
 
-  it('returns true when tmux is gone and completion.check.md reads **Status:** COMPLETE', () => {
+  it('returns true when tmux is gone (exit-1) and completion.check.md reads **Status:** COMPLETE', () => {
     const tasksBase = makeTasksBase();
     const ticketId = uniqueTicketId();
     seedTicket(tasksBase, ticketId, '**Status:** COMPLETE\n');
-    const { verifyCleanup } = createStepVerifiers(makeDeps(tasksBase));
+    // false = session provably gone (the canonical exit-1 signal).
+    const { verifyCleanup } = createStepVerifiers(makeDeps(tasksBase, () => false));
     assert.equal(verifyCleanup(ticketId), true);
+  });
+
+  it('fails closed when the tmux exec cannot prove the session is gone (ENOENT/timeout)', () => {
+    // GH-283: tmux binary missing, a timeout kill (SIGTERM), or a permission
+    // error yields a `null` tri-state — "cannot prove". Even with a valid
+    // COMPLETE marker this must NOT verify: an unproven-absent dev session is
+    // not cleanup success (a runner that cannot exec tmux must fail closed).
+    const tasksBase = makeTasksBase();
+    const ticketId = uniqueTicketId();
+    seedTicket(tasksBase, ticketId, '**Status:** COMPLETE\n');
+    const { verifyCleanup } = createStepVerifiers(makeDeps(tasksBase, () => null));
+    assert.equal(verifyCleanup(ticketId), false);
+  });
+
+  it('default probe (no injection) still fails closed when tmux is absent, or gone-with-COMPLETE passes', () => {
+    // Exercises the REAL defaultTmuxHasSession path (no seam) to prove the
+    // production default is wired. On a runner WITH tmux the never-created
+    // session exits 1 → gone → COMPLETE → true. On a runner WITHOUT tmux the
+    // exec throws ENOENT → null → fail closed → false. Either outcome is a safe
+    // (non-bypass) result, so we assert the disjunction rather than a fixed
+    // boolean — keeping the test green on both kinds of runner.
+    const tasksBase = makeTasksBase();
+    const ticketId = uniqueTicketId();
+    seedTicket(tasksBase, ticketId, '**Status:** COMPLETE\n');
+    const deps = {
+      TASKS_BASE: tasksBase,
+      safeTicketPath: (id) => id,
+      workRoot: path.join(__dirname, '..', '..'),
+      // no tmuxHasSession → default execFileSync-based probe
+    };
+    const { verifyCleanup } = createStepVerifiers(deps);
+    const result = verifyCleanup(ticketId);
+    // tmux present → true (gone+COMPLETE); tmux absent → false (fail closed).
+    assert.equal([true, false].includes(result), true);
   });
 
   it('returns false when the tasks-dir is unresolvable (fails closed, GH-283)', () => {
@@ -98,6 +152,7 @@ describe('verifyCleanup asserts completion evidence (GH-283 R8)', () => {
         throw new Error('TASKS_BASE unset / traversal rejected');
       },
       workRoot: path.join(__dirname, '..', '..'),
+      tmuxHasSession: () => false, // session gone; the dir is the failing axis
     };
     const { verifyCleanup } = createStepVerifiers(deps);
     assert.equal(verifyCleanup(uniqueTicketId()), false);

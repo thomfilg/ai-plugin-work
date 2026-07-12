@@ -15,6 +15,10 @@
  * @property {string} TASKS_BASE
  * @property {Function} safeTicketPath
  * @property {string} workRoot - workflows/work directory (for lib requires)
+ * @property {(ticketId: string) => (boolean|null)} [tmuxHasSession] - optional
+ *   tri-state tmux probe seam (true=exists, false=gone, null=cannot prove);
+ *   defaults to the real execFileSync-based probe. Injected by tests so the
+ *   cleanup check is deterministic regardless of whether the runner has tmux.
  */
 
 const path = require('path');
@@ -258,6 +262,40 @@ function completionEvidencePresent(deps, ticketId) {
 }
 
 /**
+ * GH-283: probe whether the `<ticketId>-dev` tmux session exists. Returns a
+ * TRI-STATE so the caller can fail closed on "cannot prove":
+ *   - `false` → session provably GONE (`tmux has-session` exited 1).
+ *   - `true`  → session provably EXISTS (`tmux has-session` exited 0).
+ *   - `null`  → COULD NOT PROVE either way — tmux binary missing (ENOENT),
+ *               the 3000ms timeout killed it (`err.signal` set, e.g. SIGTERM),
+ *               a permission error, or any non-1 exit status. Only exit-1 is
+ *               the canonical "session not found" signal; every other failure
+ *               is indeterminate and must NOT be read as "gone".
+ * Default impl; overridable via `deps.tmuxHasSession` so tests are deterministic
+ * regardless of whether the CI runner has tmux installed.
+ * @returns {boolean|null}
+ */
+function defaultTmuxHasSession(ticketId) {
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync('tmux', ['has-session', '-t', `${ticketId}-dev`], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return true; // exit 0 → session exists
+  } catch (err) {
+    // execFileSync sets `.status` to the child exit code, `.signal` when the
+    // process was killed (timeout → SIGTERM), and `.code` to 'ENOENT' when the
+    // binary is missing. Only a genuine exit-1 proves the session is gone.
+    if (err && err.status === 1 && !err.signal && err.code !== 'ENOENT') {
+      return false; // session provably gone
+    }
+    return null; // ENOENT / timeout / permission / other status → cannot prove
+  }
+}
+
+/**
  * GH-283 R8: cleanup is proven only when BOTH the dev tmux session is gone
  * AND completion evidence (`**Status:** COMPLETE`) is present. This closes the
  * runner-bypass gap where skipping the completion_check phase left no marker
@@ -265,23 +303,21 @@ function completionEvidencePresent(deps, ticketId) {
  * an unresolvable tasks-dir returns `false` (no tmux-only fallback), matching
  * the primary completion_check phase and closing the residual bypass for a
  * misconfigured/tampered runner (GH-283).
+ *
+ * The tmux probe is tri-state (see {@link defaultTmuxHasSession}): only a
+ * genuine `tmux has-session` exit-1 counts as "gone". A tmux exec that fails
+ * with ENOENT (binary missing), a timeout (SIGTERM), or a permission error
+ * proves NOTHING about the session — so we fail closed rather than treat those
+ * as cleanup success (a runner that cannot exec tmux must not pass cleanup).
  * @param {StepDeps} deps
  */
 function verifyCleanup(deps, ticketId) {
-  // 1) tmux dev session must be gone.
-  let tmuxGone;
-  try {
-    const { execFileSync } = require('child_process');
-    execFileSync('tmux', ['has-session', '-t', `${ticketId}-dev`], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    tmuxGone = false; // Session still exists -- not cleaned up
-  } catch {
-    tmuxGone = true; // Exit code 1 = session doesn't exist = cleaned up
-  }
-  if (!tmuxGone) return false;
+  // 1) tmux dev session must be PROVABLY gone.
+  const tmuxProbe = deps.tmuxHasSession || defaultTmuxHasSession;
+  const sessionExists = tmuxProbe(ticketId); // true=exists, false=gone, null=unknown
+  // Only a proven-gone (false) result passes. `true` (still up) and `null`
+  // (indeterminate: ENOENT/timeout/permission/non-1 status) both fail closed.
+  if (sessionExists !== false) return false;
 
   // 2) completion evidence must be present (fail-closed on unresolvable dir).
   return completionEvidencePresent(deps, ticketId);
