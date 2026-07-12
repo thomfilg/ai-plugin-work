@@ -165,6 +165,8 @@ All hooks follow a strict fail-open policy:
 | `protect-tasks-md.js` | Block edits to planner-owned tasks.md outside the tasks phase |
 | `protect-task-scope.js` | Block edits outside the active task's `### Files in scope` |
 | `work-require-implement.js` | Block code changes outside implement step (hook script exists and consumes `preflight.js`, but is NOT currently registered in hooks.json) |
+| `capture-usage.js` | PostToolUse (`Task\|Agent`): capture per-dispatch sub-agent token usage (GH-311) |
+| `context-monitor.js` | PostToolUse (`Task\|Agent`): advisory context-usage warning (GH-313) — see [Context Monitor](#context-monitor) |
 
 ### /work-implement hooks (`scripts/workflows/work-implement/hooks/`)
 
@@ -206,6 +208,51 @@ Repeat `init` calls with unchanged state are silent — pass `--show-guard` to
 node session-guard.js init TICKET-123 /work --show-guard
 ```
 
+## Context Monitor
+
+**File:** `scripts/workflows/work/hooks/context-monitor.js`
+
+Registered as a PostToolUse hook on the existing `Task|Agent` lane (alongside
+`capture-usage.js`). After each agent-dispatch tool completes, this **advisory**
+hook warns the operator as the active `/work` session approaches its context
+limit — it **never blocks** a tool call and is strictly **fail-open** (any error
+exits 0 silently via `installFailOpen()`).
+
+What it does per dispatch:
+
+1. Scopes to the active `/work` session via the `.work.pid` marker
+   (`findRecentWorkMarker`). A foreign/missing marker or a sub-agent context is a
+   silent no-op.
+2. Reads cumulative context-token usage (input + output, including cache fields)
+   from the session's own transcript (`context-usage.readCumulativeUsage`).
+3. Computes the integer percent consumed against the model context limit.
+4. Fires **once per newly-crossed threshold** (default 60/70/80), naming the
+   active workflow step, the dispatched agent/tool, and the percent consumed.
+   Crossed thresholds are tracked in a per-ticket ledger at
+   `<TASKS_BASE>/<safeTicketId>/.context-monitor.json` (`{ crossed: number[] }`),
+   so an already-crossed threshold does not re-warn within a session. The ledger
+   is created lazily and is safe to delete (absence re-arms all thresholds).
+5. At the highest (critical) threshold, the warning appends an actionable
+   recommendation: commit current work, summarize progress, and consider
+   spawning a fresh agent for the remainder.
+
+Warnings ride `emit.context('PostToolUse', ...)` (stderr-style on Claude, an
+`additionalContext` envelope on Codex).
+
+### Configuration env vars
+
+| Env var | Default | Behavior |
+|---|---|---|
+| `WORK_CONTEXT_WARN_THRESHOLDS` | `60,70,80` | Comma-separated warning percentages. Read through the canonical `config.get` accessor. Missing, empty, or non-numeric values fall back to the default `[60,70,80]` (parse-with-fallback, no error). |
+| `WORK_CONTEXT_LIMIT` | `200000` | Overrides the model→context-limit map (Opus / Sonnet / Haiku = 200000, with a 200000 safe default for an unknown model). A valid positive integer wins over the map. |
+| `WORK_CONTEXT_MONITOR_ENABLED` | (enabled) | Set to `0` to turn the monitor into a silent no-op without unregistering the hook (mirrors `SESSION_GUARD_ENABLED`). |
+
+**Deferred GH-310 follow-up:** these three keys are **not yet registered** in
+GH-310's config-validation schema. Registering them there is a deferred GH-310
+follow-up and is out of scope for this hook. Until then, operators may see an
+"unknown key" warning from config validation when they set these vars — that
+warning is expected and does not affect the monitor's behavior.
+
 ## Error Logging
 
 **File:** `scripts/workflows/lib/hook-error-log.js`
@@ -230,6 +277,9 @@ export WORK_TDD_TOKEN_SKIP=1
 
 # Disable session guard
 export SESSION_GUARD_ENABLED=0
+
+# Disable the context-usage monitor (silent no-op)
+export WORK_CONTEXT_MONITOR_ENABLED=0
 ```
 
 ## Dual runtime: the same hooks.json on Codex CLI
