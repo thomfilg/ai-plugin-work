@@ -149,6 +149,18 @@ function readBriefRequirements(tasksDir) {
 }
 
 /**
+ * GH-607 (R7): pick the declared source path from a Reuse Audit bullet match.
+ * Three path orderings are captured by `readReuseAudit`'s regex — pre-verb
+ * `from \`path\`` (group 2), pre-verb parenthesized `(\`path\`)` (group 3),
+ * and post-verb `from \`path\`` (group 4) — falling back to `null` when the
+ * bullet declares no path. Extracted so the disjunction lives outside
+ * `readReuseAudit` (keeps its cyclomatic complexity within the gate).
+ */
+function pickDeclaredReusePath(match) {
+  return match[2] || match[3] || match[4] || null;
+}
+
+/**
  * Parse the `## Reuse Audit` section of spec.md and return an array of
  * `{ symbol, line, mustReuse }` records. Returns `null` when the section
  * is absent (signals "spec doesn't declare reuse"), and `[]` when the
@@ -204,7 +216,7 @@ function readReuseAudit(specDir) {
     );
     if (!m) continue;
     const mustReuse = /MUST/i.test(m[0]);
-    const declaredPath = m[2] || m[3] || m[4] || null;
+    const declaredPath = pickDeclaredReusePath(m);
     entries.push({
       symbol: m[1],
       // headingLine is the 1-indexed line of `## Reuse Audit`; sliceSection
