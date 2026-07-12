@@ -3353,10 +3353,10 @@ describe('enforce-step-workflow', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // commit verify: branch-name fallback (GH-191)
+  // commit verify: commits-ahead evidence (GH-191 branch-name fallback DELETED, GH-693)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('commit verify branch-name fallback (GH-191)', () => {
+  describe('commit verify commits-ahead evidence (GH-191 fallback deleted, GH-693)', () => {
     const FAKE_GIT_DIR = path.join(os.tmpdir(), `fake-git-commit-${process.pid}`);
     const FAKE_GIT_PATH = path.join(FAKE_GIT_DIR, 'git');
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-commit-${process.pid}`);
@@ -3430,13 +3430,16 @@ describe('enforce-step-workflow', () => {
       cleanup();
     });
 
-    it('allows transition via branch-name fallback when commit messages lack ticket ID', async () => {
+    it('blocks when branch matches ticket but zero commits are ahead of base (GH-693: fallback deleted)', async () => {
+      // GH-693 pin: the GH-191 branch-name fallback was DELETED. Its only
+      // reachable pass case was the false positive — empty base..HEAD with a
+      // two-dot diff fabricated by a moved base. This exact shape must block.
       writeFakeGit({
         'rev-parse --show-toplevel': process.cwd(),
         'symbolic-ref': 'EXIT1',
         'rev-parse --verify': 'EXIT1',
         'rev-parse HEAD': 'abc123',
-        'log --oneline': '', // No commits with ticket ID
+        'log --oneline': '', // zero commits ahead of base
         'branch --show-current': `${TEST_TICKET}-fix-something`,
         'diff --shortstat': '1 file changed, 10 insertions(+)',
       });
@@ -3444,9 +3447,24 @@ describe('enforce-step-workflow', () => {
       const { code } = await transitionFromCommit();
       assert.equal(
         code,
-        0,
-        'Should allow transition when branch contains ticket ID and diff is non-empty'
+        2,
+        'Zero commits ahead must block even when the branch name matches the ticket'
       );
+    });
+
+    it('allows transition when commits exist ahead of base regardless of branch name', async () => {
+      writeFakeGit({
+        'rev-parse --show-toplevel': process.cwd(),
+        'symbolic-ref': 'EXIT1',
+        'rev-parse --verify': 'EXIT1',
+        'rev-parse HEAD': 'abc123',
+        'log --oneline': 'abc123 fix: improve reliability', // commits ahead of base
+        'branch --show-current': 'some-unrelated-branch',
+        'diff --shortstat': '1 file changed, 10 insertions(+)',
+      });
+
+      const { code } = await transitionFromCommit();
+      assert.equal(code, 0, 'Commits ahead of base prove the commit step (GH-693)');
     });
 
     it('blocks transition when branch does not contain ticket ID', async () => {

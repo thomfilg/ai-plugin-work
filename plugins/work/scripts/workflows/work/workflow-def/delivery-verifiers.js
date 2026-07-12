@@ -60,37 +60,25 @@ function commitProvenBySavedSha(execFileSync, shaFile, headSha) {
 function commitProvenByBranchLog(execFileSync, baseBranch, shaFile, headSha) {
   const log = execFileSync('git', ['log', '--oneline', `${baseBranch}..HEAD`], EXEC_OPTS).trim();
   if (!log) return null;
-  // Verify diff vs main is non-empty
-  const diff = execFileSync('git', ['diff', '--shortstat', baseBranch, 'HEAD'], EXEC_OPTS).trim();
+  // Verify the merge-base (three-dot) diff vs base is non-empty — a moved
+  // base cannot fabricate changes for an empty commit (GH-693).
+  const diff = execFileSync(
+    'git',
+    ['diff', '--shortstat', `${baseBranch}...HEAD`],
+    EXEC_OPTS
+  ).trim();
   if (!diff) return false; // No actual changes -- reject
   fs.writeFileSync(shaFile, headSha);
   return true;
 }
 
-/** 3. Branch-name fallback: branch contains ticketId + committed changes exist (GH-191). */
-function commitProvenByBranchName(execFileSync, ctx) {
-  const { baseBranch, shaFile, headSha, ticketId } = ctx;
-  try {
-    const branch = execFileSync('git', ['branch', '--show-current'], EXEC_OPTS).trim();
-    const escapedTicketId = ticketId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const branchTicketPattern = new RegExp(`(?:^|[/-])${escapedTicketId}(?:$|[/-])`);
-    if (!branch || !branchTicketPattern.test(branch)) return false;
-    const diff = execFileSync('git', ['diff', '--shortstat', baseBranch, 'HEAD'], EXEC_OPTS).trim();
-    if (!diff) return false;
-    if (process.env.ENFORCE_HOOK_DEBUG) {
-      process.stderr.write(
-        `[enforce-hook] commit verify: branch-name fallback matched (branch=${branch}, ticketId=${ticketId})\n`
-      );
-    }
-    fs.writeFileSync(shaFile, headSha);
-    return true;
-  } catch {
-    return false; /* detached HEAD or other error -- skip fallback */
-  }
-}
-
 /**
- * Commit is proven if HEAD has new commits with ticketId (not empty commits).
+ * Commit is proven only by commits ahead of the base branch (not empty
+ * commits). The GH-191 branch-name fallback was DELETED (GH-693): it only
+ * ran when `base..HEAD` was empty, so its sole reachable pass case was the
+ * false positive — zero commits ahead with a two-dot diff fabricated by a
+ * moved base. `.last-commit-sha` is now written only after commits ahead
+ * are proven.
  * @param {DeliveryDeps} deps
  */
 function verifyCommit(deps, ticketId) {
@@ -103,8 +91,19 @@ function verifyCommit(deps, ticketId) {
     if (proven === null) {
       proven = commitProvenByBranchLog(execFileSync, baseBranch, shaFile, headSha);
     }
-    if (proven !== null) return proven;
-    return commitProvenByBranchName(execFileSync, { baseBranch, shaFile, headSha, ticketId });
+    if (proven === null) {
+      // Zero commits ahead of the resolved base — missing work, not an
+      // excuse to fall back. Repair: commit the work, or fix the base ref.
+      if (process.env.ENFORCE_HOOK_DEBUG) {
+        process.stderr.write(
+          `[enforce-hook] commit verify: 0 commits ahead of ${baseBranch} — ` +
+            `commit the work first, or repair the base ref ` +
+            `(git fetch origin main / check BASE_BRANCH)\n`
+        );
+      }
+      return false;
+    }
+    return proven;
   } catch {
     return false;
   }

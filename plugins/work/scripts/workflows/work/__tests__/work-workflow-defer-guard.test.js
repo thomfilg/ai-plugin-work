@@ -290,20 +290,60 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
     });
     putWorkState(ticket, state);
 
-    // First transition: task_review -> check (check is deferred, plan is fresh) — should succeed
-    // task_review is soft — no verify gate
-    const { result: r1 } = await runOrchestrator(['transition', ticket, 'check']);
-    assert.ok(r1.success, `First transition should succeed: ${JSON.stringify(r1)}`);
+    // GH-693: forward transitions out of task_review now require commit
+    // evidence (commits ahead of base). Run the orchestrator inside a
+    // throwaway git repo with one commit ahead of origin/main so the
+    // commit-evidence gate passes deterministically regardless of the host
+    // repo's branch state.
+    const { execFileSync } = require('child_process');
+    const repoDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'defer-guard-git-'));
+    const git = (...args) =>
+      execFileSync('git', args, {
+        cwd: repoDir,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    const gitCommit = (msg) =>
+      git(
+        '-c',
+        'user.email=t@example.com',
+        '-c',
+        'user.name=T',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '--allow-empty',
+        '-q',
+        '-m',
+        msg
+      );
+    git('init', '-q');
+    gitCommit('base');
+    git('update-ref', 'refs/remotes/origin/main', git('rev-parse', 'HEAD').trim());
+    gitCommit('task work');
+    // Pin TASKS_BASE explicitly: with cwd inside the throwaway repo, config.js
+    // would otherwise re-derive WORKTREES_BASE from that repo's toplevel and
+    // the orchestrator would look for state under /tmp/tasks (CI has no
+    // TASKS_BASE env, unlike local runs).
+    const gitOpts = { cwd: repoDir, env: { BASE_BRANCH: 'main', TASKS_BASE } };
 
-    // After transition, lastTransitionTimestamp is updated, making plan stale.
-    // check -> pr: pr IS in deferredSteps, plan is now stale — should block
-    // (DEFER gate fires before verify gate)
-    const { result: r3 } = await runOrchestrator(['transition', ticket, 'pr']);
-    assert.ok(r3.error, 'check -> pr should be blocked (stale plan)');
-    assert.equal(r3.gate, 'defer-reeval');
-    assert.equal(r3.deferStep, 'pr');
+    try {
+      // First transition: task_review -> check (check is deferred, plan is fresh) — should succeed
+      // task_review is soft — no verify gate; commit evidence supplied above
+      const { result: r1 } = await runOrchestrator(['transition', ticket, 'check'], gitOpts);
+      assert.ok(r1.success, `First transition should succeed: ${JSON.stringify(r1)}`);
 
-    cleanupTicket(ticket);
+      // After transition, lastTransitionTimestamp is updated, making plan stale.
+      // check -> pr: pr IS in deferredSteps, plan is now stale — should block
+      // (DEFER gate fires before verify gate)
+      const { result: r3 } = await runOrchestrator(['transition', ticket, 'pr'], gitOpts);
+      assert.ok(r3.error, 'check -> pr should be blocked (stale plan)');
+      assert.equal(r3.gate, 'defer-reeval');
+      assert.equal(r3.deferStep, 'pr');
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+      cleanupTicket(ticket);
+    }
   });
 
   it('10. failed plan (no timestamp update) blocks transition', async () => {

@@ -14,7 +14,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const TEMP = path.join(os.tmpdir(), 'task-review-gate-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) —
+// never write directly into the shared os.tmpdir() (insecure-temporary-file).
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'task-review-gate-test-'));
 let testCount = 0;
 let tasksDir;
 
@@ -53,51 +55,115 @@ describe('computeTaskDiff', () => {
     }
   });
 
-  it('falls back to base branch when .last-commit-sha file is missing', () => {
-    const { computeTaskDiff } = require('../gates/task-review-gate');
-    // No .last-commit-sha file written
-    const result = computeTaskDiff(tasksDir, 'T-2');
-    assert.strictEqual(result.head, 'HEAD');
-    // base should be a branch reference (e.g., origin/main), not a 40-char SHA
-    assert.ok(
-      result.base.includes('/') || result.base === 'origin/main',
-      `Expected base branch fallback, got: ${result.base}`
-    );
-    assert.ok(result.fallback === true, 'Should indicate fallback was used');
-  });
+  // ─── GH-693: fallback matrix — missing/invalid/non-ancestor SHA must never
+  // pass on an empty diff. Zero commits ahead of base (or a git failure)
+  // blocks; commits ahead re-derive the base from the merge-base. ───────────
 
-  it('falls back to base branch when SHA is not 40-char hex', () => {
-    const { computeTaskDiff } = require('../gates/task-review-gate');
-    fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), 'not-a-valid-sha');
-    const result = computeTaskDiff(tasksDir, 'T-3');
-    assert.strictEqual(result.head, 'HEAD');
-    assert.ok(result.fallback === true, 'Should indicate fallback was used');
-  });
-
-  it('falls back to base branch when SHA is not an ancestor of HEAD', () => {
-    const { computeTaskDiff } = require('../gates/task-review-gate');
-    const fakeSha = 'b'.repeat(40);
-    fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), fakeSha);
-
-    // Mock execFileSync to simulate non-ancestor (exit code 1)
+  /**
+   * Mock git for the GH-693 fallback matrix:
+   *   - revList: number, or an Error to simulate `git rev-list` failing
+   *   - mergeBase: 40-char SHA, or an Error to simulate `git merge-base` failing
+   *   - isAncestor: whether `merge-base --is-ancestor` succeeds (default false)
+   */
+  function withGitMock({ revList, mergeBase, isAncestor = false } = {}, fn) {
     const cp = require('child_process');
     const origExecFileSync = cp.execFileSync;
     cp.execFileSync = (cmd, args, opts) => {
+      if (cmd === 'git' && args[0] === 'rev-list' && args[1] === '--count') {
+        if (revList instanceof Error) throw revList;
+        return `${revList}\n`;
+      }
       if (cmd === 'git' && args[0] === 'merge-base' && args[1] === '--is-ancestor') {
+        if (isAncestor) return '';
         const err = new Error('not ancestor');
         err.status = 1;
         throw err;
       }
+      if (cmd === 'git' && args[0] === 'merge-base') {
+        if (mergeBase instanceof Error) throw mergeBase;
+        return `${mergeBase}\n`;
+      }
       return origExecFileSync(cmd, args, opts);
     };
-
     try {
-      const result = computeTaskDiff(tasksDir, 'T-4');
-      assert.strictEqual(result.head, 'HEAD');
-      assert.ok(result.fallback === true, 'Should indicate fallback was used');
+      return fn();
     } finally {
       cp.execFileSync = origExecFileSync;
     }
+  }
+
+  it('blocks when .last-commit-sha is missing and zero commits are ahead of base (GH-693)', () => {
+    const { computeTaskDiff } = require('../gates/task-review-gate');
+    // No .last-commit-sha file written
+    withGitMock({ revList: 0 }, () => {
+      const result = computeTaskDiff(tasksDir, 'T-2');
+      assert.strictEqual(result.blocked, true, 'Zero commits ahead must block, not fall back');
+      assert.match(result.reason, /no commits ahead/);
+      assert.match(result.reason, /\.last-commit-sha/);
+      assert.strictEqual(result.base, undefined, 'Blocked result must not carry a diff range');
+    });
+  });
+
+  it('re-derives the base from the merge-base when SHA is missing but commits are ahead', () => {
+    const { computeTaskDiff } = require('../gates/task-review-gate');
+    const mergeBase = 'd'.repeat(40);
+    withGitMock({ revList: 2, mergeBase }, () => {
+      const result = computeTaskDiff(tasksDir, 'T-2b');
+      assert.deepStrictEqual(result, { base: mergeBase, head: 'HEAD', fallback: true });
+    });
+  });
+
+  it('falls back to the base branch name when merge-base fails but commits are ahead', () => {
+    const { computeTaskDiff } = require('../gates/task-review-gate');
+    withGitMock({ revList: 1, mergeBase: new Error('merge-base failed') }, () => {
+      const result = computeTaskDiff(tasksDir, 'T-2c');
+      assert.strictEqual(result.head, 'HEAD');
+      assert.ok(result.fallback === true, 'Should indicate fallback was used');
+      assert.ok(
+        result.base.includes('/') || result.base === 'origin/main',
+        `Expected base branch fallback, got: ${result.base}`
+      );
+    });
+  });
+
+  it('blocks when git rev-list fails (fail closed)', () => {
+    const { computeTaskDiff } = require('../gates/task-review-gate');
+    withGitMock({ revList: new Error('git failed') }, () => {
+      const result = computeTaskDiff(tasksDir, 'T-2d');
+      assert.strictEqual(result.blocked, true, 'git failure must block, not fall back');
+    });
+  });
+
+  it('invalid SHA follows the same matrix: blocked at zero, merge-base with commits ahead', () => {
+    const { computeTaskDiff } = require('../gates/task-review-gate');
+    fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), 'not-a-valid-sha');
+    withGitMock({ revList: 0 }, () => {
+      assert.strictEqual(computeTaskDiff(tasksDir, 'T-3').blocked, true);
+    });
+    const mergeBase = 'e'.repeat(40);
+    withGitMock({ revList: 1, mergeBase }, () => {
+      assert.deepStrictEqual(computeTaskDiff(tasksDir, 'T-3'), {
+        base: mergeBase,
+        head: 'HEAD',
+        fallback: true,
+      });
+    });
+  });
+
+  it('non-ancestor SHA follows the same matrix: blocked at zero, merge-base with commits ahead', () => {
+    const { computeTaskDiff } = require('../gates/task-review-gate');
+    fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), 'b'.repeat(40));
+    withGitMock({ revList: 0, isAncestor: false }, () => {
+      assert.strictEqual(computeTaskDiff(tasksDir, 'T-4').blocked, true);
+    });
+    const mergeBase = 'f'.repeat(40);
+    withGitMock({ revList: 3, mergeBase, isAncestor: false }, () => {
+      assert.deepStrictEqual(computeTaskDiff(tasksDir, 'T-4'), {
+        base: mergeBase,
+        head: 'HEAD',
+        fallback: true,
+      });
+    });
   });
 
   it('trims whitespace from SHA file contents', () => {
