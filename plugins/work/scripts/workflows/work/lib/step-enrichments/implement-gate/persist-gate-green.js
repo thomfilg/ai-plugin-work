@@ -27,12 +27,13 @@ const { writeGateGreen } = require(
  * GH-694: resolve the task's `### Files in scope` entries for the gate's
  * tests-only GREEN trap.
  *
- * PR #717: read/parse failures must NOT degrade to an empty scope — the
+ * PR #717: no failure or absence shape may degrade to an empty scope — the
  * shared changed-test-files rule treats `[]` as "any changed test file
- * counts", so an unreadable/unparseable tasks.md would WIDEN the gate for a
- * tests-only task. Returns `{ scope }` only when tasks.md parsed AND the
- * task block exists (a parsed task with no declared scope keeps the
- * recorder's legacy empty-scope semantics); every failure shape returns
+ * counts", so an unreadable/unparseable tasks.md OR a task block with a
+ * missing/empty `### Files in scope` section would WIDEN the gate for a
+ * tests-only task (an unrelated changed test would record GREEN). Returns
+ * `{ scope }` only when tasks.md parsed, the task block exists, AND it
+ * declares at least one in-scope file; every other shape returns
  * `{ error }` so writeGateGreen rejects tests-only GREENs fail-closed.
  */
 function resolveTaskScope(gateTasksBase, safeName, taskNum) {
@@ -43,7 +44,12 @@ function resolveTaskScope(gateTasksBase, safeName, taskNum) {
     if (!task) {
       return { error: `tasks.md is missing/unparseable or has no \`## Task ${taskNum}\` block` };
     }
-    return { scope: Array.isArray(task.filesInScope) ? task.filesInScope : [] };
+    if (!Array.isArray(task.filesInScope) || task.filesInScope.length === 0) {
+      return {
+        error: `\`## Task ${taskNum}\` declares no \`### Files in scope\` entries — an empty scope would let ANY changed test file satisfy the tests-only GREEN gate`,
+      };
+    }
+    return { scope: task.filesInScope };
   } catch (err) {
     return { error: `tasks.md could not be read/parsed: ${(err && err.message) || err}` };
   }

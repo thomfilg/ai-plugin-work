@@ -319,6 +319,52 @@ describe('GH-694 — tests-only scope resolution fails closed (PR #717)', () => 
     assert.match(String(res.reason || ''), /Files in scope.*could not be resolved/i);
   });
 
+  it('task block parses but omits ### Files in scope → passed:false (no widening)', () => {
+    // The block exists and parses fine — only the scope section is missing.
+    // Passing [] through here would let rogue.test.js satisfy the GREEN gate.
+    fs.writeFileSync(
+      path.join(tasksDir, 'tasks.md'),
+      ['## Task 1 — Add tests', '', '### Type', 'tests-only', ''].join('\n')
+    );
+    writeRedEvidence(1, 'tests-only');
+    addUnrelatedChangedTestFile();
+    const res = runTestAndRecord(
+      'echo tests-pass',
+      'GH-TEST',
+      1,
+      worktreeDir,
+      process.env,
+      tasksBase,
+      'tests-only'
+    );
+    assert.equal(res.passed, false, 'declared-scope-less tests-only task must fail closed');
+    assert.match(String(res.reason || ''), /declares no.*Files in scope/i);
+    const ev = JSON.parse(fs.readFileSync(evidencePath(1), 'utf8'));
+    assert.ok(!ev.cycles[0].green, 'GREEN must not be persisted');
+  });
+
+  it('empty ### Files in scope section → passed:false (no widening)', () => {
+    fs.writeFileSync(
+      path.join(tasksDir, 'tasks.md'),
+      ['## Task 1 — Add tests', '', '### Type', 'tests-only', '', '### Files in scope', ''].join(
+        '\n'
+      )
+    );
+    writeRedEvidence(1, 'tests-only');
+    addUnrelatedChangedTestFile();
+    const res = runTestAndRecord(
+      'echo tests-pass',
+      'GH-TEST',
+      1,
+      worktreeDir,
+      process.env,
+      tasksBase,
+      'tests-only'
+    );
+    assert.equal(res.passed, false, 'empty declared scope must fail closed');
+    assert.match(String(res.reason || ''), /declares no.*Files in scope/i);
+  });
+
   it('tdd-code task with missing tasks.md still records GREEN (regression)', () => {
     // Scope only feeds the tests-only trap — other types must not start
     // failing on an unreadable plan (they never consumed scope).
