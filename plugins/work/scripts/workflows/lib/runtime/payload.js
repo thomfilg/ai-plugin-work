@@ -153,14 +153,19 @@ function normalizeHookPayload(raw, opts = {}) {
 
 /**
  * Whether the event fired inside a subagent. Claude: transcript under
- * /subagents/, raw payload agent identity, or CLAUDE_CURRENT_AGENT set.
- * Codex: payload agent identity (agent_id/agent_type present when inside a
- * subagent — ground truth §2.5.1).
+ * /subagents/ or raw payload agent identity. Codex: payload agent identity
+ * (agent_id/agent_type present when inside a subagent — ground truth §2.5.1).
  *
- * GH-696: the claude leg reads the RAW payload (evt.native), NOT the
- * env-folded evt.agent.type — resolveAgent folds in CLAUDE_AGENT_TYPE/
- * CLAUDE_CURRENT_AGENT, which can leak via tmux global env and would
- * permanently mute auto-advance in a main session.
+ * GH-696: the claude leg reads the RAW payload (evt.native) and the
+ * transcript path ONLY — never the env-folded evt.agent.type and never
+ * process.env directly. resolveAgent folds in CLAUDE_AGENT_TYPE/
+ * CLAUDE_CURRENT_AGENT, and BOTH leak via tmux global env; any env-derived
+ * signal here would permanently mute auto-advance in a main session
+ * (PR #718). Enforcement-side dispatched-agent detection
+ * (lib/agent-detection.js isDispatchedAgentContext) deliberately still reads
+ * CLAUDE_CURRENT_AGENT — there a false positive only blocks a terminal
+ * bypass with a message naming the leaked var, while here it would be a
+ * silent liveness failure.
  */
 function isSubagentContext(evt) {
   if (!evt || typeof evt !== 'object') return false;
@@ -173,8 +178,7 @@ function isClaudeSubagentContext(evt) {
   const native = asObject(evt.native) || {};
   return (
     (typeof evt.transcriptPath === 'string' && evt.transcriptPath.includes('/subagents/')) ||
-    Boolean(str(native.agent_type) || str(native.agent_id)) ||
-    Boolean(process.env.CLAUDE_CURRENT_AGENT)
+    Boolean(str(native.agent_type) || str(native.agent_id))
   );
 }
 

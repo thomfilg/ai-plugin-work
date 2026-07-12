@@ -21,9 +21,15 @@
  *   - currentPhase === terminal        → not blocked
  *   - currentPhase non-terminal        → blocked (writer agent mid-flight —
  *     the plan matrix re-dispatches it; its runner resumes from currentPhase)
- *   - unreadable/corrupt/phase-less    → blocked, currentPhase 'unparseable'
- *     (fail closed — refusal to vouch, per the checkpoints.js precedent;
- *     repair: re-dispatch the writer agent)
+ *   - unreadable/corrupt/phase-less    → blocked, currentPhase UNPARSEABLE_PHASE
+ *     (fail closed — refusal to vouch, per the checkpoints.js precedent).
+ *     Re-dispatching the writer CANNOT repair this one: its runner reads the
+ *     same corrupt file and dies at `init` (create-phase-state-cli.js
+ *     readState → JSON.parse throw), so the plan matrix routes it to an
+ *     AskUserQuestion operator escalation naming the corrupt file and the
+ *     repair (delete the ledger to accept the artifact pre-ledger-style, or
+ *     restore valid JSON so the runner resumes) — see
+ *     steps/lib/unparseable-ledger-escalation.js (PR #718).
  */
 
 const fs = require('fs');
@@ -38,6 +44,12 @@ const { SPEC_TERMINAL_PHASE } = require(
 const { TASKS_TERMINAL_PHASE } = require(
   path.join(__dirname, '..', '..', 'work-tasks', 'tasks-phase-registry')
 );
+
+// Sentinel currentPhase for a ledger that exists but cannot be trusted
+// (unreadable, corrupt JSON, or no string currentPhase). Deliberately not a
+// real registry phase: runners can never reach it, and the plan matrix keys
+// the operator-escalation branch on it.
+const UNPARSEABLE_PHASE = 'unparseable';
 
 // File names match each runner's phase-state writer (see
 // `stateFileName` in *-phase-state.js).
@@ -61,18 +73,18 @@ function phaseLedgerBlocked(ticketDir, step) {
     raw = fs.readFileSync(file, 'utf-8');
   } catch (err) {
     if (err && err.code === 'ENOENT') return { blocked: false, currentPhase: null };
-    return { blocked: true, currentPhase: 'unparseable' }; // unreadable — refuse to vouch
+    return { blocked: true, currentPhase: UNPARSEABLE_PHASE }; // unreadable — refuse to vouch
   }
   let currentPhase;
   try {
     currentPhase = JSON.parse(raw)?.currentPhase;
   } catch {
-    return { blocked: true, currentPhase: 'unparseable' };
+    return { blocked: true, currentPhase: UNPARSEABLE_PHASE };
   }
   if (typeof currentPhase !== 'string' || currentPhase === '') {
-    return { blocked: true, currentPhase: 'unparseable' };
+    return { blocked: true, currentPhase: UNPARSEABLE_PHASE };
   }
   return { blocked: currentPhase !== ledger.terminal, currentPhase };
 }
 
-module.exports = { STEP_LEDGERS, phaseLedgerBlocked };
+module.exports = { STEP_LEDGERS, UNPARSEABLE_PHASE, phaseLedgerBlocked };

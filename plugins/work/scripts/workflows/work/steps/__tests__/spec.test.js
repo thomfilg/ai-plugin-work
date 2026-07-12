@@ -182,4 +182,24 @@ describe('spec step (GH-253)', () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0].action, 'DEFER');
   });
+
+  // GH-696 (PR #718): an unparseable ledger cannot be repaired by re-dispatching
+  // the writer — spec-next.js dies reading the same corrupt file ("Could not
+  // init phase state"). Route to the operator instead.
+  it('escalates via AskUserQuestion when the ledger is unparseable — never re-dispatches the writer (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    specStep(
+      add,
+      makeState({ hasSpec: true, specPhaseMidFlight: true, specPhase: 'unparseable' }),
+      makeCtx()
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.spec);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.command, 'AskUserQuestion');
+    assert.notEqual(entry.agentType, 'spec-writer');
+    assert.match(entry.agentPrompt, /spec-phase\.json/);
+    assert.match(entry.agentPrompt, /delete/i);
+  });
 });

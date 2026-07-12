@@ -3,20 +3,36 @@
  * Generates the product brief from ticket requirements.
  *
  * Decision matrix:
- *   1. hasBrief=true, ledger terminal/absent → DEFER (artifact already present)
- *   2. hasBrief=true, ledger mid-flight      → RUN  (GH-696: re-dispatch the
+ *   1. ledger unparseable                    → RUN  AskUserQuestion escalation
+ *      (GH-696/PR #718: a corrupt brief-phase.json cannot be repaired by
+ *      re-dispatching the writer — its runner dies reading the same file —
+ *      so the operator must delete/restore the ledger)
+ *   2. hasBrief=true, ledger terminal/absent → DEFER (artifact already present)
+ *   3. hasBrief=true, ledger mid-flight      → RUN  (GH-696: re-dispatch the
  *      brief-writer — brief-next.js resumes from the recorded phase; the
  *      ledger-blocked verifier would otherwise wedge on a bare DEFER)
- *   3. hasBrief=false                        → RUN  (generate the brief)
+ *   4. hasBrief=false                        → RUN  (generate the brief)
  *
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx
  */
+
+'use strict';
+
+const { UNPARSEABLE_PHASE } = require('../lib/phase-ledger');
+const { addUnparseableLedgerEscalation } = require('./lib/unparseable-ledger-escalation');
+
 module.exports = function briefStep(add, s, ctx) {
   const { STEPS, t, tasksDir, getDocsPrompt, fileExists, path } = ctx;
 
-  if (s?.hasBrief && !s.briefPhaseMidFlight) {
+  if (s?.briefPhaseMidFlight && s.briefPhase === UNPARSEABLE_PHASE) {
+    addUnparseableLedgerEscalation(add, ctx, {
+      step: STEPS.brief,
+      ledgerFile: 'brief-phase.json',
+      artifact: 'brief.md',
+    });
+  } else if (s?.hasBrief && !s.briefPhaseMidFlight) {
     add(STEPS.brief, 'DEFER', null, 'brief.md already exists');
   } else if (s?.hasBrief && s.briefPhaseMidFlight) {
     add(

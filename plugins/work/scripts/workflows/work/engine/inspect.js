@@ -277,6 +277,8 @@ function inspect(ticket, providerConfig, suffix, deps) {
   // GH-696: inner phase-ledger resume signals for the plan matrix — a step
   // whose artifact exists but whose *-phase.json is non-terminal needs its
   // writer agent re-dispatched (the runner resumes from the recorded phase).
+  // An UNPARSEABLE_PHASE ledger instead routes to an operator escalation
+  // (PR #718): re-dispatch cannot repair a corrupt file the runner dies on.
   const briefLedger = phaseLedgerBlocked(s.tasksDir, 'brief');
   const specLedger = phaseLedgerBlocked(s.tasksDir, 'spec');
   const tasksLedger = phaseLedgerBlocked(s.tasksDir, 'tasks');

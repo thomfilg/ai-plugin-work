@@ -187,6 +187,36 @@ describe('normalizeHookPayload — claude fixtures (byte-compat surface)', () =>
       delete process.env.CLAUDE_AGENT_TYPE;
     }
   });
+
+  // GH-696 (PR #718): CLAUDE_CURRENT_AGENT is the SAME tmux global-env leak
+  // class — an env-only signal must never mute auto-advance in a main session.
+  // Subagent identity comes from the raw payload or the /subagents/ transcript
+  // path, never from the process environment.
+  it('claude env CLAUDE_CURRENT_AGENT alone is NOT a subagent context (GH-696)', () => {
+    process.env.CLAUDE_CURRENT_AGENT = 'pr-generator';
+    try {
+      const evt = normalizeHookPayload(
+        { tool_name: 'Bash', transcript_path: '/tmp/t.jsonl' },
+        { runtime: 'claude' }
+      );
+      assert.equal(isSubagentContext(evt), false);
+    } finally {
+      delete process.env.CLAUDE_CURRENT_AGENT;
+    }
+  });
+
+  it('claude env CLAUDE_CURRENT_AGENT plus native payload identity IS a subagent context', () => {
+    process.env.CLAUDE_CURRENT_AGENT = 'pr-generator';
+    try {
+      const evt = normalizeHookPayload(
+        { tool_name: 'Bash', transcript_path: '/tmp/t.jsonl', agent_type: 'pr-generator' },
+        { runtime: 'claude' }
+      );
+      assert.equal(isSubagentContext(evt), true);
+    } finally {
+      delete process.env.CLAUDE_CURRENT_AGENT;
+    }
+  });
 });
 
 describe('normalizeHookPayload — defensive shapes', () => {

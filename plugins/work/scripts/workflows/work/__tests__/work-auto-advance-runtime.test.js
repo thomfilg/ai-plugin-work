@@ -224,4 +224,15 @@ describe('work-auto-advance — dual runtime', () => {
     assert.equal(r.code, 0);
     assert.match(r.stdout, /═══ WORK2: NEXT STEP ═══/);
   });
+
+  // GH-696 (PR #718): CLAUDE_CURRENT_AGENT rides the same tmux global-env
+  // leak — an env-only signal must not mute main-session auto-advance either.
+  it('env-leaked CLAUDE_CURRENT_AGENT without payload identity still advances (GH-696)', () => {
+    const r = runHook(
+      { tool_name: 'Task', transcript_path: '/tmp/t.jsonl', session_id: 'sess-1' },
+      { AGENT_RUNTIME: 'claude', CLAUDE_CURRENT_AGENT: 'pr-generator' }
+    );
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /═══ WORK2: NEXT STEP ═══/);
+  });
 });

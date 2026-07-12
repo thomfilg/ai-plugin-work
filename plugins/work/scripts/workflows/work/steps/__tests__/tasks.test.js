@@ -181,4 +181,25 @@ describe('tasks step (GH-253)', () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0].action, 'DEFER');
   });
+
+  // GH-696 (PR #718): an unparseable ledger cannot be repaired by re-dispatching
+  // the writer — tasks-next.js dies reading the same corrupt file ("Could not
+  // init phase state"). Route to the operator instead.
+  it('escalates via AskUserQuestion when the ledger is unparseable — never re-dispatches the writer (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    const ctx = makeCtx({ fileExists: () => true });
+    tasksStep(
+      add,
+      makeState({ hasTasks: true, tasksPhaseMidFlight: true, tasksPhase: 'unparseable' }),
+      ctx
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.tasks);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.command, 'AskUserQuestion');
+    assert.notEqual(entry.agentType, 'skill');
+    assert.match(entry.agentPrompt, /tasks-phase\.json/);
+    assert.match(entry.agentPrompt, /delete/i);
+  });
 });

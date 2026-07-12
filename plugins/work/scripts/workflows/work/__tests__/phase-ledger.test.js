@@ -12,9 +12,10 @@
  *   - absent ledger file      → not blocked (legacy/pre-phase-driver tickets)
  *   - currentPhase terminal   → not blocked
  *   - currentPhase non-terminal → blocked
- *   - unreadable/corrupt JSON → blocked, currentPhase 'unparseable' (fail
- *     closed; repair = re-dispatch the writer agent, whose runner resumes
- *     from the recorded phase)
+ *   - unreadable/corrupt JSON → blocked, currentPhase UNPARSEABLE_PHASE (fail
+ *     closed; repair = operator escalation — re-dispatch cannot fix a corrupt
+ *     ledger, the runner dies reading the same file; the plan matrix routes
+ *     to AskUserQuestion instead, PR #718)
  *
  * Run: node --test workflows/work/__tests__/phase-ledger.test.js
  */
@@ -25,7 +26,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { phaseLedgerBlocked, STEP_LEDGERS } = require('../lib/phase-ledger');
+const { phaseLedgerBlocked, STEP_LEDGERS, UNPARSEABLE_PHASE } = require('../lib/phase-ledger');
 const { createStepVerifiers } = require('../workflow-def/step-verifiers');
 const { createGateVerifiers } = require('../workflow-def/gate-verifiers');
 
@@ -109,12 +110,13 @@ describe('phase-ledger: phaseLedgerBlocked (GH-696)', () => {
     }
   });
 
-  it('corrupt ledger JSON → blocked with currentPhase "unparseable" (fail closed; repair: re-dispatch the writer agent — its runner resumes from the recorded phase)', () => {
+  it('corrupt ledger JSON → blocked with currentPhase UNPARSEABLE_PHASE (fail closed; repair: operator escalation — the plan matrix asks the user to delete/restore the ledger, PR #718)', () => {
     fs.writeFileSync(path.join(ticketDir, 'brief-phase.json'), '{not json', 'utf-8');
     assert.deepEqual(phaseLedgerBlocked(ticketDir, 'brief'), {
       blocked: true,
-      currentPhase: 'unparseable',
+      currentPhase: UNPARSEABLE_PHASE,
     });
+    assert.equal(UNPARSEABLE_PHASE, 'unparseable'); // sentinel pinned — steps key on it
   });
 
   it('parseable ledger without a string currentPhase → blocked "unparseable" (refusal to vouch)', () => {
@@ -161,7 +163,7 @@ describe('phase-ledger: step verifiers refuse mid-flight ledgers (GH-696)', () =
       assert.equal(v[verifier](ticketId), true);
     });
 
-    it(`${verifier}: artifact + corrupt ${ledgerFile} → false (fail closed; repair: re-dispatch the writer agent)`, () => {
+    it(`${verifier}: artifact + corrupt ${ledgerFile} → false (fail closed; repair: operator escalation via the plan matrix, PR #718)`, () => {
       fs.writeFileSync(path.join(ticketDir, artifact), '# content\n', 'utf-8');
       fs.writeFileSync(path.join(ticketDir, ledgerFile), '{not json', 'utf-8');
       assert.equal(v[verifier](ticketId), false);

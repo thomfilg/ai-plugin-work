@@ -154,4 +154,37 @@ describe('brief step (GH-253)', () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0].action, 'DEFER');
   });
+
+  // GH-696 (PR #718): an unparseable ledger cannot be repaired by re-dispatching
+  // the writer — brief-next.js dies reading the same corrupt file ("Could not
+  // init phase state"). The plan entry must route to the operator instead,
+  // naming the corrupt file and the repair.
+  it('escalates via AskUserQuestion when the ledger is unparseable — never re-dispatches the writer (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    briefStep(
+      add,
+      makeState({ hasBrief: true, briefPhaseMidFlight: true, briefPhase: 'unparseable' }),
+      makeCtx()
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.brief);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.command, 'AskUserQuestion');
+    assert.notEqual(entry.agentType, 'brief-writer');
+    assert.match(entry.agentPrompt, /brief-phase\.json/);
+    assert.match(entry.agentPrompt, /delete/i);
+    assert.ok(!/brief-next\.js.*resumes from the recorded phase/.test(entry.agentPrompt));
+  });
+
+  it('unparseable ledger escalates even when brief.md is absent (same corrupt-init wall) (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    briefStep(
+      add,
+      makeState({ hasBrief: false, briefPhaseMidFlight: true, briefPhase: 'unparseable' }),
+      makeCtx()
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].command, 'AskUserQuestion');
+  });
 });
