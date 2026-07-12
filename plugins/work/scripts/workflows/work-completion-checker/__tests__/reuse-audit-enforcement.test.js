@@ -642,3 +642,131 @@ test.describe('GH-607 Task 2 — refined message + regression + negative control
     }
   });
 });
+
+// --- GH-607 review fix: config-entry match must be scoped to entry.path -------
+//
+// Regression for the cross-file leak reported on
+// reuse_audit_enforcement.js:162 — `addedLines` was the COMBINED `git diff -U0`
+// for every changed file, so a config MUST-reuse entry could be satisfied by a
+// needle that appears only on the added lines of an UNRELATED changed file. The
+// `changedSet.has(entry.path)` gate confirmed the declared path was touched, but
+// the block/path content match was not scoped to that file. These tests build a
+// real git repo so `readAddedLines` runs and its per-file scoping is exercised.
+
+test.describe('GH-607 review fix — config match scoped to declared file', () => {
+  const childProcess = require('node:child_process');
+
+  function git(cwd, args) {
+    const r = childProcess.spawnSync('git', args, { cwd, encoding: 'utf8' });
+    if (r.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${r.stderr || r.stdout}`);
+    }
+    return r.stdout;
+  }
+
+  // Build a git repo whose base branch (`main`) has an initial commit, then a
+  // working tree that has ADDED `hooks.json` (without the needle) and an
+  // unrelated changed file (with the needle) relative to that base.
+  function buildGitCtx({ spec, hooksJsonAdded, otherFileAdded }) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gh607-scoped-'));
+    git(root, ['init', '-q', '-b', 'main']);
+    git(root, ['config', 'user.email', 'test@example.com']);
+    git(root, ['config', 'user.name', 'Test']);
+    // Base commit: files exist but WITHOUT the added content under test.
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'hooks.json'), '{\n}\n', 'utf8');
+    fs.writeFileSync(path.join(root, 'src', 'other.js'), 'const base = 0;\n', 'utf8');
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'base']);
+    // Working-tree changes (HEAD is still the base commit; readAddedLines
+    // diffs `main...HEAD`, and getDiffBaseCandidates resolves base = current
+    // branch's tracked base → 'main'. We instead advance HEAD with a second
+    // commit so `main...HEAD` shows the new lines).
+    fs.writeFileSync(path.join(root, 'hooks.json'), hooksJsonAdded, 'utf8');
+    fs.writeFileSync(path.join(root, 'src', 'other.js'), otherFileAdded, 'utf8');
+    // Diff base is 'main'; put the new work on a different branch so main...HEAD
+    // is a real ahead-diff.
+    git(root, ['checkout', '-q', '-b', 'feature']);
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'work']);
+
+    const tasksDir = path.join(root, 'tasks', 'GH-607');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, 'spec.md'), spec, 'utf8');
+    fs.writeFileSync(
+      path.join(tasksDir, 'pr-context.json'),
+      JSON.stringify({ files: ['hooks.json', 'src/other.js'] }, null, 2),
+      'utf8'
+    );
+    return {
+      ctx: { tasksDir, worktreeRoot: root, failures: [] },
+      cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  }
+
+  test('needle only in an UNRELATED changed file does NOT satisfy the config entry', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    // hooks.json is added-to but WITHOUT the `my-hook` symbol OR the `hooks.json`
+    // path string; the `hooks.json` PATH needle appears only on added lines of the
+    // unrelated src/other.js. `configEntryPresent` matches EITHER needle (symbol
+    // or path), so pre-fix the combined diff let the path needle from the other
+    // file satisfy the entry. Post-fix, the per-file scoped read of hooks.json —
+    // which contains neither needle — fails it. (We avoid the `my-hook` symbol in
+    // the other file so the PRIMARY symbol-in-added check can't confound the test.)
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "unrelated": { "command": "node z.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\n// see config in hooks.json for wiring\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'config entry must NOT pass when the needle is only in another changed file'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('needle on the declared file’s own added lines DOES satisfy the config entry', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "my-hook": { "command": "node x.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        true,
+        'config entry must pass when its block is on the declared file’s own added lines'
+      );
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record when the config block is genuinely present in the declared file'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+});

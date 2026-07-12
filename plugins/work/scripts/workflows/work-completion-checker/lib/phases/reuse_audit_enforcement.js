@@ -153,12 +153,20 @@ function isConfigPath(p) {
 
 // GH-607 (R2): a config-file MUST-reuse entry counts as reused only when its
 // declared path is in the change set AND its declared path or symbol block
-// literally appears on the added lines of this change.
-function configEntryPresent(entry, addedLines, changedSet) {
+// literally appears on the added lines of THAT declared file.
+//
+// Review fix (GH-607): `scopedAddedLines` MUST be the added lines of
+// `entry.path` alone — not the combined diff of every changed file. Passing the
+// repo-wide `addedLines` here let a needle appearing only in an unrelated
+// changed file satisfy the config entry, defeating the fail-closed anti-gaming
+// guarantee. Callers use `readAddedLines(ctx, [entry.path])` to scope it.
+function configEntryPresent(entry, scopedAddedLines, changedSet) {
   if (!entry || !entry.path || !changedSet || !changedSet.has(entry.path)) return false;
-  if (addedLines === null || addedLines === undefined || addedLines === '') return false;
+  if (scopedAddedLines === null || scopedAddedLines === undefined || scopedAddedLines === '') {
+    return false;
+  }
   const needles = [entry.symbol, entry.path].filter((s) => typeof s === 'string' && s.length > 0);
-  return needles.some((needle) => new RegExp(escapeRegex(needle)).test(addedLines));
+  return needles.some((needle) => new RegExp(escapeRegex(needle)).test(scopedAddedLines));
 }
 
 function errMessage(err) {
@@ -226,9 +234,20 @@ function isInPlaceExtension(entry, changedSet, blobs) {
 }
 
 // GH-607 (R2/P0.2): config-file entry — declared path is a non-JS/TS file and
-// its block genuinely appears in the change set's added lines.
-function isConfigEntryReused(entry, addedLines, changedSet) {
-  return isConfigPath(entry.path) && configEntryPresent(entry, addedLines, changedSet);
+// its block genuinely appears in the added lines of THAT declared file.
+//
+// Review fix (GH-607): re-read the added lines scoped to `entry.path` alone
+// (not the repo-wide `addedLines`) so a needle appearing only in some other
+// changed file cannot satisfy this config entry. `readAddedLines` returns:
+//   - a string (possibly empty) → git ran; authoritative scoped result
+//   - null                      → git could not run; fall back to the repo-wide
+//     `addedLines` proxy so we don't fail-closed on missing tooling. The
+//     `changedSet.has(entry.path)` gate inside `configEntryPresent` still holds.
+function isConfigEntryReused(ctx, entry, addedLines, changedSet) {
+  if (!isConfigPath(entry.path)) return false;
+  const scoped = readAddedLines(ctx, [entry.path]);
+  const effective = scoped === null ? addedLines : scoped;
+  return configEntryPresent(entry, effective, changedSet);
 }
 
 function checkMustReuseEntries(ctx, entries, blobs, joined, addedLines, failures, changedSet) {
@@ -246,7 +265,7 @@ function checkMustReuseEntries(ctx, entries, blobs, joined, addedLines, failures
     // check missed): in-place extension of a modified file, or a config-file
     // block present in the change.
     if (isInPlaceExtension(entry, changedSet, blobs)) continue;
-    if (isConfigEntryReused(entry, addedLines, changedSet)) continue;
+    if (isConfigEntryReused(ctx, entry, addedLines, changedSet)) continue;
     mustMissing += 1;
     failures.push(
       buildMissingFailure(entry, joined, declaredInUnmodifiedFile(ctx, entry, changedSet))
