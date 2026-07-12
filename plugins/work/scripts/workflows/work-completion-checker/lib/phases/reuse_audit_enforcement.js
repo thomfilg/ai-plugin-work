@@ -172,11 +172,9 @@ function isConfigPath(p) {
 // declared path is in the change set AND its declared path or symbol block
 // literally appears on the added lines of THAT declared file.
 //
-// Review fix (GH-607): `scopedAddedLines` MUST be the added lines of
-// `entry.path` alone — not the combined diff of every changed file. Passing the
-// repo-wide `addedLines` here let a needle appearing only in an unrelated
-// changed file satisfy the config entry, defeating the fail-closed anti-gaming
-// guarantee. Callers use `readAddedLines(ctx, [entry.path])` to scope it.
+// Review fix (GH-607): `scopedAddedLines` MUST be `entry.path`'s own added lines
+// (callers pass `readAddedLines(ctx, [entry.path])`) — the repo-wide diff let a
+// needle in an unrelated changed file satisfy the entry, defeating fail-closed.
 function configEntryPresent(entry, scopedAddedLines, changedSet) {
   if (!entry || !entry.path) return false;
   if (!changedSet || !changedSet.has(normalizeRepoPath(entry.path))) return false;
