@@ -164,7 +164,7 @@ const JS_TS_EXTENSIONS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'])
 function isConfigPath(p) {
   if (!p || typeof p !== 'string') return false;
   const ext = path.extname(p).toLowerCase();
-  if (ext === '') return false;
+  if (ext === '') return true; // extensionless (Dockerfile/Makefile/dotfile) → config, not importable
   return !JS_TS_EXTENSIONS.has(ext);
 }
 

@@ -385,6 +385,13 @@ test.describe('GH-607 Task 2 — pure helpers (2.1)', () => {
     for (const js of ['a.js', 'b.ts', 'c.jsx', 'd.tsx', 'e.mjs', 'f.cjs']) {
       assert.equal(phase.isConfigPath(js), false, `${js} must NOT be a config path`);
     }
+    // GH-607 review fix (Greptile P1): extensionless declared paths are never
+    // importable JS/TS, so they count as config and take the scoped per-file
+    // branch — otherwise Dockerfile/Makefile/CODEOWNERS entries would fall
+    // through to the combined-diff importable check and leak from unrelated files.
+    for (const cfg of ['Dockerfile', 'Makefile', 'CODEOWNERS', 'path/to/Procfile', '.gitignore']) {
+      assert.equal(phase.isConfigPath(cfg), true, `${cfg} (extensionless) must be a config path`);
+    }
     assert.equal(phase.isConfigPath(null), false, 'null is not a config path');
     assert.equal(phase.isConfigPath(undefined), false, 'undefined is not a config path');
     assert.equal(phase.isConfigPath(''), false, 'empty string is not a config path');
@@ -1055,6 +1062,52 @@ test.describe('GH-607 P0.1 — in-place extension under real git', () => {
       );
       const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
       assert.ok(rec, 'failure record must be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (isConfigPath extensionless): an extensionless declared path
+  // (Dockerfile/Makefile/CODEOWNERS) must be treated as config and scoped to its
+  // own file — otherwise it falls through to the importable-symbol branch and the
+  // symbol text in an UNRELATED changed file leaks a false pass. Here `my-target`
+  // is added in src/other.js while the declared Dockerfile is untouched.
+  test('extensionless config (Dockerfile) symbol in an unrelated file does NOT satisfy an untouched entry', async () => {
+    const cfgSpec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-target` MUST be reused from `Dockerfile`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec: cfgSpec,
+      changedFiles: ['src/other.js'],
+      files: {
+        Dockerfile: { base: 'FROM node:22\n', head: 'FROM node:22\n' },
+        'src/other.js': {
+          base: 'const base = 0;\n',
+          head: 'const base = 0;\nconst wire = "my-target";\n',
+        },
+      },
+    });
+    try {
+      const combined = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'src/other.js']);
+      assert.match(
+        combined,
+        /my-target/,
+        'guard: unrelated file added lines must contain the symbol'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'extensionless config entry must NOT pass when the symbol is only in an unrelated file'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the leaked extensionless config entry');
     } finally {
       cleanup();
     }
