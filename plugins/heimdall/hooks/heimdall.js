@@ -19,25 +19,7 @@ const { discoverStores, readConfig, getRepoRoot } = require(
 );
 const { buildEntries, evaluate } = require(path.join(__dirname, '..', 'lib', 'guard'));
 const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime'));
-const { parsePayload } = require(path.join(__dirname, '..', 'lib', 'hookEntrypoint'));
-
-/**
- * Strict stdin reader for this fail-closed hook. The vendored hookEntrypoint
- * readStdin resolves '' on a stream error — fail-open semantics built for
- * advisory hooks. Here a stdin READ ERROR means a possibly-blockable payload
- * was lost, so it must reject into main().catch and block for safety (exit 2),
- * preserving the pre-adoption contract. Empty/malformed stdin still allows.
- */
-function readStdinStrict() {
-  if (process.stdin.isTTY) return Promise.resolve('');
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => chunks.push(chunk));
-    process.stdin.on('end', () => resolve(chunks.join('')));
-    process.stdin.on('error', reject);
-  });
-}
+const { parsePayload, readStdin } = require(path.join(__dirname, '..', 'lib', 'hookEntrypoint'));
 
 /**
  * Merge lock blocks from every active store at cwd; [] when none apply. Each
@@ -59,8 +41,11 @@ async function main() {
   // Empty/malformed stdin parses to {} — nothing to enforce against. The
   // empty payload normalizes to a tool call with no name, which no guard
   // handler matches, so it falls through to allow (exit 0) below. A stdin
-  // stream ERROR is different: readStdinStrict rejects it into main().catch.
-  const hookData = parsePayload(await readStdinStrict());
+  // stream ERROR is different: the factory reader with `onStreamError: 'reject'`
+  // rejects it into main().catch, which fails closed (exit 2) for safety — a
+  // possibly-blockable payload may have been lost. This preserves the exact
+  // fail-closed contract of the former local strict-reader fork.
+  const hookData = parsePayload(await readStdin({ onStreamError: 'reject' }));
 
   const rt = getRuntime(hookData);
   const evt = rt.normalizeHookPayload(hookData, { event: 'PreToolUse' });

@@ -71,6 +71,7 @@ const VENDOR_SETS = [
       'plugins/work/scripts/workflows/lib/safeSubprocess',
       'plugins/synapsys/lib/safeSubprocess',
       'plugins/heimdall/lib/safeSubprocess',
+      'plugins/maestro/lib/safeSubprocess',
     ],
   },
   {
