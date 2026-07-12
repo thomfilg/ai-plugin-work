@@ -156,6 +156,67 @@ describe('normalizeHookPayload — claude fixtures (byte-compat surface)', () =>
     assert.equal(isSubagentContext(evt), true);
     assert.equal(isSubagentContext(normalize('claude', 'stop')), false);
   });
+
+  // GH-696: claude payloads fired inside a subagent can carry agent identity
+  // in the RAW payload without a /subagents/ transcript path.
+  it('claude native agent_type/agent_id in the raw payload marks subagent context (GH-696)', () => {
+    const byType = normalizeHookPayload(
+      { tool_name: 'Bash', transcript_path: '/tmp/t.jsonl', agent_type: 'pr-generator' },
+      { runtime: 'claude' }
+    );
+    assert.equal(isSubagentContext(byType), true);
+    const byId = normalizeHookPayload(
+      { tool_name: 'Bash', transcript_path: '/tmp/t.jsonl', agent_id: 'agent-42' },
+      { runtime: 'claude' }
+    );
+    assert.equal(isSubagentContext(byId), true);
+  });
+
+  // GH-696 scoping pin: never read env-folded evt.agent.type — CLAUDE_AGENT_TYPE
+  // leaks via tmux global env and would permanently mute a main session.
+  it('claude env-folded CLAUDE_AGENT_TYPE alone is NOT a subagent context (GH-696)', () => {
+    process.env.CLAUDE_AGENT_TYPE = 'developer-nodejs-tdd';
+    try {
+      const evt = normalizeHookPayload(
+        { tool_name: 'Bash', transcript_path: '/tmp/t.jsonl' },
+        { runtime: 'claude' }
+      );
+      assert.equal(evt.agent.type, 'developer-nodejs-tdd'); // env fold still surfaces it
+      assert.equal(isSubagentContext(evt), false);
+    } finally {
+      delete process.env.CLAUDE_AGENT_TYPE;
+    }
+  });
+
+  // GH-696 (PR #718): CLAUDE_CURRENT_AGENT is the SAME tmux global-env leak
+  // class — an env-only signal must never mute auto-advance in a main session.
+  // Subagent identity comes from the raw payload or the /subagents/ transcript
+  // path, never from the process environment.
+  it('claude env CLAUDE_CURRENT_AGENT alone is NOT a subagent context (GH-696)', () => {
+    process.env.CLAUDE_CURRENT_AGENT = 'pr-generator';
+    try {
+      const evt = normalizeHookPayload(
+        { tool_name: 'Bash', transcript_path: '/tmp/t.jsonl' },
+        { runtime: 'claude' }
+      );
+      assert.equal(isSubagentContext(evt), false);
+    } finally {
+      delete process.env.CLAUDE_CURRENT_AGENT;
+    }
+  });
+
+  it('claude env CLAUDE_CURRENT_AGENT plus native payload identity IS a subagent context', () => {
+    process.env.CLAUDE_CURRENT_AGENT = 'pr-generator';
+    try {
+      const evt = normalizeHookPayload(
+        { tool_name: 'Bash', transcript_path: '/tmp/t.jsonl', agent_type: 'pr-generator' },
+        { runtime: 'claude' }
+      );
+      assert.equal(isSubagentContext(evt), true);
+    } finally {
+      delete process.env.CLAUDE_CURRENT_AGENT;
+    }
+  });
 });
 
 describe('normalizeHookPayload — defensive shapes', () => {

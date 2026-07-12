@@ -139,4 +139,67 @@ describe('tasks step (GH-253)', () => {
     assert.equal(entries[0].agentType, 'skill');
     assert.match(entries[0].agentPrompt, /split-in-tasks/);
   });
+
+  // GH-696: tasks.md present but tasks-phase.json mid-flight → re-dispatch the
+  // split-in-tasks skill with a resume-oriented prompt (deadlock-free repair).
+  it('RUNs split-in-tasks in resume mode when tasks exist but the ledger is mid-flight (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    const ctx = makeCtx({ fileExists: () => true });
+    tasksStep(
+      add,
+      makeState({ hasTasks: true, tasksPhaseMidFlight: true, tasksPhase: 'traceability' }),
+      ctx
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.tasks);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.agentType, 'skill');
+    assert.match(entry.agentPrompt, /split-in-tasks/);
+    assert.match(entry.agentPrompt, /tasks-phase\.json/);
+    assert.match(entry.agentPrompt, /"traceability"/);
+    assert.match(entry.agentPrompt, /tasks-next\.js/);
+    assert.match(entry.agentPrompt, /resume/i);
+  });
+
+  it('resume branch fires even when spec.md is missing (runner self-heals) (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    const ctx = makeCtx({ fileExists: () => false });
+    tasksStep(
+      add,
+      makeState({ hasTasks: true, tasksPhaseMidFlight: true, tasksPhase: 'draft' }),
+      ctx
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'RUN');
+  });
+
+  it('DEFERs when tasks exist and the ledger flag is explicitly false (GH-696 regression)', () => {
+    const { add, entries } = makeAdd();
+    const ctx = makeCtx({ fileExists: () => true });
+    tasksStep(add, makeState({ hasTasks: true, tasksPhaseMidFlight: false }), ctx);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'DEFER');
+  });
+
+  // GH-696 (PR #718): an unparseable ledger cannot be repaired by re-dispatching
+  // the writer — tasks-next.js dies reading the same corrupt file ("Could not
+  // init phase state"). Route to the operator instead.
+  it('escalates via AskUserQuestion when the ledger is unparseable — never re-dispatches the writer (GH-696)', () => {
+    const { add, entries } = makeAdd();
+    const ctx = makeCtx({ fileExists: () => true });
+    tasksStep(
+      add,
+      makeState({ hasTasks: true, tasksPhaseMidFlight: true, tasksPhase: 'unparseable' }),
+      ctx
+    );
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.step, STEPS.tasks);
+    assert.equal(entry.action, 'RUN');
+    assert.equal(entry.command, 'AskUserQuestion');
+    assert.notEqual(entry.agentType, 'skill');
+    assert.match(entry.agentPrompt, /tasks-phase\.json/);
+    assert.match(entry.agentPrompt, /delete/i);
+  });
 });

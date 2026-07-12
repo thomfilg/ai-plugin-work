@@ -78,7 +78,14 @@ describe('work-auto-advance — dual runtime', () => {
   function runHook(payload, env = {}) {
     const merged = { ...process.env, ...envBase, ...env };
     // Scrub ambient runtime signals so each row controls detection fully.
-    for (const key of ['AGENT_RUNTIME', 'AGENT_SESSION_ID', 'CODEX_THREAD_ID', 'PLUGIN_ROOT']) {
+    for (const key of [
+      'AGENT_RUNTIME',
+      'AGENT_SESSION_ID',
+      'CODEX_THREAD_ID',
+      'PLUGIN_ROOT',
+      'CLAUDE_AGENT_TYPE',
+      'CLAUDE_CURRENT_AGENT',
+    ]) {
       if (!(key in env)) delete merged[key];
     }
     const r = spawnSync(process.execPath, [HOOK], {
@@ -173,5 +180,59 @@ describe('work-auto-advance — dual runtime', () => {
     );
     assert.equal(r.code, 0);
     assert.equal(r.stdout, '');
+  });
+
+  // GH-696: claude PostToolUse payloads fired during a subagent's tool calls
+  // carry agent identity in the RAW payload (agent_type/agent_id) even when
+  // the transcript path lacks /subagents/ — auto-advance must abstain.
+  it('subagent guard (GH-696): claude payload with native agent_type is silent — work-next never invoked', () => {
+    const r = runHook(
+      {
+        tool_name: 'Task',
+        transcript_path: '/tmp/t.jsonl',
+        session_id: 'sess-1',
+        agent_type: 'pr-generator',
+      },
+      { AGENT_RUNTIME: 'claude' }
+    );
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout, '');
+  });
+
+  it('subagent guard (GH-696): claude payload with native agent_id is silent', () => {
+    const r = runHook(
+      {
+        tool_name: 'Task',
+        transcript_path: '/tmp/t.jsonl',
+        session_id: 'sess-1',
+        agent_id: 'agent-42',
+      },
+      { AGENT_RUNTIME: 'claude' }
+    );
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout, '');
+  });
+
+  // GH-696 scoping pin: identity is read from the RAW payload only, never the
+  // env-folded evt.agent.type — a CLAUDE_AGENT_TYPE leak via tmux global env
+  // must not permanently mute auto-advance in a main session.
+  it('env-leaked CLAUDE_AGENT_TYPE without payload identity still advances (GH-696)', () => {
+    const r = runHook(
+      { tool_name: 'Task', transcript_path: '/tmp/t.jsonl', session_id: 'sess-1' },
+      { AGENT_RUNTIME: 'claude', CLAUDE_AGENT_TYPE: 'developer-nodejs-tdd' }
+    );
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /═══ WORK2: NEXT STEP ═══/);
+  });
+
+  // GH-696 (PR #718): CLAUDE_CURRENT_AGENT rides the same tmux global-env
+  // leak — an env-only signal must not mute main-session auto-advance either.
+  it('env-leaked CLAUDE_CURRENT_AGENT without payload identity still advances (GH-696)', () => {
+    const r = runHook(
+      { tool_name: 'Task', transcript_path: '/tmp/t.jsonl', session_id: 'sess-1' },
+      { AGENT_RUNTIME: 'claude', CLAUDE_CURRENT_AGENT: 'pr-generator' }
+    );
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /═══ WORK2: NEXT STEP ═══/);
   });
 });
