@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { safeSpawnSync } = require('../lib/safeSubprocess');
 const namespace = require('./lib/maestro-conduct/namespace');
 
 // Honor STATE_DIR (matches state.js / alerts.js) so custom deployments clean
@@ -123,7 +123,10 @@ function killTmux(ticket, dryRun) {
       process.stdout.write(`(dry-run) would tmux kill-session -t ${session}\n`);
       continue;
     }
-    const res = spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
+    // No explicit timeout at this call site — the wrapper applies its enforced
+    // default (15000 ms). `tmux kill-session` is a fast local op; the success
+    // predicate (status === 0) is preserved unchanged.
+    const res = safeSpawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
     if (res.status === 0) killed += 1;
   }
   return killed;
