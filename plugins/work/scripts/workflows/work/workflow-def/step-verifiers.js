@@ -220,8 +220,51 @@ function verifyTaskReview(deps, ticketId) {
   }
 }
 
-function verifyCleanup(ticketId) {
-  // Cleanup is proven if no dev tmux session exists for this ticket
+/**
+ * GH-283 R8: strict canonical completion-status matcher. Mirrors the
+ * completion_check phase's regex EXACTLY — intentionally rejects the
+ * `APPROVED` / `NOT_APPLICABLE` aliases so a mis-marked report cannot pass
+ * step verification.
+ */
+const STATUS_COMPLETE_RE = /^\s*\*\*Status:\*\*\s*COMPLETE\b/im;
+
+/**
+ * GH-283 R8: completion evidence is present iff `<tasksDir>/completion.check.md`
+ * exists AND contains the canonical `**Status:** COMPLETE` line. Fail-OPEN
+ * (returns `null`) only when the tasks-dir cannot be resolved — that is the one
+ * unresolvable case where we fall back to the tmux-only invariant. A present
+ * file with a wrong/absent status returns `false` (fail closed).
+ * @param {StepDeps} deps
+ * @returns {boolean|null} true=COMPLETE, false=present-but-wrong/missing, null=unresolvable dir
+ */
+function completionEvidencePresent(deps, ticketId) {
+  let dir;
+  try {
+    dir = ticketDir(deps, ticketId);
+  } catch {
+    return null; // tasks-dir unresolvable → fail open to tmux-only invariant
+  }
+  if (!dir) return null;
+  let raw;
+  try {
+    raw = fs.readFileSync(path.join(dir, 'completion.check.md'), 'utf-8');
+  } catch {
+    return false; // absent or unreadable → fail closed
+  }
+  return STATUS_COMPLETE_RE.test(raw);
+}
+
+/**
+ * GH-283 R8: cleanup is proven only when BOTH the dev tmux session is gone
+ * AND completion evidence (`**Status:** COMPLETE`) is present. This closes the
+ * runner-bypass gap where skipping the completion_check phase left no marker
+ * yet cleanup still verified on tmux-absence alone. Fail-open on an
+ * unresolvable tasks-dir only (falls back to the tmux-only invariant).
+ * @param {StepDeps} deps
+ */
+function verifyCleanup(deps, ticketId) {
+  // 1) tmux dev session must be gone.
+  let tmuxGone;
   try {
     const { execFileSync } = require('child_process');
     execFileSync('tmux', ['has-session', '-t', `${ticketId}-dev`], {
@@ -229,10 +272,16 @@ function verifyCleanup(ticketId) {
       timeout: 3000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    return false; // Session still exists -- not cleaned up
+    tmuxGone = false; // Session still exists -- not cleaned up
   } catch {
-    return true;
-  } // Exit code 1 = session doesn't exist = cleaned up
+    tmuxGone = true; // Exit code 1 = session doesn't exist = cleaned up
+  }
+  if (!tmuxGone) return false;
+
+  // 2) completion evidence must be present (fail-open only on unresolvable dir).
+  const evidence = completionEvidencePresent(deps, ticketId);
+  if (evidence === null) return true; // unresolvable dir → tmux-only invariant
+  return evidence;
 }
 
 /** @param {StepDeps} deps */
@@ -245,7 +294,7 @@ function createStepVerifiers(deps) {
     verifyTasksGate: (ticketId) => verifyTasksGate(deps, ticketId),
     verifyImplement: (ticketId) => verifyImplement(deps, ticketId),
     verifyTaskReview: (ticketId) => verifyTaskReview(deps, ticketId),
-    verifyCleanup,
+    verifyCleanup: (ticketId) => verifyCleanup(deps, ticketId),
   };
 }
 

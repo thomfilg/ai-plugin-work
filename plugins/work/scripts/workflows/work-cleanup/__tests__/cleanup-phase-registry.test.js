@@ -14,16 +14,22 @@ const {
   isCleanupPhase,
 } = require('../cleanup-phase-registry');
 
-test('CLEANUP_PHASE_ORDER lists 7 phases in declared order', () => {
+test('CLEANUP_PHASE_ORDER lists 8 phases in declared order', () => {
   assert.deepEqual(CLEANUP_PHASE_ORDER, [
     'inputs',
     'pr_merged_check',
+    'completion_check',
     'branch_cleanup',
     'tmux_cleanup',
     'state_archive',
     'memorize',
     'done',
   ]);
+});
+
+test('completion_check sits between pr_merged_check and branch_cleanup', () => {
+  assert.deepEqual(cleanupNextPhases('pr_merged_check'), ['completion_check']);
+  assert.deepEqual(cleanupNextPhases('completion_check'), ['branch_cleanup']);
 });
 
 test('initial is inputs, terminal is done', () => {

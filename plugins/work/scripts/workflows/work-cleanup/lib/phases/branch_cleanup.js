@@ -41,7 +41,7 @@ function instructions(ctx) {
   const c = readContext(ctx.tasksDir);
   const branch = c && c.branch ? c.branch : '<your-branch>';
   return [
-    '# cleanup-next — Phase 3 of 7: BRANCH CLEANUP',
+    '# cleanup-next — Phase 4 of 8: BRANCH CLEANUP',
     `Ticket: ${ctx.ticket}`,
     '',
     'Run the following from the worktree root, then `touch` the sentinel:',

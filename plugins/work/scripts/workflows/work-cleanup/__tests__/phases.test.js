@@ -134,3 +134,61 @@ test('state_archive passes when all sections + Status present', () => {
   assert.equal(r.ok, true);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// Resolve the not-yet-authored module through a try/catch so an absent module
+// surfaces as a per-test assertion failure (a behavior gap: "module not
+// authored yet") rather than a load-time crash whose raw "Cannot find module"
+// string the RED recorder treats as a structurally broken test.
+function loadCompletionCheck() {
+  let mod = null;
+  try {
+    mod = require('../lib/phases/completion_check');
+  } catch {
+    mod = null;
+  }
+  assert.ok(mod, 'completion_check module is authored and exports validate');
+  return mod;
+}
+
+test('completion_check hard-blocks when completion.check.md is absent', () => {
+  const completion_check = loadCompletionCheck();
+  const { root, tasksDir } = makeTasksDir();
+  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('completion.check.md'));
+  assert.ok(r.errors[0].includes('re-run the check step'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('completion_check hard-blocks when status line is NEEDS_WORK', () => {
+  const completion_check = loadCompletionCheck();
+  const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': '**Status:** NEEDS_WORK\n',
+  });
+  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('completion_check hard-blocks when status line is the APPROVED alias', () => {
+  const completion_check = loadCompletionCheck();
+  const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': '**Status:** APPROVED\n',
+  });
+  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('completion_check passes when the canonical **Status:** COMPLETE line is present', () => {
+  const completion_check = loadCompletionCheck();
+  const { root, tasksDir } = makeTasksDir({
+    'completion.check.md': '**Status:** COMPLETE\n',
+  });
+  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
+  assert.equal(r.ok, true);
+  assert.ok(r.summary.includes('**Status:** COMPLETE'));
+  fs.rmSync(root, { recursive: true, force: true });
+});

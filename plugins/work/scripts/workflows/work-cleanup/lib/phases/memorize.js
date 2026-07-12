@@ -28,14 +28,14 @@ function validate(ctx) {
 function instructions(ctx) {
   if (!ctx.memory) {
     return [
-      '# cleanup-next — Phase 6 of 7: MEMORIZE',
+      '# cleanup-next — Phase 7 of 8: MEMORIZE',
       '',
       'No memory plugin — auto-advance.',
       '',
     ].join('\n');
   }
   return [
-    '# cleanup-next — Phase 6 of 7: MEMORIZE',
+    '# cleanup-next — Phase 7 of 8: MEMORIZE',
     `Ticket: ${ctx.ticket}`,
     '',
     `Memory: **${ctx.memory.name}**`,

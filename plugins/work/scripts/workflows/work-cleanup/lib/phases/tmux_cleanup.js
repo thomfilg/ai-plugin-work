@@ -55,7 +55,7 @@ function instructions(ctx) {
   const sessions = listSessionsMatching(ctx.ticket);
   const killCmds = sessions.map((s) => `tmux kill-session -t ${JSON.stringify(s)}`).join('\n');
   return [
-    '# cleanup-next — Phase 4 of 7: TMUX CLEANUP',
+    '# cleanup-next — Phase 5 of 8: TMUX CLEANUP',
     `Ticket: ${ctx.ticket}`,
     '',
     sessions.length

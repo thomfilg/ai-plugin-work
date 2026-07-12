@@ -52,7 +52,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# cleanup-next — Phase 5 of 7: STATE ARCHIVE',
+    '# cleanup-next — Phase 6 of 8: STATE ARCHIVE',
     `Ticket: ${ctx.ticket}`,
     '',
     'Write `cleanup-summary.md` with:',
