@@ -51,6 +51,7 @@ const VENDORED_DIRS = [
   'plugins/heimdall/lib/runtime',
   'plugins/heimdall/lib/safeSubprocess',
   'plugins/heimdall/lib/storeDiscovery',
+  'plugins/maestro/lib/safeSubprocess',
   'plugins/maestro/lib/storeDiscovery',
   'plugins/maestro/scripts/lib/runtime',
   // factories/statusline-host → per-plugin statusline installer lib/ (this + the work one below)

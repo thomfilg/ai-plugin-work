@@ -122,6 +122,7 @@ describe('VENDOR_SETS table shape', () => {
       'plugins/work/scripts/workflows/lib/safeSubprocess',
       'plugins/synapsys/lib/safeSubprocess',
       'plugins/heimdall/lib/safeSubprocess',
+      'plugins/maestro/lib/safeSubprocess',
     ],
     'factories/pathSafe': ['plugins/heimdall/lib/pathSafe'],
     'factories/statusline-host': [

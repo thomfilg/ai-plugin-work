@@ -9,7 +9,8 @@ const path = require('node:path');
 
 const MODULE_ROOT = path.resolve(__dirname, '..');
 const LOGGER_PATH = require.resolve('../logHookError');
-const { parsePayload, runHook } = require('../hookEntrypoint');
+const { EventEmitter } = require('node:events');
+const { parsePayload, readStdin, runHook } = require('../hookEntrypoint');
 
 // ---------------------------------------------------------------------------
 // Smoke tests: the full pipe-stdin → exit-code → log-entry flow, exercised by
@@ -318,6 +319,87 @@ describe('runHook config validation', () => {
       (err) => {
         assert.ok(err instanceof TypeError);
         assert.match(err.message, /"onError"/);
+        return true;
+      }
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit tests: readStdin onStreamError option.
+//
+// A stream error is simulated by swapping process.stdin for a fake readable
+// that schedules an 'error' emit before any 'end'. Only the stream-reading
+// branches (default resolve-empty vs reject) install such a stub; the invalid-
+// value case must throw synchronously WITHOUT reading stdin, so it never wires
+// up a stream error (an un-subscribed 'error' emit would become an unhandled
+// 'error' → uncaughtException).
+// ---------------------------------------------------------------------------
+
+describe('readStdin onStreamError option', () => {
+  let savedStdin;
+
+  function installErroringStdin(err) {
+    const fake = new EventEmitter();
+    fake.isTTY = false;
+    fake.setEncoding = () => fake;
+    // Emit the stream error asynchronously, after readStdin has subscribed.
+    setImmediate(() => fake.emit('error', err));
+    Object.defineProperty(process, 'stdin', { value: fake, configurable: true });
+  }
+
+  // A benign stdin stub that reaches clean EOF (no data, no error). Used by the
+  // invalid-value test so that IF the current implementation still starts a real
+  // stdin read (option not yet threaded), that read settles to '' instead of
+  // hanging on the test process's never-ending real stdin. This test asserts a
+  // SYNCHRONOUS throw, so it never emits a stream 'error' (no un-subscribed
+  // 'error' → uncaughtException).
+  function installEofStdin() {
+    const fake = new EventEmitter();
+    fake.isTTY = false;
+    fake.setEncoding = () => fake;
+    setImmediate(() => fake.emit('end'));
+    Object.defineProperty(process, 'stdin', { value: fake, configurable: true });
+  }
+
+  beforeEach(() => {
+    savedStdin = Object.getOwnPropertyDescriptor(process, 'stdin');
+  });
+
+  afterEach(() => {
+    if (savedStdin) Object.defineProperty(process, 'stdin', savedStdin);
+  });
+
+  it('default (no opts): a stream error resolves to ""', async () => {
+    installErroringStdin(new Error('stream boom'));
+    const result = await readStdin();
+    assert.equal(result, '', 'the default path must fail open with an empty string');
+  });
+
+  it('onStreamError \'resolve-empty\' (explicit): a stream error resolves to ""', async () => {
+    installErroringStdin(new Error('stream boom'));
+    const result = await readStdin({ onStreamError: 'resolve-empty' });
+    assert.equal(result, '', 'explicit resolve-empty must match the default fail-open behavior');
+  });
+
+  it("onStreamError 'reject': a stream error rejects with that error", async () => {
+    const boom = new Error('stream boom');
+    installErroringStdin(boom);
+    await assert.rejects(readStdin({ onStreamError: 'reject' }), (err) => {
+      assert.equal(err, boom, 'the promise must reject with the original stream error');
+      return true;
+    });
+  });
+
+  it('an unknown onStreamError value throws TypeError synchronously', () => {
+    // Must throw synchronously — do NOT install an erroring stub here. The EOF
+    // stub only guards against a pre-implementation dangling stdin read.
+    installEofStdin();
+    assert.throws(
+      () => readStdin({ onStreamError: 'nope' }),
+      (err) => {
+        assert.ok(err instanceof TypeError, 'invalid onStreamError must throw a TypeError');
+        assert.match(err.message, /onStreamError/);
         return true;
       }
     );

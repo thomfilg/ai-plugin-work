@@ -34,15 +34,45 @@
 
 const { logHookError } = require('./logHookError');
 
-/** Drain a readable stream into a utf8 string; a stream error resolves ''. */
-function collectStream(stream) {
-  return new Promise((resolve) => {
+/**
+ * Drain a readable stream into a utf8 string.
+ *
+ * On a stream error the behavior is controlled by `onStreamError`:
+ * - `'resolve-empty'` (default) → resolve '' (fail-open, today's behavior).
+ * - `'reject'` → reject the promise with the stream error (fail-closed).
+ *
+ * @param {NodeJS.ReadableStream} stream
+ * @param {'resolve-empty'|'reject'} [onStreamError]
+ * @returns {Promise<string>}
+ */
+function collectStream(stream, onStreamError = 'resolve-empty') {
+  return new Promise((resolve, reject) => {
     const chunks = [];
     stream.setEncoding('utf8');
     stream.on('data', (chunk) => chunks.push(chunk));
     stream.on('end', () => resolve(chunks.join('')));
-    stream.on('error', () => resolve(''));
+    stream.on('error', (err) => {
+      if (onStreamError === 'reject') reject(err);
+      else resolve('');
+    });
   });
+}
+
+/**
+ * Validate and return the `onStreamError` policy. Throws synchronously on an
+ * unknown value so a misconfigured caller fails fast rather than on the
+ * (possibly rare) stream-error path.
+ *
+ * @param {object} [opts]
+ * @param {'resolve-empty'|'reject'} [opts.onStreamError]
+ * @returns {'resolve-empty'|'reject'}
+ */
+function assertOnStreamError(opts = {}) {
+  const policy = opts.onStreamError === undefined ? 'resolve-empty' : opts.onStreamError;
+  if (policy !== 'resolve-empty' && policy !== 'reject') {
+    throw new TypeError("hookEntrypoint: \"onStreamError\" must be 'resolve-empty' or 'reject'");
+  }
+  return policy;
 }
 
 /**
@@ -51,11 +81,20 @@ function collectStream(stream) {
  * TTY guard: when the script is run interactively (no piped payload) this
  * resolves '' immediately instead of hanging on a stdin that never ends.
  *
- * @returns {Promise<string>} raw stdin text; '' on TTY or stream error.
+ * @param {object} [opts]
+ * @param {'resolve-empty'|'reject'} [opts.onStreamError] - Stream-error policy.
+ *   `'resolve-empty'` (default) resolves '' (fail-open, preserved for every
+ *   existing caller); `'reject'` rejects with the stream error. Any other value
+ *   throws a `TypeError` synchronously.
+ * @returns {Promise<string>} raw stdin text; '' on TTY (or on stream error when
+ *   `onStreamError` is `'resolve-empty'`).
  */
-async function readStdin() {
-  if (process.stdin.isTTY) return '';
-  return collectStream(process.stdin);
+function readStdin(opts) {
+  // Validate synchronously so a bad `onStreamError` throws at the call site
+  // (not as a rejected promise) — this must NOT touch stdin.
+  const onStreamError = assertOnStreamError(opts);
+  if (process.stdin.isTTY) return Promise.resolve('');
+  return collectStream(process.stdin, onStreamError);
 }
 
 /**
