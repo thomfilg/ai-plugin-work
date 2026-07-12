@@ -223,9 +223,14 @@ What it does per dispatch:
 1. Scopes to the active `/work` session via the `.work.pid` marker
    (`findRecentWorkMarker`). A foreign/missing marker or a sub-agent context is a
    silent no-op.
-2. Reads cumulative context-token usage (input + output, including cache fields)
-   from the session's own transcript (`context-usage.readCumulativeUsage`).
-3. Computes the integer percent consumed against the model context limit.
+2. Reads the **current context occupancy** from the session's own transcript —
+   the **most recent turn's** usage (input + output + cache fields), NOT a sum
+   across turns (summing re-counts the growing, re-sent, cached context and
+   over-counts wildly). On Codex the last `token_count` snapshot's
+   `last_token_usage` is used and its `model_context_window` is surfaced as the
+   real limit (`context-usage.readContextUsage`).
+3. Computes the integer percent consumed against the context limit
+   (`WORK_CONTEXT_LIMIT` override → transcript window → 200000 default).
 4. Fires **once per newly-crossed threshold** (default 60/70/80), naming the
    active workflow step, the dispatched agent/tool, and the percent consumed.
    Crossed thresholds are tracked in a per-ticket ledger at
@@ -244,7 +249,7 @@ Warnings ride `emit.context('PostToolUse', ...)` (stderr-style on Claude, an
 | Env var | Default | Behavior |
 |---|---|---|
 | `WORK_CONTEXT_WARN_THRESHOLDS` | `60,70,80` | Comma-separated warning percentages. Read through the canonical `config.get` accessor. Missing, empty, or non-numeric values fall back to the default `[60,70,80]` (parse-with-fallback, no error). |
-| `WORK_CONTEXT_LIMIT` | `200000` | Overrides the model→context-limit map (Opus / Sonnet / Haiku = 200000, with a 200000 safe default for an unknown model). A valid positive integer wins over the map. |
+| `WORK_CONTEXT_LIMIT` | `200000` | Explicit context-token limit. Resolution order: a valid positive-integer override here wins; otherwise the transcript-reported `model_context_window` (Codex) is used; otherwise a 200000 safe default. Claude transcripts do not report a window, so a Claude session uses this override or the 200000 default. |
 | `WORK_CONTEXT_MONITOR_ENABLED` | (enabled) | Set to `0` to turn the monitor into a silent no-op without unregistering the hook (mirrors `SESSION_GUARD_ENABLED`). |
 
 **Deferred GH-310 follow-up:** these three keys are **not yet registered** in

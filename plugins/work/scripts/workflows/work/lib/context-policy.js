@@ -9,29 +9,24 @@
  * call them without a try/catch of its own.
  *
  * Exports:
- *   - parseThresholds(raw)              → sorted, unique, default-on-invalid %s
- *   - modelContextLimit(model, override)→ token limit with a safe 200000 default
- *   - percentUsed(tokens, limit)        → integer floor percent, clamped [0,100]
- *   - newlyCrossed(pct, thresholds, hit)→ once-per-threshold crossing decision
- *   - renderWarning({...})              → human-readable warning string
+ *   - parseThresholds(raw)                 → sorted, unique, default-on-invalid %s
+ *   - resolveContextLimit(override, window)→ token limit: override > window > default
+ *   - percentUsed(tokens, limit)           → integer floor percent, clamped [0,100]
+ *   - newlyCrossed(pct, thresholds, hit)   → once-per-threshold crossing decision
+ *   - renderWarning({...})                 → human-readable warning string
  */
 
 /** Default warning thresholds (percent of context limit). */
 const DEFAULT_THRESHOLDS = Object.freeze([60, 70, 80]);
 
-/** Safe default / per-model context-token limit. */
-const DEFAULT_CONTEXT_LIMIT = 200000;
-
 /**
- * Model → context-token-limit map. Opus / Sonnet / Haiku all currently share a
- * 200000-token window; matching is by lower-cased substring so version-suffixed
- * ids (e.g. `claude-opus-4-8`) resolve without an exhaustive id table.
+ * Safe default context-token limit, used only when neither an explicit
+ * `WORK_CONTEXT_LIMIT` override nor a transcript-reported `model_context_window`
+ * is available. Claude transcripts do not report a window, so a Claude session
+ * falls back to this unless the operator sets `WORK_CONTEXT_LIMIT`; codex
+ * transcripts carry the real window and use it directly.
  */
-const MODEL_LIMITS = Object.freeze([
-  Object.freeze({ match: 'opus', limit: 200000 }),
-  Object.freeze({ match: 'sonnet', limit: 200000 }),
-  Object.freeze({ match: 'haiku', limit: 200000 }),
-]);
+const DEFAULT_CONTEXT_LIMIT = 200000;
 
 /**
  * Coerce a value to a positive, finite integer, or return null.
@@ -72,23 +67,23 @@ function parseThresholds(raw) {
 }
 
 /**
- * Resolve the context-token limit for a model, honoring an explicit override.
- * A valid positive-integer `override` (from `WORK_CONTEXT_LIMIT`) wins over the
- * model map; an invalid override is ignored. An unknown / undefined model
- * falls back to `DEFAULT_CONTEXT_LIMIT`.
+ * Resolve the context-token limit from, in priority order: a valid
+ * positive-integer `override` (from `WORK_CONTEXT_LIMIT`), then the
+ * transcript-reported `transcriptWindow` (codex's `model_context_window`), then
+ * `DEFAULT_CONTEXT_LIMIT`. Invalid / zero / non-numeric inputs are ignored at
+ * each tier. The limit is derived from the transcript, not the agent type —
+ * the dispatched *agent type* is never a model id, so a model-name map would be
+ * dead code that always fell through to the default.
  *
- * @param {string|undefined} model the model id
- * @param {unknown} [override] optional explicit limit
+ * @param {unknown} [override] explicit limit (WORK_CONTEXT_LIMIT)
+ * @param {unknown} [transcriptWindow] window reported by the transcript
  * @returns {number} the token limit
  */
-function modelContextLimit(model, override) {
+function resolveContextLimit(override, transcriptWindow) {
   const overrideLimit = toPositiveInt(override);
   if (overrideLimit !== null) return overrideLimit;
-  if (typeof model === 'string') {
-    const lower = model.toLowerCase();
-    const entry = MODEL_LIMITS.find((m) => lower.includes(m.match));
-    if (entry) return entry.limit;
-  }
+  const windowLimit = toPositiveInt(transcriptWindow);
+  if (windowLimit !== null) return windowLimit;
   return DEFAULT_CONTEXT_LIMIT;
 }
 
@@ -156,7 +151,7 @@ module.exports = {
   DEFAULT_THRESHOLDS,
   DEFAULT_CONTEXT_LIMIT,
   parseThresholds,
-  modelContextLimit,
+  resolveContextLimit,
   percentUsed,
   newlyCrossed,
   renderWarning,

@@ -7,10 +7,12 @@
  * 1. Scopes to the active /work session (`.work.pid` marker via
  *    `findRecentWorkMarker`) — a foreign/missing marker or a sub-agent context
  *    is a silent no-op.
- * 2. Reads cumulative context-token usage from the session's own transcript
- *    (`context-usage.readCumulativeUsage`, GH-313 Task 2).
- * 3. Computes the integer percent consumed against the model context limit
- *    (`context-policy`, GH-313 Task 1), honoring `WORK_CONTEXT_LIMIT`.
+ * 2. Reads the CURRENT context occupancy from the session's own transcript —
+ *    the most recent turn's usage, plus the transcript-reported context window
+ *    when present (`context-usage.readContextUsage`, GH-313 Task 2).
+ * 3. Computes the integer percent consumed against the context limit
+ *    (`context-policy`, GH-313 Task 1): `WORK_CONTEXT_LIMIT` override, else the
+ *    transcript's `model_context_window` (codex), else a 200000 default.
  * 4. Fires once per newly-crossed warning threshold (default 60/70/80, via
  *    `WORK_CONTEXT_WARN_THRESHOLDS`), tracked in a per-ticket crossed-threshold
  *    ledger (`<TASKS_BASE>/<safeTicketId>/.context-monitor.json`), and emits a
@@ -29,7 +31,7 @@ const path = require('path');
 
 const hookCommon = require(path.join(__dirname, '..', 'lib', 'hook-common'));
 const policy = require(path.join(__dirname, '..', 'lib', 'context-policy'));
-const { readCumulativeUsage } = require(path.join(__dirname, '..', 'lib', 'context-usage'));
+const { readContextUsage } = require(path.join(__dirname, '..', 'lib', 'context-usage'));
 
 hookCommon.installFailOpen();
 
@@ -84,8 +86,8 @@ function limitOverride() {
  * Compute the warning percent + newly-crossed thresholds for a dispatch.
  * @returns {{percent:number, thresholds:number[], newly:number[]}}
  */
-function computeCrossings(tokens, evt, alreadyCrossed) {
-  const limit = policy.modelContextLimit(evt.agent && evt.agent.type, limitOverride());
+function computeCrossings(tokens, contextWindow, alreadyCrossed) {
+  const limit = policy.resolveContextLimit(limitOverride(), contextWindow);
   const percent = policy.percentUsed(tokens, limit);
   const thresholds = policy.parseThresholds(process.env.WORK_CONTEXT_WARN_THRESHOLDS);
   const newly = policy.newlyCrossed(percent, thresholds, alreadyCrossed);
@@ -124,10 +126,10 @@ function main() {
   if (!found || !found.marker.ticket) process.exit(0);
 
   const ticket = found.marker.ticket;
-  const tokens = readCumulativeUsage(evt.transcriptPath);
+  const { tokens, contextWindow } = readContextUsage(evt.transcriptPath);
 
   const alreadyCrossed = readLedger(found.tasksBase, ticket);
-  const { percent, thresholds, newly } = computeCrossings(tokens, evt, alreadyCrossed);
+  const { percent, thresholds, newly } = computeCrossings(tokens, contextWindow, alreadyCrossed);
   if (newly.length === 0) process.exit(0);
 
   emitWarnings(rt, {
