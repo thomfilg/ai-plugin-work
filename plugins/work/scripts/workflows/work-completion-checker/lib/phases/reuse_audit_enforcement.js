@@ -25,6 +25,21 @@ const config = require('../../../lib/config');
 
 const SUFFIX_RE = /([A-Z][a-z0-9]+)$/;
 
+// GH-607: canonicalize a repo-relative path so spec-declared spellings
+// (`./hooks.json`, `foo//bar.json`, a leading `/`) compare equal to git's
+// `--name-only` output (repo-relative, no `./`, single separators). Conservative:
+// a `..` segment is left intact so an out-of-tree path can't silently normalize
+// onto a matching in-tree one.
+function normalizeRepoPath(p) {
+  if (typeof p !== 'string' || p.length === 0) return p;
+  let out = p
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/{2,}/g, '/');
+  while (out.startsWith('./')) out = out.slice(2);
+  return out.replace(/\/$/, '');
+}
+
 /**
  * Extract candidate tokens from `diffContent` that share `symbol`'s
  * trailing PascalCase suffix (e.g. for `ContentPageToolbar`, the suffix
@@ -63,7 +78,9 @@ function loadChangedContents(ctx, changed) {
   const out = [];
   for (const rel of changed) {
     const abs = path.isAbsolute(rel) ? rel : path.join(root, rel);
-    out.push({ rel, content: readFileSafe(abs) });
+    // GH-607: key blobs by canonical repo-relative path so `entry.path`
+    // (spec-declared spelling) matches regardless of `./` prefix etc.
+    out.push({ rel: normalizeRepoPath(rel), content: readFileSafe(abs) });
   }
   return out;
 }
@@ -161,7 +178,8 @@ function isConfigPath(p) {
 // changed file satisfy the config entry, defeating the fail-closed anti-gaming
 // guarantee. Callers use `readAddedLines(ctx, [entry.path])` to scope it.
 function configEntryPresent(entry, scopedAddedLines, changedSet) {
-  if (!entry || !entry.path || !changedSet || !changedSet.has(entry.path)) return false;
+  if (!entry || !entry.path) return false;
+  if (!changedSet || !changedSet.has(normalizeRepoPath(entry.path))) return false;
   if (scopedAddedLines === null || scopedAddedLines === undefined || scopedAddedLines === '') {
     return false;
   }
@@ -187,7 +205,8 @@ function missClassMessage(symbol, declaredInUnmodifiedFile) {
 // symbol, yet that file was NOT modified in this change (not in `changedSet`).
 // This is the "declared in an unmodified file" miss class.
 function declaredInUnmodifiedFile(ctx, entry, changedSet) {
-  if (!entry.path || (changedSet && changedSet.has(entry.path))) return false;
+  if (!entry.path) return false;
+  if (changedSet && changedSet.has(normalizeRepoPath(entry.path))) return false;
   const root = ctx.worktreeRoot || process.cwd();
   const abs = path.isAbsolute(entry.path) ? entry.path : path.join(root, entry.path);
   const content = readFileSafe(abs);
@@ -218,8 +237,10 @@ function buildMissingFailure(entry, joined, declaredElsewhere) {
 // non-empty content? Gate for the P0.1 in-place-extension relaxation and for
 // the refined "unmodified file" miss message.
 function declaringFileModified(entry, changedSet, blobs) {
-  if (!entry.path || !changedSet || !changedSet.has(entry.path)) return false;
-  return blobs.some((b) => b.rel === entry.path && b.content !== '');
+  if (!entry.path || !changedSet) return false;
+  const norm = normalizeRepoPath(entry.path);
+  if (!changedSet.has(norm)) return false;
+  return blobs.some((b) => b.rel === norm && b.content !== '');
 }
 
 // GH-607 (R1/P0.1): in-place extension — the symbol is not on an added line,
@@ -229,7 +250,7 @@ function declaringFileModified(entry, changedSet, blobs) {
 function isInPlaceExtension(entry, changedSet, blobs) {
   return (
     declaringFileModified(entry, changedSet, blobs) &&
-    symbolPresentInBlobsScoped(entry.symbol, blobs, entry.path)
+    symbolPresentInBlobsScoped(entry.symbol, blobs, normalizeRepoPath(entry.path))
   );
 }
 
@@ -245,7 +266,7 @@ function isInPlaceExtension(entry, changedSet, blobs) {
 //     `changedSet.has(entry.path)` gate inside `configEntryPresent` still holds.
 function isConfigEntryReused(ctx, entry, addedLines, changedSet) {
   if (!isConfigPath(entry.path)) return false;
-  const scoped = readAddedLines(ctx, [entry.path]);
+  const scoped = readAddedLines(ctx, [normalizeRepoPath(entry.path)]);
   const effective = scoped === null ? addedLines : scoped;
   return configEntryPresent(entry, effective, changedSet);
 }
@@ -317,7 +338,9 @@ function validate(ctx) {
 
   try {
     const changed = readChangedFiles(ctx) || [];
-    const changedSet = new Set(changed);
+    // GH-607: canonicalize the change-set keys so `entry.path` (spec-declared
+    // spelling like `./hooks.json`) matches git's repo-relative output.
+    const changedSet = new Set(changed.map(normalizeRepoPath));
     const blobs = loadChangedContents(ctx, changed);
     const joined = blobs.map((b) => b.content).join('\n');
     const addedLines = readAddedLines(ctx, changed);
@@ -375,3 +398,4 @@ module.exports.symbolPresentInBlobs = symbolPresentInBlobs;
 module.exports.symbolPresentInBlobsScoped = symbolPresentInBlobsScoped;
 module.exports.isConfigPath = isConfigPath;
 module.exports.configEntryPresent = configEntryPresent;
+module.exports.normalizeRepoPath = normalizeRepoPath;

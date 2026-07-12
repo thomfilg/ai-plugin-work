@@ -769,4 +769,95 @@ test.describe('GH-607 review fix — config match scoped to declared file', () =
       cleanup();
     }
   });
+
+  // GH-607 review fix: the spec author writes `./hooks.json` (equivalent
+  // repo-relative spelling) but git's --name-only / pr-context list carries the
+  // canonical `hooks.json`. Pre-fix the raw `changedSet.has(entry.path)` gate
+  // rejected the reuse; post-fix both sides normalize and it is recognized.
+  test('`./hooks.json` spec spelling matches canonical `hooks.json` change (config gate)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `./hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "my-hook": { "command": "node x.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        true,
+        '`./hooks.json` spec spelling must be recognized as the reused `hooks.json` change'
+      );
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record when the equivalent-spelling config block is genuinely present'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Anti-gaming negative control preserved under the new normalization: the
+  // `./hooks.json` spelling still fails when the needle lives only in an
+  // unrelated changed file (nothing on hooks.json's own added lines).
+  test('`./hooks.json` spelling still fails when needle only in an unrelated file (anti-gaming)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `./hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "unrelated": { "command": "node z.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\n// see config in hooks.json for wiring\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'normalization must not let an unrelated-file needle satisfy the `./hooks.json` entry'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must still be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+test.describe('GH-607 — normalizeRepoPath canonicalization', () => {
+  test('strips ./ prefix, leading slash, redundant separators, trailing slash', () => {
+    assert.equal(phase.normalizeRepoPath('./hooks.json'), 'hooks.json');
+    assert.equal(phase.normalizeRepoPath('/hooks.json'), 'hooks.json');
+    assert.equal(phase.normalizeRepoPath('src//other.js'), 'src/other.js');
+    assert.equal(phase.normalizeRepoPath('.//src/nested.js'), 'src/nested.js');
+    assert.equal(phase.normalizeRepoPath('src/dir/'), 'src/dir');
+    assert.equal(phase.normalizeRepoPath('src\\win\\path.js'), 'src/win/path.js');
+  });
+
+  test('already-canonical paths are unchanged and nullish input is passed through', () => {
+    assert.equal(phase.normalizeRepoPath('hooks.json'), 'hooks.json');
+    assert.equal(phase.normalizeRepoPath('src/other.js'), 'src/other.js');
+    assert.equal(phase.normalizeRepoPath(''), '');
+    assert.equal(phase.normalizeRepoPath(null), null);
+    assert.equal(phase.normalizeRepoPath(undefined), undefined);
+  });
+
+  test('does NOT resolve `..` outside the repo (conservative)', () => {
+    // A `..` segment is left intact so an out-of-tree path cannot silently
+    // normalize onto an in-tree change-set entry.
+    assert.equal(phase.normalizeRepoPath('../hooks.json'), '../hooks.json');
+  });
 });
