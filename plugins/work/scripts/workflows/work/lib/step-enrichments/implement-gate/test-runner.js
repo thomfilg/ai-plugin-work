@@ -10,7 +10,6 @@
 'use strict';
 
 const path = require('path');
-const fs = require('fs');
 const { execSync } = require('child_process');
 
 const { findNearestEnvrc, detectMalformedTestCommand, detectUnsetEnvelopeCommand } = require(
@@ -28,14 +27,17 @@ const {
   unsetEnvelopeBlock,
   unsetEnvelopeReason,
   preTestPassOutcome,
-  buildGreenEvidence,
 } = require(path.join(__dirname, 'evidence'));
 
 // W11 — the ONE gate evidence writer (atomic writes + recorder-parity traps).
 // Lives beside the recorder so both sides share the hang/load-failure guards.
-const { writeGateRed, writeGateGreen, gateHangRejection } = require(
+const { writeGateRed, gateHangRejection } = require(
   path.join(__dirname, '..', '..', '..', '..', 'work-implement', 'tdd-phase-state', 'gate-writer')
 );
+// GREEN persistence (extracted for file-size burndown, GH-694) — preserves
+// the pre-test RED and applies the writer's traps, incl. the tests-only
+// changed-test-files rule.
+const { persistGateGreen } = require(path.join(__dirname, 'persist-gate-green'));
 // W5 §5 — same env-overridable timeout the recorder uses
 // (TDD_PHASE_TEST_TIMEOUT_MS, default 5min), so tests can exercise the
 // hang-rejection path without waiting minutes.
@@ -326,68 +328,7 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase
     return { passed: false, command: cmd, exitCode, outputTail: String(output).slice(-4000) };
   if (!gateTasksBase) return { passed: false, command: cmd, exitCode: 0, outputTail: '' };
 
-  return persistGateGreen({ cmd, output, safeName, taskNum, gateTasksBase, taskType });
-}
-
-/**
- * Build + persist gate GREEN for a passing post-implement run. Preserves the
- * pre-test RED entry (refusing when none exists) and writes via the shared
- * gate writer, which applies the recorder-parity traps: hang rejection and
- * the RC-D empty-output rejection per gateContractFor(taskType).rcdEmptyTrap
- * (GH-466 fix #1 — a silent-success non-eval command must not record a
- * zero-output gate GREEN the recorder would refuse).
- */
-function persistGateGreen(p) {
-  const { cmd, output, safeName, taskNum, gateTasksBase, taskType } = p;
-  const taskDir = path.join(gateTasksBase, safeName, `task${taskNum}`);
-  const evidencePath = path.join(taskDir, 'tdd-phase.json');
-  const now = new Date().toISOString();
-
-  // If pre-test wrote a RED entry, preserve it and add GREEN
-  let existing = null;
-  try {
-    existing = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
-  } catch {
-    /* no pre-existing evidence */
-  }
-
-  const greenLog = writeTestLog(taskDir, 'green', cmd, 0, output, now);
-  const built = buildGreenEvidence(existing, cmd, output, now, greenLog);
-  if (built.noRedEvidence) {
-    return { passed: false, command: cmd, exitCode: 0, outputTail: '', noRedEvidence: true };
-  }
-
-  try {
-    // W11 — atomic write via the shared gate writer (no raw writeFileSync).
-    const wr = writeGateGreen({
-      tasksBase: gateTasksBase,
-      ticketId: safeName,
-      taskNum,
-      evidencePath,
-      evidence: built.evidence,
-      cmd,
-      output,
-      taskType,
-    });
-    if (wr.rejected) {
-      return {
-        passed: false,
-        plannerDefect: Boolean(wr.plannerDefect),
-        reason: wr.reason,
-        command: cmd,
-        exitCode: 0,
-        outputTail: String(output).slice(-4000),
-      };
-    }
-    return { passed: true };
-  } catch (err) {
-    return {
-      passed: false,
-      command: cmd,
-      exitCode: 0,
-      outputTail: `Failed to write tdd-phase.json: ${err && err.message}`,
-    };
-  }
+  return persistGateGreen({ cmd, output, safeName, taskNum, gateTasksBase, taskType, workingDir });
 }
 
 module.exports = {

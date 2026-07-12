@@ -146,17 +146,30 @@ function tddGate(ctx) {
  * transition succeeds after any single task's TDD evidence passes and remaining
  * tasks are silently skipped. work's implement-gate.js handles advancing the
  * task pointer; this guard ensures the transition itself is blocked.
+ *
+ * GH-694: every task STATUS must be completed — the previous pointer-only
+ * check (`currentIdx >= totalTasks - 1`) let implement close while pointing
+ * AT a pending last task (the GH-689 task_4 dangle). Malformed or
+ * missing-status entries count as pending (fail closed). Checkpoint tasks
+ * are NOT exempt: work-next's dispatch-advance gate advances them
+ * unconditionally (advanceCheckpointTask), so the gate is always
+ * satisfiable on the next work-next pass.
  */
 function multiTaskGate(ctx) {
-  const { ws, currentStep, targetStep, deps } = ctx;
+  const { ws, currentStep, targetStep, ticket, deps } = ctx;
   if (currentStep !== deps.STEPS.implement || currentStep === targetStep) return null;
   if (!ws?.tasksMeta || !Array.isArray(ws.tasksMeta.tasks)) return null;
-  const currentIdx = ws.tasksMeta.currentTaskIndex ?? 0;
-  const totalTasks = ws.tasksMeta.tasks.length;
-  if (currentIdx >= totalTasks - 1) return null;
+  const tasks = ws.tasksMeta.tasks;
+  const pending = tasks
+    .map((t, i) => (t && t.status === 'completed' ? null : (t && t.id) || `task_${i + 1}`))
+    .filter(Boolean);
+  if (pending.length === 0) return null;
   return {
     error: true,
-    message: `Cannot leave implement: task ${currentIdx + 1}/${totalTasks} done, ${totalTasks - currentIdx - 1} tasks remaining. Advance to next task first.`,
+    message:
+      `Cannot leave implement: ${pending.length} of ${tasks.length} task(s) not completed: ` +
+      `${pending.join(', ')}. Run \`node work-next.js ${ticket}\` to advance them ` +
+      '(validated tasks and checkpoints advance on the next gate pass).',
     gate: 'multi-task',
   };
 }

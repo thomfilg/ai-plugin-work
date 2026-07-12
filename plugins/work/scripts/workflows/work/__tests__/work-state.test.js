@@ -1162,6 +1162,67 @@ describe('work-state.js', () => {
       assert.notEqual(code, 0);
       assert.match(stderr, /2 tasks still pending/);
     });
+
+    // GH-694: reports naturally write "Task 4" prose, not the literal token
+    // `task_4` — the auto-close linkage must accept natural prose with
+    // explicit non-alnum boundaries on both sides.
+    function seedFourTaskCheckpoint(ticket) {
+      return seedTicket(ticket, [
+        { id: 'task_1', status: 'completed', kind: 'tdd-code' },
+        { id: 'task_2', status: 'completed', kind: 'tdd-code' },
+        { id: 'task_3', status: 'completed', kind: 'tdd-code' },
+        { id: 'task_4', status: 'pending', kind: 'checkpoint', title: 'Wrap-up verification' },
+      ]);
+    }
+
+    it('auto-closes on natural report prose: "Task 4", "task-4", "Task 04" (GH-694)', async () => {
+      const variants = ['Task 4', 'task-4', 'Task 04'];
+      for (let i = 0; i < variants.length; i++) {
+        const ticket = `TEST-CHK-PROSE-${i}`;
+        cleanupTempWorkState(ticket);
+        const dir = seedFourTaskCheckpoint(ticket);
+        fs.writeFileSync(
+          path.join(dir, 'completion.check.md'),
+          `# Completion Report\nStatus: APPROVED\n\n${variants[i]} verified: all prior work present.\n`
+        );
+        const { result, code } = await runWorkState(['complete', ticket]);
+        assert.equal(code, 0, `"${variants[i]}" prose must auto-close task_4`);
+        assert.equal(result.autoCompleted.length, 1);
+        assert.equal(result.autoCompleted[0].taskId, 'task_4');
+        cleanupTempWorkState(ticket);
+      }
+    });
+
+    it('does NOT close task_4 on "Task 41", "task 40", or "task_4a" (GH-694 boundaries)', async () => {
+      const variants = ['Task 41', 'task 40', 'task_4a'];
+      for (let i = 0; i < variants.length; i++) {
+        const ticket = `TEST-CHK-BOUND-${i}`;
+        cleanupTempWorkState(ticket);
+        const dir = seedFourTaskCheckpoint(ticket);
+        fs.writeFileSync(
+          path.join(dir, 'completion.check.md'),
+          `# Completion Report\nStatus: APPROVED\n\n${variants[i]} looks unrelated.\n`
+        );
+        const { code, stderr } = await runWorkState(['complete', ticket]);
+        assert.notEqual(code, 0, `"${variants[i]}" must NOT auto-close task_4`);
+        assert.match(stderr, /tasks still pending|checkpoint/i);
+        cleanupTempWorkState(ticket);
+      }
+    });
+
+    it('does NOT auto-close on a title-only mention with no task number (GH-694)', async () => {
+      const ticket = 'TEST-CHK-TITLEONLY-001';
+      cleanupTempWorkState(ticket);
+      const dir = seedFourTaskCheckpoint(ticket);
+      fs.writeFileSync(
+        path.join(dir, 'completion.check.md'),
+        '# Completion Report\nStatus: APPROVED\n\nWrap-up verification passed.\n'
+      );
+      const { code, stderr } = await runWorkState(['complete', ticket]);
+      assert.notEqual(code, 0, 'title prose without the task number must NOT auto-close');
+      assert.match(stderr, /tasks still pending|checkpoint/i);
+      cleanupTempWorkState(ticket);
+    });
   });
 
   describe('task-init descriptor array (GH-410)', () => {

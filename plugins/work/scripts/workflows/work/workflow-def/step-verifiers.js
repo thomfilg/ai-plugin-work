@@ -24,6 +24,18 @@ function ticketDir(deps, ticketId) {
   return path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId));
 }
 
+/**
+ * GH-696: a step whose inner phase driver is still mid-flight (or whose
+ * ledger is corrupt) must not verify, even when the artifact file exists —
+ * on GH-689 the brief step advanced while brief-phase.json sat at `draft`.
+ * Absent ledger = legacy/pre-phase-driver ticket → not blocked (today's
+ * behavior). The plan matrix's RUN-resume branch is the repair route.
+ */
+function ledgerClear(deps, ticketId, step) {
+  const { phaseLedgerBlocked } = require(path.join(deps.workRoot, 'lib', 'phase-ledger'));
+  return !phaseLedgerBlocked(ticketDir(deps, ticketId), step).blocked;
+}
+
 /** @param {StepDeps} deps */
 function verifyTicket(deps, ticketId) {
   // Ticket is proven if the work state file exists and is active for this ticket
@@ -42,7 +54,10 @@ function verifyTicket(deps, ticketId) {
 /** @param {StepDeps} deps */
 function verifyBrief(deps, ticketId) {
   try {
-    return fs.existsSync(path.join(ticketDir(deps, ticketId), 'brief.md'));
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'brief.md')) &&
+      ledgerClear(deps, ticketId, 'brief')
+    );
   } catch {
     return false;
   }
@@ -55,7 +70,10 @@ function verifyBrief(deps, ticketId) {
  */
 function verifySpec(deps, ticketId) {
   try {
-    return fs.existsSync(path.join(ticketDir(deps, ticketId), 'spec.md'));
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'spec.md')) &&
+      ledgerClear(deps, ticketId, 'spec')
+    );
   } catch {
     return false;
   }
@@ -65,7 +83,10 @@ function verifySpec(deps, ticketId) {
 function verifyTasks(deps, ticketId) {
   // verify remains active -- used by evidence checks
   try {
-    return fs.existsSync(path.join(ticketDir(deps, ticketId), 'tasks.md'));
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'tasks.md')) &&
+      ledgerClear(deps, ticketId, 'tasks')
+    );
   } catch {
     return false;
   } // fail-safe: assume tasks not generated
@@ -114,9 +135,49 @@ function checkTddException(state, workRoot) {
 }
 
 /**
+ * GH-694: in multi-task mode, implement is only proven when EVERY tasksMeta
+ * task has status 'completed' — the hook-side evidence path previously never
+ * read tasksMeta, so implement could verify with unsatisfied tasks (the
+ * GH-689 task_4 dangle). Statuses only, no per-task evidence re-walk:
+ * evidence was already validated at advance time by the ONE shared validator
+ * (re-validating here risks the echo-4552 infinite-retry class). Malformed or
+ * missing-status entries count as pending (fail closed); a MISSING
+ * .work-state.json (ENOENT) or absent tasksMeta is single-task mode —
+ * unchanged. PR #717: a read/parse failure on an EXISTING state file is NOT
+ * single-task mode — a corrupt state file on a multi-task ticket must not
+ * verify on TDD evidence alone (refusal-to-vouch, the checkpoints.js
+ * precedent). Repair route: restore .work-state.json (git checkout / re-run
+ * `node work-next.js <ticket>` to rebuild it), then re-verify.
+ */
+function tasksMetaAllCompleted(deps, ticketId) {
+  const statePath = path.join(ticketDir(deps, ticketId), '.work-state.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(statePath, 'utf-8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return true; // single-task mode / no state file
+    return false; // EXISTING but unreadable state file — refuse to vouch
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false; // EXISTING but corrupt state file — refuse to vouch
+  }
+  if (!parsed || typeof parsed !== 'object' || !parsed.tasksMeta) {
+    return true; // falsy tasksMeta — single-task mode (repo-wide idiom), unchanged
+  }
+  // Once tasksMeta exists this IS a multi-task ticket: statuses must be
+  // present and checkable — a missing/non-array tasks field blocks.
+  const tasks = parsed.tasksMeta.tasks;
+  if (!Array.isArray(tasks)) return false;
+  return tasks.every((t) => t && t.status === 'completed');
+}
+
+/**
  * tasks step gating is orchestrator-controlled via DEFER/RUN plan actions.
  * Implement is proven if tdd-phase.json has at least one cycle with red +
- * green evidence.
+ * green evidence AND (GH-694) every tasksMeta task is completed.
  * @param {StepDeps} deps
  */
 function verifyImplement(deps, ticketId) {
@@ -124,11 +185,18 @@ function verifyImplement(deps, ticketId) {
     const state = JSON.parse(
       fs.readFileSync(path.join(ticketDir(deps, ticketId), 'tdd-phase.json'), 'utf-8')
     );
+    let tddProven;
     const exception = checkTddException(state, deps.workRoot);
-    if (exception !== null) return exception;
-    if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
-    // At least one cycle must have both red and green evidence
-    return state.cycles.some((c) => c.red && c.green);
+    if (exception !== null) {
+      tddProven = exception;
+    } else if (!Array.isArray(state.cycles) || state.cycles.length === 0) {
+      tddProven = false;
+    } else {
+      // At least one cycle must have both red and green evidence
+      tddProven = state.cycles.some((c) => c.red && c.green);
+    }
+    if (!tddProven) return false;
+    return tasksMetaAllCompleted(deps, ticketId);
   } catch {
     return false;
   }

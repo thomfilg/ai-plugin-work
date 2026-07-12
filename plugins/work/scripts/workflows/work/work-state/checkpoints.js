@@ -99,16 +99,20 @@ function matchVerdict(reportContent) {
  * We deliberately do NOT match on titles. Titles are free-form prose
  * ("Refactor", "Tests", "Wrap-up") that can collide with unrelated mentions
  * in the report — a checkpoint titled "Refactor" would auto-close on any
- * APPROVED report that happened to mention refactoring. Task ids
- * (`task_1`, `task_2`, ...) are unambiguous synthetic tokens.
+ * APPROVED report that happened to mention refactoring. The linkage keys on
+ * the task NUMBER in a `task`-prefixed token.
  *
- * JS `\b` treats `_` as a word char and so does NOT separate `task_1`
- * from `task_10`; we use an explicit `[^A-Za-z0-9_]` boundary instead so
- * a report naming only `task_10` does not auto-close `task_1`.
+ * GH-694: reports naturally write "Task 4" / "Task-4" prose, never the
+ * literal synthetic token `task_4`, so the exact-id match was dead code
+ * (GH-410's auto-close could never fire). The pattern accepts one optional
+ * space/underscore/hyphen separator and leading zeros ("Task 04"),
+ * case-insensitively. Explicit `[^A-Za-z0-9_]` boundaries on BOTH sides
+ * (JS `\b` treats `_` as a word char) keep "task_41" / "task 40" /
+ * "task_4a" from closing task_4 — every closure stays individually backed
+ * by the line-anchored verdict + the tasks.md type=checkpoint re-check.
  */
 function closeMatchingCheckpoints(state, reportContent, matchedVerdict, tasksMdCheckpointNums) {
   const closed = [];
-  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const idToNum = (id) => {
     const m = /^task_(\d+)$/.exec(String(id || ''));
     return m ? Number(m[1]) : null;
@@ -121,7 +125,7 @@ function closeMatchingCheckpoints(state, reportContent, matchedVerdict, tasksMdC
     // unreadable). This is the gate state-file tampering can't bypass.
     const num = idToNum(entry.id);
     if (num === null || !tasksMdCheckpointNums.has(num)) continue;
-    const re = new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(entry.id)}([^A-Za-z0-9_]|$)`);
+    const re = new RegExp(`(^|[^A-Za-z0-9_])task[\\s_-]?0*${num}([^A-Za-z0-9_]|$)`, 'i');
     if (!re.test(reportContent)) continue;
     entry.status = 'completed';
     closed.push({
