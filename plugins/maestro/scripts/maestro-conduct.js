@@ -38,6 +38,32 @@ const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
 const progress = require('./lib/maestro-conduct/progress');
 const runners = require('./lib/maestro-conduct/detector-runners');
 const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
+const usageLimit = require('./lib/maestro-conduct/usage-limit');
+
+const USAGE_FREEZE_RE_EMIT_MIN = parseInt(process.env.USAGE_FREEZE_RE_EMIT_MIN || '30', 10);
+
+// Frozen pane: the harness refuses every turn until the usage window resets.
+// Hold ALL heuristics (nudge/restart/rotation/dead-end) — they'd kill healthy
+// agents — but still run the stop oracle (CI/review progress is external to
+// the pane). One deduped alert per session per re-emit window.
+function handleUsageLimitFreeze(ctx) {
+  actions.noteUsageFreeze();
+  const marker = state.read(ctx.session, 'usage-limit') || {};
+  if (marker.lastAlertAt && state.minutesSince(marker.lastAlertAt) < USAGE_FREEZE_RE_EMIT_MIN)
+    return;
+  state.write(ctx.session, 'usage-limit', { lastAlertAt: state.now() });
+  actions.alert({
+    session: ctx.session,
+    ticket: ctx.ticket,
+    kind: 'usage-limit-freeze',
+    phase: ctx.phase,
+    skill: ctx.skill,
+    instruction:
+      'agent pane shows the session/usage limit banner — the model refuses every turn until the window resets. ' +
+      'All conductor timers, nudges, restarts, rotations, and pool top-ups are HELD for this fleet. ' +
+      'After the reset, nudge each session to resume (a queued message is enough); no restart needed.',
+  });
+}
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -193,8 +219,19 @@ function runPhaseDetectors(ctx) {
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
 function tickSession(session) {
   const ctx = ctxFor(session);
+  // Usage-limit freeze wins over everything: the agent CANNOT respond, so any
+  // heuristic verdict (silence, spinner, stall, dead-end) is meaningless and
+  // acting on it kills healthy agents. The stop oracle still runs — a parked
+  // ticket's CI/review can finish while its pane is frozen.
+  if (usageLimit.isUsageLimitFrozen(ctx.pane)) {
+    stopCondition.maybeStopOnOracle({ ctx, actions, manifest, restartEligible });
+    handleUsageLimitFreeze(ctx);
+    return;
+  }
   // One progress observation per session per tick; detectors read the marker.
-  const prog = progress.observe(ctx.ticket, ctx.worktree);
+  // Pane text rides along so token-counter movement counts as progress in the
+  // worktree-quiet phases (brief/spec/tasks planning, follow-up loops).
+  const prog = progress.observe(ctx.ticket, ctx.worktree, ctx.pane);
   // Real progress (phase forward-step) resets the dead-end strike counter so
   // an old stall in an unrelated phase can't escalate a fresh one (PR #603).
   detectPhaseAdvance(ctx, restartEligible);
@@ -241,6 +278,14 @@ function tick() {
     actions.maybeFillPool();
   } catch (e) {
     alerts.log(`maybeFillPool failed: ${e.message}`);
+  }
+  // Parked tickets (awaiting-merge, session rotated away) keep their stop
+  // oracles ticking — re-reviews fire and "done" is detected without a live
+  // session (2026-07-12: GH-607's re-review never launched after rotation).
+  try {
+    stopCondition.sweepParkedOracles({ manifest, actions, tmuxMod: tmux, liveSessions: sessions });
+  } catch (e) {
+    alerts.log(`sweepParkedOracles failed: ${e.message}`);
   }
   if (!sessions.length) {
     alerts.log(`no ${tmux.sessionName(`${tmux.resolveTicketPrefix()}-*`, 'work')} sessions`);

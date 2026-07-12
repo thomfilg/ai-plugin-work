@@ -264,6 +264,33 @@ function launchConfigForTask(taskId) {
   };
 }
 
+/**
+ * tasksByStatus — every task across all manifests currently in `status`,
+ * as [{ taskId, topic }]. Duplicate ticket ids across manifests dedupe to
+ * the newest manifest's row (same createdAt rule as findTask) so a stale
+ * 12-day-old manifest can't resurrect a parked ticket the live run owns.
+ * Powers the parked-oracle sweep (stop-condition.sweepParkedOracles).
+ */
+function tasksByStatus(status) {
+  const best = new Map(); // taskId → { createdAt, topic }
+  for (const file of listManifestFiles()) {
+    const manifest = readManifest(file);
+    if (!manifest || !Array.isArray(manifest.tasks)) continue;
+    const createdAt = Date.parse(manifest.createdAt || '') || 0;
+    for (const task of manifest.tasks) {
+      if (!task || !task.id) continue;
+      const prev = best.get(task.id);
+      if (prev && prev.createdAt >= createdAt) continue;
+      best.set(task.id, { createdAt, topic: manifest.topic || null, status: task.status });
+    }
+  }
+  const rows = [];
+  for (const [taskId, row] of best) {
+    if (row.status === status) rows.push({ taskId, topic: row.topic });
+  }
+  return rows;
+}
+
 module.exports = {
   listManifestFiles,
   readManifest,
@@ -278,4 +305,5 @@ module.exports = {
   stopOracleForTask,
   commandForTask,
   launchConfigForTask,
+  tasksByStatus,
 };

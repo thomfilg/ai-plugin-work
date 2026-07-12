@@ -71,20 +71,54 @@ function signature(worktree) {
 }
 
 /**
- * Observe the ticket's worktree once per tick: recompute the signature and
- * roll the marker forward. Returns
- *   { sig, changed, minutesSinceChange }
- * with sig=null (and changed=false, minutesSinceChange=Infinity) on git
- * failure. Callers should invoke this at most once per (ticket, tick);
- * repeated calls in the same tick are harmless but redundant.
+ * Extract the largest "N tokens" figure from a captured pane. The Claude Code
+ * status bar shows the session-total token count, which grows monotonically
+ * while the model produces — a progress signal that covers the phases the git
+ * signature is blind to (brief/spec/tasks planning, follow-up loops, and
+ * subagent work that hasn't touched the worktree yet). Observed 2026-07-12:
+ * agents in planning phases accumulated ~40 false spinner-hang/no-progress
+ * alerts because only worktree mtime counted as progress.
+ * Returns null when no figure is visible (pane missing, TUI redraw).
  */
-function observe(ticket, worktree) {
+function paneTokenFigure(paneText) {
+  if (!paneText) return null;
+  let max = null;
+  const re = /(\d[\d,]*(?:\.\d+)?)\s*(k?)\s*tokens/gi;
+  for (const m of paneText.matchAll(re)) {
+    let n = parseFloat(m[1].replace(/,/g, ''));
+    if (m[2]) n *= 1000;
+    if (!Number.isFinite(n)) continue;
+    if (max === null || n > max) max = n;
+  }
+  return max;
+}
+
+/**
+ * Observe the ticket's worktree (and optionally its pane) once per tick:
+ * recompute the git signature plus the pane token figure and roll the marker
+ * forward. EITHER signal changing counts as progress. Returns
+ *   { sig, changed, minutesSinceChange }
+ * with sig=null on git failure; when git is unreadable the pane-token signal
+ * still drives lastChangeAt (fail-open on suppression stays intact: consumers
+ * that exempt on sig===null keep doing so). Callers should invoke this at
+ * most once per (ticket, tick).
+ */
+function observe(ticket, worktree, paneText) {
   const sig = signature(worktree);
-  if (sig === null) return { sig: null, changed: false, minutesSinceChange: Infinity };
+  const tokens = paneTokenFigure(paneText);
+  if (sig === null && tokens === null)
+    return { sig: null, changed: false, minutesSinceChange: Infinity };
   const now = state.now();
   const prev = state.read(ticket, 'progress');
-  if (!prev || prev.sig !== sig) {
-    state.write(ticket, 'progress', { sig, lastChangeAt: now, lastCheckAt: now });
+  const sigChanged = sig !== null && (!prev || prev.sig !== sig);
+  const tokensChanged = tokens !== null && (!prev || prev.paneTokens !== tokens);
+  if (sigChanged || tokensChanged || !prev) {
+    state.write(ticket, 'progress', {
+      sig: sig !== null ? sig : (prev && prev.sig) || null,
+      paneTokens: tokens !== null ? tokens : (prev && prev.paneTokens) || null,
+      lastChangeAt: now,
+      lastCheckAt: now,
+    });
     // First sighting counts as a change: we cannot distinguish "just started"
     // from "just changed", and treating it as fresh errs on the safe side
     // (suppress interrupts right after bootstrap/restart).
@@ -109,6 +143,7 @@ module.exports = {
   signature,
   observe,
   hasFreshProgress,
+  paneTokenFigure,
   PROGRESS_FRESH_MIN,
   GIT_CALL_TIMEOUT_MS,
 };
