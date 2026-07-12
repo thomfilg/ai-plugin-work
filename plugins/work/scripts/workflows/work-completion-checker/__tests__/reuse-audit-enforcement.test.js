@@ -739,13 +739,12 @@ test.describe('GH-607 review fix — config match scoped to declared file', () =
       '- `my-hook` MUST be reused from `hooks.json`',
       '',
     ].join('\n');
-    // hooks.json is added-to but WITHOUT the `my-hook` symbol OR the `hooks.json`
-    // path string; the `hooks.json` PATH needle appears only on added lines of the
-    // unrelated src/other.js. `configEntryPresent` matches EITHER needle (symbol
-    // or path), so pre-fix the combined diff let the path needle from the other
-    // file satisfy the entry. Post-fix, the per-file scoped read of hooks.json —
-    // which contains neither needle — fails it. (We avoid the `my-hook` symbol in
-    // the other file so the PRIMARY symbol-in-added check can't confound the test.)
+    // hooks.json is added-to but WITHOUT the `my-hook` symbol; the `hooks.json`
+    // path text appears only on added lines of the unrelated src/other.js. The
+    // config entry is judged SOLELY by its own file's added lines and ONLY by the
+    // symbol token (path text is not evidence), so the symbol — absent from
+    // hooks.json's own added lines — fails it. (We avoid the `my-hook` symbol in
+    // the other file so the primary symbol-in-added check can't confound the test.)
     const { ctx, cleanup } = buildGitCtx({
       spec,
       hooksJsonAdded: '{\n  "unrelated": { "command": "node z.js" }\n}\n',
@@ -857,6 +856,81 @@ test.describe('GH-607 review fix — config match scoped to declared file', () =
       );
       const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
       assert.ok(rec, 'failure record must still be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (configEntryPresent evidence strength): a change that merely
+  // MENTIONS the declared config filename on the config file's OWN added lines —
+  // without the required symbol — must NOT satisfy the entry. Pre-fix `entry.path`
+  // was a match needle, so the path text `hooks.json` counted as reuse evidence.
+  test('config filename text on the declared file’s own added lines does NOT satisfy (no path-as-evidence)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    // hooks.json's own added lines contain the PATH text `hooks.json` but NOT the
+    // `my-hook` symbol; src/other.js also does not reference the symbol.
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "note": "see hooks.json for wiring"\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      // Guard: hooks.json's own added lines DO contain the path text, so it is the
+      // removal of path-as-evidence — not an absent needle — that fails the entry.
+      const own = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'hooks.json']);
+      assert.match(
+        own,
+        /hooks\.json/,
+        'guard: hooks.json own added lines must contain the path text'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'the config filename text must not count as reuse evidence');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed when only the path text is present');
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (configEntryPresent evidence strength): a SUPERSTRING of the symbol
+  // on the declared file's own added lines must NOT satisfy the entry — the match is
+  // word-bounded, so `my-hookish` cannot stand in for the `my-hook` token.
+  test('a superstring of the symbol does NOT satisfy the config entry (word-bounded, no substring)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "my-hookish": { "command": "node x.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      // Guard: the symbol text appears as a SUBSTRING on hooks.json's own added
+      // lines, so it is the word boundary — not an absent needle — that fails it.
+      const own = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'hooks.json']);
+      assert.match(
+        own,
+        /my-hookish/,
+        'guard: hooks.json own added lines must contain the superstring'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'a substring (my-hookish) must not satisfy the my-hook token');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed when only a superstring is present');
     } finally {
       cleanup();
     }

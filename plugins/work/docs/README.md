@@ -88,8 +88,13 @@ the declaring surface, so the fail-closed / anti-gaming guarantee is preserved:
   only in some *other* modified file does not satisfy the audit.
 - **Config-file (non-JS/TS) reuse entries (P0.2).** When the declared path is a
   non-`.js`/`.ts` file (e.g. a `.json` config), the importable-symbol heuristic is
-  bypassed and the entry is matched by its declared path/block literally appearing
-  on the added lines — gated on that path being in the change set.
+  bypassed and the entry is matched by its declared **symbol** appearing as a whole
+  token on that file's **own** added lines — gated on that path being in the change
+  set. The declared path/filename text is never accepted as evidence (mentioning the
+  config filename cannot satisfy the entry) and the match is word-bounded (`my-hookish`
+  cannot satisfy `my-hook`) — the same token strength as the importable-symbol paths.
+  When the added-lines diff is unavailable the config entry fails closed rather than
+  falling back to bare file-wide presence.
 
 **Fail-closed / anti-gaming preserved.** The relaxations never turn the gate into
 a rubber-stamp: a symbol present **only** in a pre-existing, unmodified file still

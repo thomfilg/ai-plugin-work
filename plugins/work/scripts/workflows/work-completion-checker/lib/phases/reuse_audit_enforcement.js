@@ -169,20 +169,20 @@ function isConfigPath(p) {
 }
 
 // GH-607 (R2): a config-file MUST-reuse entry counts as reused only when its
-// declared path is in the change set AND its declared path or symbol block
-// literally appears on the added lines of THAT declared file.
-//
-// Review fix (GH-607): `scopedAddedLines` MUST be `entry.path`'s own added lines
-// (callers pass `readAddedLines(ctx, [entry.path])`) — the repo-wide diff let a
-// needle in an unrelated changed file satisfy the entry, defeating fail-closed.
+// declared path is in the change set AND the declared SYMBOL appears as a whole
+// token on the added lines of THAT declared file (callers pass the file's own
+// `readAddedLines`). Greptile P1 (evidence strength): the match uses the SAME
+// word-boundary token matcher as the importable-symbol paths — never the declared
+// path/filename text (mentioning the config filename must not satisfy the entry)
+// and never a substring (`my-hook` is not satisfied by `my-hookish`).
 function configEntryPresent(entry, scopedAddedLines, changedSet) {
   if (!entry || !entry.path) return false;
+  if (typeof entry.symbol !== 'string' || entry.symbol.length === 0) return false;
   if (!changedSet || !changedSet.has(normalizeRepoPath(entry.path))) return false;
   if (scopedAddedLines === null || scopedAddedLines === undefined || scopedAddedLines === '') {
     return false;
   }
-  const needles = [entry.symbol, entry.path].filter((s) => typeof s === 'string' && s.length > 0);
-  return needles.some((needle) => new RegExp(escapeRegex(needle)).test(scopedAddedLines));
+  return wordBoundaryRe(entry.symbol).test(scopedAddedLines);
 }
 
 function errMessage(err) {
