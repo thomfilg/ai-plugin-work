@@ -44,26 +44,6 @@ function safeTicket(ticket) {
   }
 }
 
-/**
- * Resolve the ticket's active step name from `.work-state.json`.
- * `currentStep` is 1-indexed into ALL_STEPS (mirrors capture-usage.readStateStep).
- * A missing/invalid state file yields 'unknown' rather than dropping the warning.
- */
-function readStateStep(tasksBase, ticket) {
-  try {
-    const statePath = path.join(tasksBase, safeTicket(ticket), '.work-state.json');
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    const { ALL_STEPS } = require(path.join(__dirname, '..', 'step-registry'));
-    const num = Number(state && state.currentStep);
-    if (Number.isFinite(num) && num >= 1 && num <= ALL_STEPS.length) {
-      return ALL_STEPS[num - 1];
-    }
-  } catch {
-    /* missing/corrupt state file */
-  }
-  return 'unknown';
-}
-
 /** Dispatched agent type: subagent_type / agentType input field, else tool name. */
 function resolveAgentType(evt) {
   const input = evt.toolInput || {};
@@ -154,7 +134,7 @@ function main() {
     percent,
     thresholds,
     newly,
-    step: readStateStep(found.tasksBase, ticket),
+    step: hookCommon.readStateStep(found.tasksBase, ticket),
     agent: resolveAgentType(evt),
   });
 
