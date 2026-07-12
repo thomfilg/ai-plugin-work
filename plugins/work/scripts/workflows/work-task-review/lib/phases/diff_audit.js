@@ -6,6 +6,8 @@
 
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const { TASK_REVIEW_PHASES } = require('../../task-review-phase-registry');
@@ -71,16 +73,33 @@ function writeContext(ctx, diff, files) {
   });
 }
 
+/**
+ * PR #716: a failed audit must not leave a previous snapshot behind — later
+ * phases (reuse_check, kind-checks shared.js) read task-review-context.json
+ * and would analyze the STALE file list on a retry after an earlier
+ * successful audit. Missing file = "no snapshot", which those readers
+ * already handle.
+ */
+function clearStaleContext(ctx) {
+  try {
+    fs.rmSync(path.join(ctx.tasksDir, 'task-review-context.json'), { force: true });
+  } catch {
+    /* hook-gated; non-fatal */
+  }
+}
+
 function validate(ctx) {
   const diff = computeDiff(ctx);
   if (diff && diff.blocked) {
     // GH-693: surface the same blocked state as the plan-time gate instead
     // of auditing an empty range (validator-unification invariant).
+    clearStaleContext(ctx);
     return { ok: false, errors: [diff.reason] };
   }
   const root = ctx.worktreeRoot || process.cwd();
   const files = gitDiffNameOnly(diff.base, diff.head, root);
   if (!files.length) {
+    clearStaleContext(ctx);
     return {
       ok: false,
       errors: [

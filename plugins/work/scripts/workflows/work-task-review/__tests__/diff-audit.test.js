@@ -74,4 +74,44 @@ describe('diff_audit validate (GH-693 blocked propagation)', () => {
     assert.equal(res.ok, false);
     assert.match(res.errors[0], /task diff empty/);
   });
+
+  // ─── PR #716: a failed audit must not leave a previous snapshot behind ────
+  // Later phases (reuse_check, kind-checks shared.js) read
+  // task-review-context.json; a retry after an earlier successful audit
+  // must not let them analyze the STALE file list.
+
+  function writeStaleContext(ctx) {
+    const p = path.join(ctx.tasksDir, 'task-review-context.json');
+    fs.writeFileSync(
+      p,
+      JSON.stringify({ ticket: ctx.ticket, files: ['stale-old-file.js'], fileCount: 1 })
+    );
+    return p;
+  }
+
+  it('removes a stale task-review-context.json when the range is blocked', () => {
+    const ctx = makeCtx('T-STALE-BLOCKED');
+    const stale = writeStaleContext(ctx);
+    const res = validate(ctx); // revList '0\n' -> blocked
+    assert.equal(res.ok, false);
+    assert.equal(
+      fs.existsSync(stale),
+      false,
+      'stale snapshot must not survive a blocked audit for later phases to read'
+    );
+  });
+
+  it('removes a stale task-review-context.json when the current range yields no files', () => {
+    revList = '1\n';
+    const ctx = makeCtx('T-STALE-EMPTY');
+    const stale = writeStaleContext(ctx);
+    const res = validate(ctx);
+    assert.equal(res.ok, false);
+    assert.match(res.errors[0], /task diff empty/);
+    assert.equal(
+      fs.existsSync(stale),
+      false,
+      'stale snapshot must not survive an empty-range audit either'
+    );
+  });
 });

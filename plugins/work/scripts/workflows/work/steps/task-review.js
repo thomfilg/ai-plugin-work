@@ -105,14 +105,20 @@ function addBlockedEscalation(add, ctx, { currentIdx, totalTasks, reason }) {
 
 /**
  * Compute the task-scoped diff range for the review. GH-693 blocked results
- * ({ blocked, reason }) pass through; genuine exceptions -> null (the review
- * proceeds with the "computed from .last-commit-sha" note, as before).
+ * ({ blocked, reason }) pass through; exceptions ALSO fail closed as a
+ * blocked result (PR #716) — computeTaskDiff catches git/fs failures
+ * internally, so a throw means the range is unverifiable and must route to
+ * the escalation, never to a scheduled review with no valid diff range.
  */
 function computeDiffRange(reviewTasksDir, ticket) {
   try {
     return computeTaskDiff(reviewTasksDir, ticket);
-  } catch (_e) {
-    return null;
+  } catch (e) {
+    const detail = e && typeof e.message === 'string' ? e.message : String(e);
+    return {
+      blocked: true,
+      reason: `commit evidence check failed while computing task diff: ${detail}`,
+    };
   }
 }
 

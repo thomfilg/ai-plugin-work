@@ -11,7 +11,7 @@
  * Uses node:test + node:assert/strict.
  */
 
-const { describe, it, beforeEach } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 // Minimal deps stub for transitionStep
@@ -851,6 +851,26 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
 });
 
 describe('transition-step.js (GH-693): commit-evidence gate', () => {
+  // Pin BASE_BRANCH unset (env + config snapshot) so a leaked value from the
+  // host environment cannot flip the gate into the explicit-base paths
+  // (PR #716) and the auto-detection tests stay deterministic.
+  const cfgModule = require('../../lib/config');
+  let savedBaseBranchEnv;
+  let savedBaseBranchCfg;
+
+  beforeEach(() => {
+    savedBaseBranchEnv = process.env.BASE_BRANCH;
+    savedBaseBranchCfg = cfgModule.BASE_BRANCH;
+    delete process.env.BASE_BRANCH;
+    cfgModule.BASE_BRANCH = '';
+  });
+
+  afterEach(() => {
+    if (savedBaseBranchEnv === undefined) delete process.env.BASE_BRANCH;
+    else process.env.BASE_BRANCH = savedBaseBranchEnv;
+    cfgModule.BASE_BRANCH = savedBaseBranchCfg;
+  });
+
   // The gate shells out via a dynamic require('child_process').execFileSync,
   // so monkey-patching the module property intercepts the rev-list call and
   // keeps these tests independent of the repo's real commits-ahead count.
@@ -940,5 +960,67 @@ describe('transition-step.js (GH-693): commit-evidence gate', () => {
       assert.equal(result.success, true, `expected success, got ${JSON.stringify(result)}`);
       assert.equal(calls.length, 0, 'rev-list must not run for backward transitions');
     });
+  });
+
+  // ─── PR #716: explicit BASE_BRANCH must never degrade to a fallback ───────
+
+  it('blocks with a distinct message when configured BASE_BRANCH cannot be resolved', () => {
+    const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
+    process.env.BASE_BRANCH = 'gh716-no-such-base';
+    withRevList('5\n', (calls) => {
+      const deps = depsAt(STEPS.commit);
+      const result = transitionStep('TEST-693', STEPS.task_review, deps);
+      assert.equal(result.error, true, 'unresolvable explicit base must fail closed');
+      assert.equal(result.gate, 'commit-evidence');
+      assert.match(result.message, /BASE_BRANCH/, 'message must name the config knob');
+      assert.match(result.message, /gh716-no-such-base/, 'message must name the configured base');
+      assert.match(result.message, /git fetch/, 'message must name the fetch repair');
+      assert.doesNotMatch(result.message, /zero commits/, 'distinct from the no-commits block');
+      assert.doesNotMatch(result.message, /git failed/, 'distinct from the git-failed block');
+      assert.equal(calls.length, 0, 'commits must NOT be counted against a fallback base');
+    });
+  });
+
+  it('counts commits against the explicitly configured base when it resolves', () => {
+    const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
+    const cp = require('child_process');
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gh716-base-'));
+    const git = (args) =>
+      cp.execFileSync('git', args, { cwd: repo, stdio: ['pipe', 'pipe', 'pipe'] });
+    git(['init', '-q']);
+    git([
+      '-c',
+      'user.email=t@example.com',
+      '-c',
+      'user.name=t',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'x',
+      '-q',
+    ]);
+    git(['update-ref', 'refs/remotes/origin/stable', 'HEAD']);
+    const prevCwd = process.cwd();
+    process.env.BASE_BRANCH = 'stable';
+    try {
+      process.chdir(repo);
+      withRevList('1\n', (calls) => {
+        const deps = depsAt(STEPS.commit);
+        const result = transitionStep('TEST-693', STEPS.task_review, deps);
+        assert.equal(result.success, true, `expected success, got ${JSON.stringify(result)}`);
+        assert.ok(
+          calls.some((args) => args.includes('origin/stable..HEAD')),
+          `rev-list must count against the configured base, got ${JSON.stringify(calls)}`
+        );
+      });
+    } finally {
+      process.chdir(prevCwd);
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

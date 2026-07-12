@@ -382,6 +382,37 @@ describe('task-review step', () => {
     assert.match(entries[0].reason, /commit evidence/i);
   });
 
+  it('escalates when computeTaskDiff throws — exceptions fail closed (PR #716)', () => {
+    // computeTaskDiff catches git/fs failures internally, so a throw is an
+    // unverifiable state — it must route to the blocked escalation, never
+    // schedule a review with no valid diff range. Simulate by making the
+    // shared config module's getBaseBranch throw (same require-cache
+    // instance task-review-gate.js holds).
+    const config = require(path.join(__dirname, '..', '..', '..', 'lib', 'config'));
+    const origGetBaseBranch = config.getBaseBranch;
+    config.getBaseBranch = () => {
+      throw new Error('config exploded');
+    };
+    try {
+      const { add, entries } = makeAdd();
+      const { taskData, s } = makeIntermediateFixture();
+      const ctx = makeCtx({ _taskData: taskData, _currentTaskIdx: 0 });
+      taskReviewStep(add, s, ctx);
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].action, 'RUN');
+      assert.equal(entries[0].command, 'AskUserQuestion');
+      assert.match(entries[0].reason, /commit evidence/i);
+      assert.match(entries[0].reason, /config exploded/, 'reason must carry the failure detail');
+      assert.doesNotMatch(
+        entries[0].agentPrompt,
+        /tests-review/,
+        'a review with an unverifiable range must NOT be scheduled'
+      );
+    } finally {
+      config.getBaseBranch = origGetBaseBranch;
+    }
+  });
+
   it('appends a blocked audit row when commit evidence is missing', () => {
     const fs = require('fs');
     const getConfig = require(path.join(__dirname, '..', '..', '..', 'lib', 'get-config'));
