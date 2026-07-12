@@ -528,6 +528,22 @@ describe('workflow-definition: verify[STEPS.implement] (GH-694)', () => {
     seed('T-694D', null);
     assert.equal(verifyImplement('T-694D'), true);
   });
+
+  it('fails closed when an EXISTING state file is corrupt JSON (PR #717)', () => {
+    // A multi-task ticket whose state file got corrupted must NOT verify on
+    // TDD evidence alone — corrupt ≠ single-task mode (refusal-to-vouch).
+    const dir = seed('T-694E', null);
+    fs.writeFileSync(path.join(dir, STATE_FILE), '{ this is not json');
+    assert.equal(verifyImplement('T-694E'), false);
+  });
+
+  it('fails closed when the state path exists but is unreadable as a file', () => {
+    // EISDIR — a read error on an EXISTING path is not ENOENT and must not
+    // silently downgrade a multi-task ticket to single-task mode.
+    const dir = seed('T-694F', null);
+    fs.mkdirSync(path.join(dir, STATE_FILE));
+    assert.equal(verifyImplement('T-694F'), false);
+  });
 });
 
 // ─── GH-219: brief.md contentGuard ───────────────────────────────────────────
