@@ -306,11 +306,17 @@ function phaseStallSuppressed(ctx, stallHit, marker, sinceLastNudge) {
     return true;
   }
   // Progress gate: a phase over budget whose worktree is still changing is a
-  // WORKING agent (slow ≠ stuck). Nudging it interrupts real work.
+  // WORKING agent (slow ≠ stuck). Nudging it interrupts real work. Log with a
+  // 30m dedup — this branch fires EVERY tick while a long phase progresses,
+  // and the per-minute line drowned the operator's event stream.
   if (progress.hasFreshProgress(ctx.ticket)) {
-    alerts.log(
-      `${ctx.session} phase-stall suppressed: worktree changed <${progress.PROGRESS_FRESH_MIN}m ago (phase=${ctx.phase} ${stallHit.elapsedMin}m over budget but progressing)`
-    );
+    const logMark = state.read(ctx.ticket, 'stall-suppress-log') || {};
+    if (!logMark.lastLogAt || state.minutesSince(logMark.lastLogAt) >= 30) {
+      state.write(ctx.ticket, 'stall-suppress-log', { lastLogAt: state.now() });
+      alerts.log(
+        `${ctx.session} phase-stall suppressed: worktree changed <${progress.PROGRESS_FRESH_MIN}m ago (phase=${ctx.phase} ${stallHit.elapsedMin}m over budget but progressing; log deduped 30m)`
+      );
+    }
     return true;
   }
   // Don't re-nudge before the per-phase cooldown.
