@@ -27,10 +27,74 @@
  * independently).
  */
 
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('node:child_process');
+const workstate = require('./workstate');
+const alerts = require('./alerts');
+const stateStore = require('./state');
+
 const CI_OR_LATER_PHASES = new Set(['ci', 'complete']);
+
+// How often to re-log a held rotation (log-only; rotation retries every tick).
+const ROTATION_HOLD_RELOG_MIN = parseInt(process.env.ROTATION_HOLD_RELOG_MIN || '30', 10);
+const GIT_CALL_TIMEOUT_MS = parseInt(process.env.GIT_CALL_TIMEOUT_MS || '10000', 10);
 
 function isReadyForRotation(phase) {
   return CI_OR_LATER_PHASES.has(phase);
+}
+
+// Uncommitted changes in the ticket worktree mean the agent still has work in
+// flight (review fixes, cleanup). Rotating now orphans it — observed
+// 2026-07-12: the reaper killed a session twice with the review-fix commits
+// still unstaged, stranding PR #723 mid-round. Fail-open: an unreadable git
+// state must not disable rotation (same posture as progress.js).
+function worktreeDirty(worktree) {
+  if (!worktree) return false;
+  try {
+    const res = spawnSync('git', ['-C', worktree, 'status', '--porcelain'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: GIT_CALL_TIMEOUT_MS,
+    });
+    if (res.status !== 0 || typeof res.stdout !== 'string') return false;
+    return res.stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// An independent-review verdict of CHANGES_REQUESTED means the dev session is
+// the only actor that can address the findings — parking the ticket with no
+// session wedges the review loop until an operator resurrects it by hand.
+function pendingReviewVerdict(ticket) {
+  try {
+    const f = path.join(workstate.TASKS_BASE, ticket, `${ticket}-pr-review.md`);
+    if (!fs.existsSync(f)) return false;
+    return /^\s*VERDICT:\s*CHANGES_REQUESTED/im.test(fs.readFileSync(f, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+/** Reason the rotation must hold this tick, or null when free to rotate. */
+function rotationHold({ ticket, worktree }) {
+  if (worktreeDirty(worktree)) return 'dirty-worktree';
+  if (pendingReviewVerdict(ticket)) return 'changes-requested-verdict';
+  return null;
+}
+
+function logHold(ctx, hold) {
+  const marker = stateStore.read(ctx.ticket, 'ci-rotation-hold') || {};
+  if (marker.lastLogAt && stateStore.minutesSince(marker.lastLogAt) < ROTATION_HOLD_RELOG_MIN)
+    return;
+  stateStore.write(ctx.ticket, 'ci-rotation-hold', { lastLogAt: stateStore.now(), hold });
+  alerts.log(
+    `${ctx.session} CI-PHASE rotation HELD (${hold}) — phase=${ctx.phase}; ` +
+      (hold === 'dirty-worktree'
+        ? 'uncommitted changes in the worktree; rotating would orphan in-flight work'
+        : 'independent review verdict is CHANGES_REQUESTED; the dev session must stay to fix it')
+  );
 }
 
 function maybeFreeOnPrReady(_args) {
@@ -48,6 +112,12 @@ function maybeRotateOnPhase({ ctx, state: _state, actions, restartEligible }) {
   // Fail-closed on a missing skill: only an explicit 'work' rotates.
   if (ctx.skill !== 'work') return false;
   if (!CI_OR_LATER_PHASES.has(ctx.phase)) return false;
+  const hold = rotationHold(ctx);
+  if (hold) {
+    logHold(ctx, hold);
+    return false;
+  }
+  stateStore.clear(ctx.ticket, 'ci-rotation-hold');
   return actions.freeCiPhaseSlot({ session: ctx.session, ticket: ctx.ticket, phase: ctx.phase });
 }
 
@@ -56,4 +126,7 @@ module.exports = {
   isReadyForRotation,
   maybeRotateOnPhase,
   maybeFreeOnPrReady,
+  rotationHold,
+  worktreeDirty,
+  pendingReviewVerdict,
 };

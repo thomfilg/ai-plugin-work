@@ -57,6 +57,22 @@ function bootstrapArgsFor(taskId) {
   return args;
 }
 
+// Minutes after the last frozen-pane sighting during which bootstrapping is
+// held. Fresh agents launched into an active usage-limit freeze burn a pool
+// slot to freeze on their first turn (observed 2026-07-12: GH-339).
+const USAGE_FREEZE_HOLD_MIN = parseInt(process.env.USAGE_FREEZE_HOLD_MIN || '10', 10);
+
+function usageFreezeActive() {
+  const marker = state.read('_global', 'usage-limit-freeze');
+  if (!marker || !marker.lastSeenAt) return false;
+  return state.minutesSince(marker.lastSeenAt) < USAGE_FREEZE_HOLD_MIN;
+}
+
+/** Record a frozen-pane sighting (called by the conductor's tick). */
+function noteUsageFreeze() {
+  state.write('_global', 'usage-limit-freeze', { lastSeenAt: state.now() });
+}
+
 /**
  * Optionally bootstrap a fresh tmux + worktree for the next ticket. Returns
  * true on launch. Gated by AUTO_BOOTSTRAP_NEXT=1 (default off — explicit
@@ -66,6 +82,10 @@ function maybeAutoBootstrap(taskId) {
   if (process.env.AUTO_BOOTSTRAP_NEXT !== '1') return false;
   if (!taskId || !/^[A-Z]+-\d+$/.test(taskId)) return false;
   if (!fs.existsSync(BOOTSTRAP_SCRIPT)) return false;
+  if (usageFreezeActive()) {
+    alerts.log(`AUTO-BOOTSTRAP held for ${taskId}: usage-limit freeze active on the fleet`);
+    return false;
+  }
   // Respect manifest-declared pool size (global live -work count vs the
   // owning manifest's slots). Avoids over-bootstrapping when an operator
   // pre-launched sessions or a sibling manifest already fills the machine.
@@ -355,4 +375,6 @@ module.exports = {
   syncManifest: manifest.syncFromTmux,
   maybeFillPool,
   maybeAutoBootstrap,
+  noteUsageFreeze,
+  usageFreezeActive,
 };

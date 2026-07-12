@@ -45,4 +45,4 @@ function snapshot(ticket) {
   };
 }
 
-module.exports = { read, snapshot, WORKTREES_BASE };
+module.exports = { read, snapshot, WORKTREES_BASE, TASKS_BASE };
