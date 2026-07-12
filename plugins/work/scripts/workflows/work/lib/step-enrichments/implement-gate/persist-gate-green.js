@@ -25,17 +25,27 @@ const { writeGateGreen } = require(
 
 /**
  * GH-694: resolve the task's `### Files in scope` entries for the gate's
- * tests-only GREEN trap. Read/parse failures degrade to an empty scope
- * (= "any changed test file counts", the recorder's empty-scope semantics).
+ * tests-only GREEN trap.
+ *
+ * PR #717: read/parse failures must NOT degrade to an empty scope — the
+ * shared changed-test-files rule treats `[]` as "any changed test file
+ * counts", so an unreadable/unparseable tasks.md would WIDEN the gate for a
+ * tests-only task. Returns `{ scope }` only when tasks.md parsed AND the
+ * task block exists (a parsed task with no declared scope keeps the
+ * recorder's legacy empty-scope semantics); every failure shape returns
+ * `{ error }` so writeGateGreen rejects tests-only GREENs fail-closed.
  */
 function resolveTaskScope(gateTasksBase, safeName, taskNum) {
   try {
     const { parseTasks } = require(path.join(__dirname, '..', '..', 'task-parser'));
     const tasks = parseTasks(path.join(gateTasksBase, safeName));
     const task = Array.isArray(tasks) ? tasks.find((t) => t && t.num === Number(taskNum)) : null;
-    return task && Array.isArray(task.filesInScope) ? task.filesInScope : [];
-  } catch {
-    return [];
+    if (!task) {
+      return { error: `tasks.md is missing/unparseable or has no \`## Task ${taskNum}\` block` };
+    }
+    return { scope: Array.isArray(task.filesInScope) ? task.filesInScope : [] };
+  } catch (err) {
+    return { error: `tasks.md could not be read/parsed: ${(err && err.message) || err}` };
   }
 }
 
@@ -69,7 +79,10 @@ function persistGateGreen(p) {
   try {
     // W11 — atomic write via the shared gate writer (no raw writeFileSync).
     // GH-694: workingDir + scope feed the writer's tests-only changed-files
-    // trap (recorder-parity rule from lib/changed-test-files).
+    // trap (recorder-parity rule from lib/changed-test-files). PR #717: an
+    // unresolvable scope is passed as null (+ scopeError) so the writer
+    // rejects tests-only GREENs fail-closed instead of widening.
+    const resolvedScope = resolveTaskScope(gateTasksBase, safeName, taskNum);
     const wr = writeGateGreen({
       tasksBase: gateTasksBase,
       ticketId: safeName,
@@ -80,7 +93,8 @@ function persistGateGreen(p) {
       output,
       taskType,
       workingDir,
-      scope: resolveTaskScope(gateTasksBase, safeName, taskNum),
+      scope: resolvedScope.error ? null : resolvedScope.scope,
+      scopeError: resolvedScope.error || undefined,
     });
     if (wr.rejected) {
       return {

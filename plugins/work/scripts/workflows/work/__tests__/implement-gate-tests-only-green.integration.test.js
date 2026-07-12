@@ -256,6 +256,86 @@ describe('GH-694 — persistGateGreen threads workingDir + scope (via runTestAnd
   });
 });
 
+describe('GH-694 — tests-only scope resolution fails closed (PR #717)', () => {
+  // A changed test file that WOULD count under widened (empty) scope
+  // semantics — proves the gate is failing closed, not just "no changes".
+  function addUnrelatedChangedTestFile() {
+    fs.writeFileSync(path.join(worktreeDir, 'tests', 'rogue.test.js'), 'unrelated new suite\n');
+  }
+
+  it('writeGateGreen rejects a tests-only GREEN with unresolved (null) scope', () => {
+    addUnrelatedChangedTestFile();
+    const r = gateWriter.writeGateGreen(
+      greenParams({ scope: null, scopeError: 'tasks.md unreadable (fixture)' })
+    );
+    assert.equal(r.rejected, true, 'unresolved scope must not record GREEN');
+    assert.equal(r.kind, 'tests-only-scope-unresolved');
+    assert.match(r.reason, /failing closed/i);
+    assert.match(r.reason, /tasks\.md unreadable \(fixture\)/);
+    assert.equal(fs.existsSync(evidencePath(1)), false, 'no GREEN evidence written');
+    const rows = auditRowsFor('tdd-green-tests-only-scope-unresolved-rejected');
+    assert.equal(rows.length, 1, 'rejection is audit-logged');
+    assert.equal(rows[0].allow, false);
+  });
+
+  it('missing tasks.md + unrelated changed test file → passed:false (no widening)', () => {
+    // No writeTasksMd(): parseTasks returns null. Today the scope degrades
+    // to [] and rogue.test.js counts — the exact widening in the finding.
+    writeRedEvidence(1, 'tests-only');
+    addUnrelatedChangedTestFile();
+    const res = runTestAndRecord(
+      'echo tests-pass',
+      'GH-TEST',
+      1,
+      worktreeDir,
+      process.env,
+      tasksBase,
+      'tests-only'
+    );
+    assert.equal(res.passed, false, 'unresolvable scope must fail closed, not widen');
+    assert.match(String(res.reason || ''), /Files in scope.*could not be resolved/i);
+    const ev = JSON.parse(fs.readFileSync(evidencePath(1), 'utf8'));
+    assert.ok(!ev.cycles[0].green, 'GREEN must not be persisted');
+    assert.equal(auditRowsFor('tdd-green-tests-only-scope-unresolved-rejected').length, 1);
+  });
+
+  it('tasks.md without the gated task number → passed:false for tests-only', () => {
+    fs.writeFileSync(
+      path.join(tasksDir, 'tasks.md'),
+      ['## Task 2 — Some other task', '', '### Type', 'tests-only', ''].join('\n')
+    );
+    writeRedEvidence(1, 'tests-only');
+    addUnrelatedChangedTestFile();
+    const res = runTestAndRecord(
+      'echo tests-pass',
+      'GH-TEST',
+      1,
+      worktreeDir,
+      process.env,
+      tasksBase,
+      'tests-only'
+    );
+    assert.equal(res.passed, false, 'task missing from the plan must fail closed');
+    assert.match(String(res.reason || ''), /Files in scope.*could not be resolved/i);
+  });
+
+  it('tdd-code task with missing tasks.md still records GREEN (regression)', () => {
+    // Scope only feeds the tests-only trap — other types must not start
+    // failing on an unreadable plan (they never consumed scope).
+    writeRedEvidence(1, 'tdd-code');
+    const res = runTestAndRecord(
+      'echo tests-pass',
+      'GH-TEST',
+      1,
+      worktreeDir,
+      process.env,
+      tasksBase,
+      'tdd-code'
+    );
+    assert.equal(res.passed, true, `expected pass, got ${JSON.stringify(res)}`);
+  });
+});
+
 describe('GH-694 — validator unchanged (unification-invariant pin)', () => {
   it('validateTddEvidenceForType still accepts pre-change tests-only gate evidence', () => {
     // Evidence recorded by the gate BEFORE this change: capturedByGate, no

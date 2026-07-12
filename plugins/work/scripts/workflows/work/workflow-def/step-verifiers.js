@@ -120,18 +120,28 @@ function checkTddException(state, workRoot) {
  * GH-689 task_4 dangle). Statuses only, no per-task evidence re-walk:
  * evidence was already validated at advance time by the ONE shared validator
  * (re-validating here risks the echo-4552 infinite-retry class). Malformed or
- * missing-status entries count as pending (fail closed); a missing/unreadable
- * .work-state.json or absent tasksMeta is single-task mode — unchanged.
+ * missing-status entries count as pending (fail closed); a MISSING
+ * .work-state.json (ENOENT) or absent tasksMeta is single-task mode —
+ * unchanged. PR #717: a read/parse failure on an EXISTING state file is NOT
+ * single-task mode — a corrupt state file on a multi-task ticket must not
+ * verify on TDD evidence alone (refusal-to-vouch, the checkpoints.js
+ * precedent). Repair route: restore .work-state.json (git checkout / re-run
+ * `node work-next.js <ticket>` to rebuild it), then re-verify.
  */
 function tasksMetaAllCompleted(deps, ticketId) {
+  const statePath = path.join(ticketDir(deps, ticketId), '.work-state.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(statePath, 'utf-8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return true; // single-task mode / no state file
+    return false; // EXISTING but unreadable state file — refuse to vouch
+  }
   let tasks;
   try {
-    const ws = JSON.parse(
-      fs.readFileSync(path.join(ticketDir(deps, ticketId), '.work-state.json'), 'utf-8')
-    );
-    tasks = ws?.tasksMeta?.tasks;
+    tasks = JSON.parse(raw)?.tasksMeta?.tasks;
   } catch {
-    return true; // single-task mode / no state file — today's behavior
+    return false; // EXISTING but corrupt state file — refuse to vouch
   }
   if (!Array.isArray(tasks)) return true;
   return tasks.every((t) => t && t.status === 'completed');
