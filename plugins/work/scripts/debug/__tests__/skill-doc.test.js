@@ -160,6 +160,46 @@ test('SKILL.md continue verifies an active session then dispatches Task(debugger
   );
 });
 
+test('SKILL.md continue-guard parses the status VALUE and only dispatches when exactly active', () => {
+  const content = readSkillMd();
+  // Isolate the `/debug continue` section (up to the next `## ` heading) so the
+  // assertions pin the guard prose itself, not incidental matches elsewhere.
+  const section = content.slice(content.indexOf('### `/debug continue`'));
+  const continueSection = section.slice(0, section.indexOf('\n## '));
+  assert.ok(continueSection.length > 0, 'expected a /debug continue section');
+
+  // The guard must capture the status VALUE, not rely on the exit code alone.
+  assert.match(
+    continueSection,
+    /status:/,
+    'expected the guard to parse the `status:` value from the helper output'
+  );
+  assert.match(
+    continueSection,
+    /exit code|exit `?0`?/i,
+    'expected the guard to call out that a success exit is not proof of resumability'
+  );
+  assert.match(
+    continueSection,
+    /only when[\s\S]*active|exactly[\s\S]*active/i,
+    'expected the guard to dispatch ONLY when the status value is exactly active'
+  );
+
+  // The guard must stop (not dispatch) on every terminal status.
+  for (const terminal of ['resolved', 'diagnosed', 'abandoned']) {
+    assert.match(
+      continueSection,
+      new RegExp(terminal),
+      `expected the guard to name the terminal status "${terminal}"`
+    );
+  }
+  assert.match(
+    continueSection,
+    /stop[\s\S]*without[\s\S]*dispatch|without dispatching|report[\s\S]*stop/i,
+    'expected the guard to report and STOP (no dispatch) on a terminal status'
+  );
+});
+
 test('SKILL.md has a Task(debugger) dispatch block for investigate/diagnose/continue', () => {
   const content = readSkillMd();
   assert.match(content, /Task\(debugger\)/, 'expected a Task(debugger) dispatch block');
