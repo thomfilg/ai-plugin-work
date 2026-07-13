@@ -9,12 +9,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { CLEANUP_PHASES } = require('../../cleanup-phase-registry');
+const { completionGateBlock } = require('../completion-evidence');
 
 const SUMMARY_FILE = 'cleanup-summary.md';
 const REQUIRED_SECTIONS = [/^##\s+Branch\b/im, /^##\s+Tmux sessions\b/im, /^##\s+Worktree\b/im];
 const STATUS_RE = /^Status:\s*(DONE|PARTIAL)\b/im;
 
 function validate(ctx) {
+  // GH-283: fail closed if persisted cleanup state resumed past completion_check
+  // without completion evidence — archiving/teardown must not finalize on an
+  // unproven-complete ticket.
+  const gate = completionGateBlock(ctx.tasksDir, 'state_archive');
+  if (gate) return gate;
+
   const p = path.join(ctx.tasksDir, SUMMARY_FILE);
   if (!fs.existsSync(p)) {
     return {
@@ -52,7 +59,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# cleanup-next — Phase 5 of 7: STATE ARCHIVE',
+    '# cleanup-next — Phase 6 of 8: STATE ARCHIVE',
     `Ticket: ${ctx.ticket}`,
     '',
     'Write `cleanup-summary.md` with:',

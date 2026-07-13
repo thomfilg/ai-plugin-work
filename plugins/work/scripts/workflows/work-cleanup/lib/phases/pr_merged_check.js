@@ -4,6 +4,9 @@
  * Hard-blocks (NOT WAITs) if PR is OPEN or CLOSED. The workflow shouldn't
  * reach cleanup at all in those states — if it did, something bypassed the
  * ci gate and we refuse to proceed with destructive cleanup actions.
+ *
+ * On success this phase advances to the `completion_check` gate (see the
+ * `next` edge in register()).
  */
 
 'use strict';
@@ -69,7 +72,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# cleanup-next — Phase 2 of 7: PR MERGED CHECK',
+    '# cleanup-next — Phase 2 of 8: PR MERGED CHECK',
     `Ticket: ${ctx.ticket}`,
     '',
     'Defensive double-check: cleanup must only run on MERGED PRs. If this blocks, your ci step exited prematurely (likely missing wait_merge).',
@@ -79,7 +82,7 @@ function instructions(ctx) {
 
 module.exports = function register(r) {
   r(CLEANUP_PHASES.pr_merged_check, {
-    next: CLEANUP_PHASES.branch_cleanup,
+    next: CLEANUP_PHASES.completion_check,
     validate,
     instructions,
   });

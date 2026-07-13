@@ -184,18 +184,13 @@ function requireVerifiedToken(name, allowedAgents) {
     process.exit(2);
   }
 
-  // Check token freshness — prevents replay with pre-placed token files
-  // Reject expired AND future timestamps (clock skew / tampered tokens)
-  const age = Date.now() - token.timestamp;
-  if (age < 0 || age > TOKEN_MAX_AGE_MS) {
-    process.stderr.write(
-      `[${name}] BLOCKED: Write token expired (${age}ms old, max ${TOKEN_MAX_AGE_MS}ms).\n` +
-        `  Token was issued at ${new Date(token.timestamp).toISOString()}\n`
-    );
-    process.exit(2);
-  }
-
-  // Check agent in token matches allowedAgents
+  // Check agent in token matches allowedAgents FIRST. Authorization is an
+  // identity property of the token, independent of its age, so an unauthorized
+  // agent must be rejected as "not authorized" regardless of how old the token
+  // is. Checking agent before freshness also makes the outcome deterministic
+  // (a wrong-agent token can never be misreported as merely "expired" when
+  // spawn latency pushes it past the TTL). Both branches exit 2, so this does
+  // not weaken any gate.
   const agentMatch = allowedAgents.some(
     (a) => normalizeAgentName(a) === normalizeAgentName(token.agent)
   );
@@ -204,6 +199,17 @@ function requireVerifiedToken(name, allowedAgents) {
       `[${name}] BLOCKED: Token agent "${token.agent}" is not authorized.\n` +
         `  Allowed agents: ${allowedAgents.join(', ')}\n` +
         `  Only these agents can use this writer.\n`
+    );
+    process.exit(2);
+  }
+
+  // Check token freshness — prevents replay with pre-placed token files
+  // Reject expired AND future timestamps (clock skew / tampered tokens)
+  const age = Date.now() - token.timestamp;
+  if (age < 0 || age > TOKEN_MAX_AGE_MS) {
+    process.stderr.write(
+      `[${name}] BLOCKED: Write token expired (${age}ms old, max ${TOKEN_MAX_AGE_MS}ms).\n` +
+        `  Token was issued at ${new Date(token.timestamp).toISOString()}\n`
     );
     process.exit(2);
   }

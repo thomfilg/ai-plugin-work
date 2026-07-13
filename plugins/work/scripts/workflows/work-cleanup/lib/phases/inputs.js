@@ -32,6 +32,23 @@ function detectPrNumber(cwd, branch) {
   }
 }
 
+// Build the blocking-error list for missing branch / PR context. Extracted
+// from validate() to keep that function under the cyclomatic-complexity gate.
+function resolveContextErrors(branch, prNumber) {
+  const errors = [];
+  if (!branch) {
+    errors.push(
+      'Could not resolve current git branch. Ensure you are inside a git worktree (`git rev-parse --abbrev-ref HEAD` must succeed).'
+    );
+  }
+  if (!prNumber) {
+    errors.push(
+      `Could not resolve PR number for branch \`${branch || '(unknown)'}\`. Either (a) create the PR first (\`gh pr create\`), (b) verify \`gh pr view ${branch || '<branch>'} --json number\` succeeds, or (c) abort cleanup — there's nothing to clean up for a branch with no PR.`
+    );
+  }
+  return errors;
+}
+
 function validate(ctx) {
   const root = ctx.worktreeRoot || process.cwd();
   const branch = currentBranch(root);
@@ -54,17 +71,7 @@ function validate(ctx) {
   // BLOCK (don't advance) when branch/prNumber are missing — downstream phases
   // can't recover, and the agent would hit a dead-end "re-run inputs" loop if
   // we advanced past this point with incomplete context.
-  const errors = [];
-  if (!branch) {
-    errors.push(
-      'Could not resolve current git branch. Ensure you are inside a git worktree (`git rev-parse --abbrev-ref HEAD` must succeed).'
-    );
-  }
-  if (!prNumber) {
-    errors.push(
-      `Could not resolve PR number for branch \`${branch || '(unknown)'}\`. Either (a) create the PR first (\`gh pr create\`), (b) verify \`gh pr view ${branch || '<branch>'} --json number\` succeeds, or (c) abort cleanup — there's nothing to clean up for a branch with no PR.`
-    );
-  }
+  const errors = resolveContextErrors(branch, prNumber);
   if (errors.length) {
     return {
       ok: false,
@@ -80,7 +87,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# cleanup-next — Phase 1 of 7: INPUTS',
+    '# cleanup-next — Phase 1 of 8: INPUTS',
     `Ticket: ${ctx.ticket}`,
     '',
     'I record the current branch + PR number into `cleanup-context.json` for downstream phases.',
