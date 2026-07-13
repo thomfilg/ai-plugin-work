@@ -1643,6 +1643,9 @@ module.exports = {
   scopeEntryAdmitsOnlyTestFiles,
   filterChangedTestFilesByScope,
   detectChangedTestFilesInScope,
+  // GH-690: exported so the git-probe-failure catch site in
+  // evaluateGreenTestsOnly (throw → honest fail-closed block) is unit-testable.
+  evaluateGreenTestsOnly,
   findTestFilesInScope,
   countTestBlocksInFiles,
   wrapStrictMode,
