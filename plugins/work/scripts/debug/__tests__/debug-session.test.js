@@ -205,6 +205,98 @@ describe('debug-session.js CLI', () => {
     );
   });
 
+  it('init refuses to overwrite an ACTIVE session', () => {
+    // A live investigation must not be silently clobbered by a fresh `init`.
+    const filePath = path.join(tmpDir, SESSION_FILE);
+    fs.writeFileSync(
+      filePath,
+      [
+        '---',
+        'status: active',
+        'trigger: "TypeError in useCollectionDetail hook"',
+        'created: "2026-07-12"',
+        'updated: "2026-07-12"',
+        '---',
+        '',
+        '## Hypotheses',
+        '',
+        '1. [TESTING] The hook derefs an undefined response',
+        '',
+        '## Evidence',
+        '',
+        '- Stack trace points at useCollectionDetail.ts:42',
+        '',
+        '## Current Focus',
+        '',
+        '- Active hypothesis: The hook derefs an undefined response',
+        '',
+      ].join('\n')
+    );
+
+    const before = fs.readFileSync(filePath);
+    const res = runCli(['init', 'a brand new unrelated issue'], tmpDir);
+    const after = fs.readFileSync(filePath);
+
+    assert.notEqual(res.status, 0, 'init over an active session should exit non-zero');
+    const combined = `${res.stdout}${res.stderr}`;
+    assert.match(
+      combined,
+      /active.*session|already exists|\/debug continue|resolve.*abandon/i,
+      'init should print a clear "active session already exists" message'
+    );
+
+    // The original investigation must be byte-for-byte intact — no data loss.
+    assert.ok(before.equals(after), 'the active session file must be left unchanged');
+  });
+
+  it('init starts fresh when the existing session is terminal (resolved)', () => {
+    // A closed investigation may be overwritten by a new `init`.
+    const filePath = path.join(tmpDir, SESSION_FILE);
+    fs.writeFileSync(
+      filePath,
+      [
+        '---',
+        'status: resolved',
+        'trigger: "old already-fixed bug"',
+        'created: "2026-07-01"',
+        'updated: "2026-07-02"',
+        '---',
+        '',
+        '## Hypotheses',
+        '',
+        '## Evidence',
+        '',
+        '## Current Focus',
+        '',
+      ].join('\n')
+    );
+
+    const res = runCli(['init', 'a brand new unrelated issue'], tmpDir);
+    assert.equal(
+      res.status,
+      0,
+      `init over a resolved session should exit 0, got ${res.status}: ${res.stderr}`
+    );
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    assert.ok(fmMatch, 'frontmatter block should be present after fresh init');
+    const frontmatter = fmMatch[1];
+
+    // The new session replaced the terminal one: active status + new trigger.
+    assert.match(frontmatter, /status:\s*active/, 'a fresh init resets status to active');
+    assert.match(
+      frontmatter,
+      /a brand new unrelated issue/,
+      'a fresh init records the new trigger text'
+    );
+    assert.doesNotMatch(
+      frontmatter,
+      /old already-fixed bug/,
+      'the terminal session trigger should be overwritten'
+    );
+  });
+
   it('init rejects a path-traversal argument', () => {
     // A path-traversal / absolute path passed where a safe cwd-relative
     // target is expected must be refused, writing nothing outside cwd.
