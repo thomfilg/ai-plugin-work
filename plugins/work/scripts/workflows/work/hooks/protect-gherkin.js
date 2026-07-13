@@ -26,7 +26,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', '..', 'lib', 'hookEntrypoint'));
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 
 /** Tag line: zero or more whitespace, then one or more `@token` tokens. */
@@ -162,13 +162,7 @@ const protector = createArtifactProtector({
 const BYPASS_LINE =
   'BYPASS: edit gherkin.feature via /work spec_gate — re-enter spec_gate to recover and fix structural Gherkin changes.';
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-
-  const hookData = JSON.parse(input);
+function main(hookData) {
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
 
@@ -206,9 +200,9 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  process.exit(0); // fail-open
-});
+// runHook reads + parses stdin (malformed JSON → {}), runs the handler, and on
+// an uncaught throw logs the error and exits 0 (fail-open). Intentional blocks
+// exit 2 from inside main().
+runHook(main, { file: __filename });
 
 module.exports = { isTagOnlyGherkinEdit };

@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', '..', 'lib', 'hookEntrypoint'));
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 const { consumeTasksMdWriteToken } = require('../../lib/tasks-md-write-token');
 // Vendored dual-runtime adapter: codex apply_patch payloads carry a raw patch
@@ -165,14 +165,6 @@ const protector = createArtifactProtector({
 });
 
 /** Read and parse the hook payload from stdin. */
-async function readHookData() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-  return JSON.parse(input);
-}
-
 /**
  * Scan ALL whitespace-separated tokens of a Bash command for tasks.md
  * references and classify each as root-level or subfolder. A command may
@@ -347,8 +339,7 @@ function referencesTasksMd(toolName, toolInput, cmd, hookData) {
   );
 }
 
-async function main() {
-  const hookData = await readHookData();
+function main(hookData) {
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
   const cmd = toolInput.command || '';
@@ -369,7 +360,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  process.exit(0); // fail-open
-});
+// runHook reads + parses stdin (malformed JSON → {}), runs the handler, and on
+// an uncaught throw logs the error and exits 0 (fail-open). Intentional blocks
+// exit 2 from inside main().
+runHook(main, { file: __filename });

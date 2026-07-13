@@ -56,7 +56,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', '..', 'lib', 'hookEntrypoint'));
 const { decideEdit, relativizePath } = require(
   path.join(__dirname, '..', '..', 'lib', 'hooks', 'policies', 'scope-protection')
 );
@@ -137,17 +137,6 @@ function evaluateTool(toolName, toolInput, active, workDir) {
 
 // ─── Main hook ──────────────────────────────────────────────────────────────
 
-/** Read + parse the hook payload; fail-open (exit 0) on malformed JSON. */
-async function readHookPayload() {
-  let raw = '';
-  for await (const chunk of process.stdin) raw += chunk;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    process.exit(0); // fail-open
-  }
-}
-
 /** Resolve ticket + active task, exiting 0 (fail-open) when Gate D is idle. */
 function resolveActiveScope(cwd) {
   const ticketId = getTicketId(cwd);
@@ -226,9 +215,7 @@ function checkPerTypeAllowlist(active, toolName, toolInput, cwd, ticketId) {
   return typeAllowlistDecision(active.type, relTarget);
 }
 
-async function main() {
-  const hookData = await readHookPayload();
-
+function main(hookData) {
   const cwd = process.cwd();
   const { ticketId, tasksDir, active } = resolveActiveScope(cwd);
 
@@ -246,15 +233,11 @@ async function main() {
   process.exit(0);
 }
 
+// runHook reads + parses stdin (malformed JSON → {}), runs the handler, and on
+// an uncaught throw logs the error and exits 0 (fail-open). Intentional blocks
+// exit 2 from inside main(). Only run when spawned directly; stay importable.
 if (require.main === module) {
-  main().catch((err) => {
-    try {
-      logHookError(__filename, err);
-    } catch {
-      /* swallow */
-    }
-    process.exit(0);
-  });
+  runHook(main, { file: __filename });
 }
 
 module.exports = {
