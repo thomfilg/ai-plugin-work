@@ -54,6 +54,122 @@ function warn(log, file, message) {
   }
 }
 
+function logNoExtDir(log, extDir) {
+  try {
+    log.error('no extensions directory; skipping', { dir: extDir });
+  } catch {
+    /* fail-open */
+  }
+  // Also emit informationally to stderr so callers without a debug log see it.
+  try {
+    process.stderr.write(`[work-extensions] no extensions directory; skipping (${extDir})\n`);
+  } catch {
+    /* fail-open */
+  }
+}
+
+/**
+ * Classify a directory entry by extension.
+ * @returns {{skip: true}|{entry: object}|{ok: true}}
+ *   `skip` → ignore silently; `entry` → a terminal status row; `ok` → a .js
+ *   candidate to load.
+ */
+function classifyEntry(name, full, log) {
+  const ext = path.extname(name).toLowerCase();
+  if (ext === '.ts') {
+    const msg = `Phase 1 supports .js only — skipping ${name}`;
+    warn(log, full, msg);
+    return { entry: { file: full, events: [], loaded: false, error: msg } };
+  }
+  if (ext !== '.js') return { skip: true };
+  return { ok: true };
+}
+
+/**
+ * Path-traversal hardening: resolve realpath and confirm it stays under the
+ * extensions directory.
+ * @returns {{realFile: string}|{entry: object}}
+ */
+function guardRealpath(full, realExtDir, log) {
+  let realFile;
+  try {
+    realFile = fs.realpathSync(full);
+  } catch (err) {
+    warn(log, full, `failed to resolve realpath: ${err.message}`);
+    return { entry: { file: full, events: [], loaded: false, error: err.message } };
+  }
+  const rel = path.relative(realExtDir, realFile);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    const msg = `path traversal rejected — realpath outside extensions dir: ${realFile}`;
+    warn(log, full, msg);
+    return { entry: { file: full, events: [], loaded: false, error: msg } };
+  }
+  return { realFile };
+}
+
+/**
+ * Require an extension module fresh (bypassing the module cache).
+ * @returns {{mod: unknown}|{entry: object}}
+ */
+function requireExtension(realFile, full, log) {
+  try {
+    // Always re-require to avoid stale module cache across tests / reloads.
+    delete require.cache[realFile];
+    return { mod: require(realFile) };
+  } catch (err) {
+    warn(log, full, `failed to require extension: ${err.message}`);
+    return { entry: { file: full, events: [], loaded: false, error: err.message } };
+  }
+}
+
+/**
+ * Register a validated extension's handler against the bus for each of its
+ * events.
+ * @returns {object} a terminal status row (success or error)
+ */
+function registerExtension(bus, mod, full, log) {
+  try {
+    for (const eventName of mod.events) {
+      bus.register({
+        eventName,
+        handler: mod.handler,
+        priority: mod.priority,
+        sourceFile: full,
+        match: mod.match,
+      });
+    }
+  } catch (err) {
+    warn(log, full, `failed to register extension: ${err.message}`);
+    return { file: full, events: mod.events || [], loaded: false, error: err.message };
+  }
+  return { file: full, events: mod.events.slice(), loaded: true };
+}
+
+/**
+ * Load a single directory entry into a status row.
+ * @returns {object|null} a status row, or null when the entry is ignored.
+ */
+function loadEntry(name, extDir, realExtDir, bus, log) {
+  const full = path.join(extDir, name);
+  const cls = classifyEntry(name, full, log);
+  if (cls.skip) return null;
+  if (cls.entry) return cls.entry;
+
+  const guarded = guardRealpath(full, realExtDir, log);
+  if (guarded.entry) return guarded.entry;
+
+  const required = requireExtension(guarded.realFile, full, log);
+  if (required.entry) return required.entry;
+
+  const validationError = validateExport(required.mod);
+  if (validationError) {
+    warn(log, full, validationError);
+    return { file: full, events: [], loaded: false, error: validationError };
+  }
+
+  return registerExtension(bus, required.mod, full, log);
+}
+
 /**
  * Discover and load extensions from `<repoRoot>/.claude/work-extensions/`.
  *
@@ -68,17 +184,7 @@ function loadExtensions(opts) {
   const extDir = path.join(repoRoot, EXTENSIONS_REL);
 
   if (!fs.existsSync(extDir)) {
-    try {
-      log.error('no extensions directory; skipping', { dir: extDir });
-    } catch {
-      /* fail-open */
-    }
-    // Also emit informationally to stderr so callers without a debug log see it.
-    try {
-      process.stderr.write(`[work-extensions] no extensions directory; skipping (${extDir})\n`);
-    } catch {
-      /* fail-open */
-    }
+    logNoExtDir(log, extDir);
     return status;
   }
 
@@ -99,75 +205,8 @@ function loadExtensions(opts) {
   }
 
   for (const name of entries) {
-    const full = path.join(extDir, name);
-    const ext = path.extname(name).toLowerCase();
-
-    if (ext === '.ts') {
-      const msg = `Phase 1 supports .js only — skipping ${name}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: [], loaded: false, error: msg });
-      continue;
-    }
-
-    if (ext !== '.js') {
-      continue;
-    }
-
-    // Path-traversal hardening: ensure realpath sits under realExtDir.
-    let realFile;
-    try {
-      realFile = fs.realpathSync(full);
-    } catch (err) {
-      warn(log, full, `failed to resolve realpath: ${err.message}`);
-      status.push({ file: full, events: [], loaded: false, error: err.message });
-      continue;
-    }
-
-    const rel = path.relative(realExtDir, realFile);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) {
-      const msg = `path traversal rejected — realpath outside extensions dir: ${realFile}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: [], loaded: false, error: msg });
-      continue;
-    }
-
-    let mod;
-    try {
-      // Always re-require to avoid stale module cache across tests / reloads.
-      delete require.cache[realFile];
-      mod = require(realFile);
-    } catch (err) {
-      const msg = `failed to require extension: ${err.message}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: [], loaded: false, error: err.message });
-      continue;
-    }
-
-    const validationError = validateExport(mod);
-    if (validationError) {
-      warn(log, full, validationError);
-      status.push({ file: full, events: [], loaded: false, error: validationError });
-      continue;
-    }
-
-    try {
-      for (const eventName of mod.events) {
-        bus.register({
-          eventName,
-          handler: mod.handler,
-          priority: mod.priority,
-          sourceFile: full,
-          match: mod.match,
-        });
-      }
-    } catch (err) {
-      const msg = `failed to register extension: ${err.message}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: mod.events || [], loaded: false, error: err.message });
-      continue;
-    }
-
-    status.push({ file: full, events: mod.events.slice(), loaded: true });
+    const entry = loadEntry(name, extDir, realExtDir, bus, log);
+    if (entry) status.push(entry);
   }
 
   return status;
