@@ -428,6 +428,7 @@ function mintCompanionToken() {
 const {
   filterChangedTestFilesByScope,
   detectChangedTestFilesInScope,
+  GitProbeFailedError,
 } = require('./lib/changed-test-files');
 
 /** Spawn a tdd-phase-state.js subcommand with a freshly minted companion token. */
@@ -1408,7 +1409,27 @@ function evaluateGreenTestsOnly(ctx) {
         `Move source edits to a tdd-code task, or change Type.`
     );
   }
-  const changedTestFiles = detectChangedTestFilesInScope(repoRoot, scope);
+  let changedTestFiles;
+  try {
+    changedTestFiles = detectChangedTestFilesInScope(repoRoot, scope);
+  } catch (err) {
+    // GH-690: a git probe failure (nonzero/null exit, missing binary, or the
+    // 15000ms safeSpawnSync timeout on a large/slow worktree) must NOT be
+    // reported as the misleading "no test file changed" block. Surface the
+    // honest cause so the developer knows the probe failed, not that they
+    // wrote no test. Still fail closed (a GREEN gate must never record GREEN
+    // when it cannot verify a test changed).
+    if (err instanceof GitProbeFailedError) {
+      return _blocked(
+        TDD_PHASES.green,
+        'Type=tests-only GREEN: could not verify an in-scope test file changed — ' +
+          `git change detection failed. ${err.message} ` +
+          'Re-run once the worktree is responsive; if it persists this is an ' +
+          'environment fault (not a TDD violation) — STOP and report to the orchestrator.'
+      );
+    }
+    throw err;
+  }
   if (changedTestFiles.length === 0) {
     return _blocked(
       TDD_PHASES.green,

@@ -201,6 +201,47 @@ function gateTestsOnlyScopeUnresolvedRejection(p) {
   };
 }
 
+/**
+ * GH-690 rejection: a Type=tests-only GREEN whose git change-detection probes
+ * FAILED (nonzero/null exit, missing git binary, or the safeSpawnSync 15000ms
+ * timeout on a large/slow worktree) must fail CLOSED with an HONEST cause —
+ * not the misleading `gateTestsOnlyUnchangedRejection` "you wrote no test"
+ * message. Before the safeSpawnSync migration the git probes were unbounded;
+ * the enforced 15s timeout added a new way for the changed-set to come back
+ * empty, and `detectChangedTestFilesInScope` now throws `GitProbeFailedError`
+ * instead of degrading to `[]`. Audited as
+ * `tdd-green-tests-only-git-probe-failed-rejected`.
+ */
+function gateTestsOnlyGitProbeFailedRejection(p) {
+  appendGateAudit(p.tasksBase, p.ticketId, {
+    origin: 'workflow',
+    task: p.taskNum || null,
+    phase: 'green',
+    action: 'tdd-green-tests-only-git-probe-failed-rejected',
+    allow: false,
+    reason: 'tests-only-git-probe-failed',
+    outputPath: null,
+    meta: {
+      testCommand: p.cmd,
+      taskType: p.taskType || null,
+      capturedByGate: true,
+      gitProbeError: p.gitProbeError || null,
+    },
+  });
+  return {
+    rejected: true,
+    kind: 'tests-only-git-probe-failed',
+    reason:
+      `Type=tests-only GREEN for task ${p.taskNum}: git change detection failed` +
+      (p.gitProbeError ? ` (${p.gitProbeError})` : '') +
+      ' — could not verify an in-scope test file changed, so the GREEN cannot ' +
+      'be recorded (failing closed, not degrading to "no test changed"). This ' +
+      'is usually an environment fault (slow/large worktree hitting the 15s ' +
+      'probe timeout, or a corrupt/detached repo), not a TDD violation: re-run ' +
+      'once the worktree is responsive, or STOP and report to the orchestrator.',
+  };
+}
+
 module.exports = {
   appendGateAudit,
   gateHangRejection,
@@ -208,4 +249,5 @@ module.exports = {
   gateEmptyOutputRejection,
   gateTestsOnlyUnchangedRejection,
   gateTestsOnlyScopeUnresolvedRejection,
+  gateTestsOnlyGitProbeFailedRejection,
 };
