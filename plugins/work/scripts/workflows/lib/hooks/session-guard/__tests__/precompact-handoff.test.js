@@ -35,15 +35,6 @@ const { REQUIRED_HANDOFF_SECTIONS, validateHandoffSections } = require(
 const TICKET = 'AAA-1';
 const HANDOFF_FILE = '.continue-here.md';
 
-/** A fully-populated handoff body carrying all three required headings. */
-function validHandoffBody() {
-  return (
-    `## ${REQUIRED_HANDOFF_SECTIONS[0]}\n\nChose approach X over Y.\n\n` +
-    `## ${REQUIRED_HANDOFF_SECTIONS[1]}\n\nWatch out for the flaky test.\n\n` +
-    `## ${REQUIRED_HANDOFF_SECTIONS[2]}\n\nMid-refactor of the parser.\n`
-  );
-}
-
 /** A handoff body missing the third required heading ("What was in flight"). */
 function handoffMissingInFlight() {
   return (
