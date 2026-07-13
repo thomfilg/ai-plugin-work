@@ -293,23 +293,12 @@ function formatPlan(plan) {
  */
 function firePreToolCall(args, deps) {
   const { toolName, toolInput, tasksDir, repoRoot } = args || {};
-  let marker = null;
+  const { resolveHookExtensions } = require(
+    path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'extensions', 'hook-dispatch')
+  );
+  const api = resolveHookExtensions({ tasksDir, repoRoot }, deps);
+  if (!api) return;
   try {
-    const findMarker =
-      deps?.findActiveMarker ||
-      require(path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'marker'))
-        .findActiveMarker;
-    marker = findMarker(tasksDir, '.work.pid');
-  } catch {
-    /* fail-open */
-  }
-  if (!marker) return;
-  try {
-    const init =
-      deps?.initExtensions ||
-      require(path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'extensions'))
-        .initExtensions;
-    const api = init({ repoRoot, tasksDir });
     api.dispatch('OnPreToolCall', { toolName, toolInput });
   } catch {
     /* fail-open — extension dispatch errors must never crash the hook */

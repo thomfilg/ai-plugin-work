@@ -57,25 +57,34 @@ function parseArgs(argv) {
  * @param {{repoRoot?: string, tasksDir?: string}} flags
  * @returns {{repoRoot: string, tasksDir: string} | null}
  */
+/**
+ * Resolve {repoRoot, tasksDir} from the active /work marker (config-driven).
+ * @param {{repoRoot?: string}} flags
+ * @returns {{repoRoot: string, tasksDir: string} | null}
+ */
+function resolveFromMarker(flags) {
+  const libDir = path.join(__dirname, '..', '..', 'lib');
+  const getConfig = require(path.join(libDir, 'get-config'));
+  const { findActiveMarker } = require(path.join(__dirname, '..', 'lib', 'marker'));
+  const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
+  const TASKS_BASE =
+    getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
+  if (!TASKS_BASE) return null;
+  const marker = findActiveMarker(TASKS_BASE, '.work.pid');
+  if (!marker) return null;
+  // Derive tasksDir by locating which subdir of TASKS_BASE owns the marker.
+  const tasksDir = locateTasksDir(TASKS_BASE, marker);
+  if (!tasksDir) return null;
+  const repoRoot = marker.worktreeRoot || flags.repoRoot || process.cwd();
+  return { repoRoot, tasksDir };
+}
+
 function resolveContext(flags) {
   if (flags.repoRoot && flags.tasksDir) {
     return { repoRoot: flags.repoRoot, tasksDir: flags.tasksDir };
   }
   try {
-    const libDir = path.join(__dirname, '..', '..', 'lib');
-    const getConfig = require(path.join(libDir, 'get-config'));
-    const { findActiveMarker } = require(path.join(__dirname, '..', 'lib', 'marker'));
-    const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
-    const TASKS_BASE =
-      getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
-    if (!TASKS_BASE) return null;
-    const marker = findActiveMarker(TASKS_BASE, '.work.pid');
-    if (!marker) return null;
-    const repoRoot = marker.worktreeRoot || flags.repoRoot || process.cwd();
-    // Derive tasksDir by locating which subdir of TASKS_BASE owns the marker.
-    const tasksDir = locateTasksDir(TASKS_BASE, marker);
-    if (!tasksDir) return null;
-    return { repoRoot, tasksDir };
+    return resolveFromMarker(flags);
   } catch {
     return null;
   }
