@@ -85,7 +85,8 @@ const { detectSessionConflict } = require(path.join(workDir, 'lib', 'session-con
 // ─── Local modules ──────────────────────────────────────────────────────────
 const { buildInstruction } = require(path.join(__dirname, 'lib', 'instruction-builder'));
 const { buildStateContext } = require(path.join(__dirname, 'lib', 'state-context'));
-const { writeMarkerFile } = require(path.join(__dirname, 'lib', 'marker'));
+const { writeMarkerFile, findActiveMarker } = require(path.join(__dirname, 'lib', 'marker'));
+const { initExtensions } = require(path.join(__dirname, 'lib', 'extensions'));
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const { buildVerdictRegex } = require(path.join(__dirname, '..', 'lib', 'parse-completion-status'));
@@ -177,6 +178,49 @@ function validateCliTicket(ticketRaw) {
   }
 }
 
+// ─── OnSessionStart wiring (Task 5) ─────────────────────────────────────────
+
+/**
+ * Process-scoped idempotence flag. The OnSessionStart event MUST fire exactly
+ * once per Node process invocation — repeated calls from within the same
+ * orchestration loop are silently ignored.
+ */
+let _sessionStartFired = false;
+
+/**
+ * Dispatch the `OnSessionStart` event after confirming that an active /work
+ * marker exists for this terminal. Idempotent within a single process.
+ *
+ * @param {{ticketId: string, tasksDir: string, repoRoot: string}} args
+ * @param {{ findActiveMarker?: Function, initExtensions?: Function }} [deps]
+ *   optional dependency injection for testing
+ * @returns {void}
+ */
+function fireSessionStart(args, deps) {
+  if (_sessionStartFired) return;
+  const findMarker = deps?.findActiveMarker || findActiveMarker;
+  const init = deps?.initExtensions || initExtensions;
+  const { ticketId, tasksDir, repoRoot } = args || {};
+  let marker = null;
+  try {
+    marker = findMarker(TASKS_BASE, '.work.pid');
+  } catch {
+    /* fail-open — never crash /work on marker probe failure */
+  }
+  if (!marker) return;
+  _sessionStartFired = true;
+  try {
+    const api = init({ repoRoot, tasksDir });
+    // Fire-and-forget. Extension dispatch errors are caught inside
+    // initExtensions and never propagate.
+    Promise.resolve(api.dispatch('OnSessionStart', { ticketId, tasksDir, repoRoot })).catch(
+      () => {}
+    );
+  } catch {
+    /* fail-open — extension wiring must never crash /work */
+  }
+}
+
 function main() {
   const args = process.argv.slice(2);
 
@@ -202,6 +246,15 @@ function main() {
   const { ticketRaw, rework, init } = parseCliTicket(args);
   validateCliTicket(ticketRaw);
 
+  // Fire OnSessionStart once per process invocation — gated on an active /work
+  // marker so non-session callers (e.g. inspection-only) don't trigger
+  // extension dispatch. Safe no-op when the extension dir does not exist (R8).
+  fireSessionStart({
+    ticketId: ticketRaw,
+    tasksDir: path.join(TASKS_BASE, ticketRaw),
+    repoRoot: path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketRaw}`),
+  });
+
   // On --init, write marker file for auto-advance hook detection (stamped with
   // the owning session id + worktree root so hooks scope to this terminal).
   if (init) {
@@ -218,4 +271,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { getNextInstruction, buildStateContext, buildInstruction };
+module.exports = { getNextInstruction, buildStateContext, buildInstruction, fireSessionStart };
