@@ -85,6 +85,23 @@ function serializeSession(trigger, status, created, updated) {
 }
 
 /**
+ * Parse a single frontmatter line into a `[key, value]` pair, or `null` when
+ * the line is not a `key: value` field. Surrounding double quotes are stripped.
+ */
+function parseFrontmatterLine(line) {
+  const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+  if (!kv) {
+    return null;
+  }
+  let value = kv[2].trim();
+  const quoted = value.length >= 2 && value.startsWith('"') && value.endsWith('"');
+  if (quoted) {
+    value = value.slice(1, -1);
+  }
+  return [kv[1], value];
+}
+
+/**
  * Parse the leading YAML frontmatter block of a session file. Throws a plain
  * Error (caught by the command wrapper) when the block is malformed — e.g. no
  * closing fence — so the CLI can fail safe instead of throwing unhandled.
@@ -100,15 +117,10 @@ function parseFrontmatter(content) {
 
   const fields = Object.create(null);
   for (const line of match[1].split('\n')) {
-    const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (!kv) {
-      continue;
+    const field = parseFrontmatterLine(line);
+    if (field) {
+      fields[field[0]] = field[1];
     }
-    let value = kv[2].trim();
-    if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
-      value = value.slice(1, -1);
-    }
-    fields[kv[1]] = value;
   }
 
   if (!fields.status || !STATUSES.includes(fields.status)) {
