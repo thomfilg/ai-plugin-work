@@ -246,20 +246,22 @@ function main() {
   const { ticketRaw, rework, init } = parseCliTicket(args);
   validateCliTicket(ticketRaw);
 
-  // Fire OnSessionStart once per process invocation — gated on an active /work
-  // marker so non-session callers (e.g. inspection-only) don't trigger
-  // extension dispatch. Safe no-op when the extension dir does not exist (R8).
-  fireSessionStart({
-    ticketId: ticketRaw,
-    tasksDir: path.join(TASKS_BASE, ticketRaw),
-    repoRoot: path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketRaw}`),
-  });
-
   // On --init, write marker file for auto-advance hook detection (stamped with
   // the owning session id + worktree root so hooks scope to this terminal).
   if (init) {
     writeMarkerFile(ticketRaw, { TASKS_BASE, tp });
   }
+
+  // Fire OnSessionStart once per process invocation — AFTER the marker write so
+  // the very first `--init` invocation (which creates the session) still sees
+  // an active marker. Gated on that marker so non-session callers (e.g.
+  // inspection-only) don't trigger dispatch; safe no-op when the extension dir
+  // does not exist (R8).
+  fireSessionStart({
+    ticketId: ticketRaw,
+    tasksDir: path.join(TASKS_BASE, ticketRaw),
+    repoRoot: path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketRaw}`),
+  });
 
   const instruction = getNextInstruction(ticketRaw, rework);
   // Single-line JSON keeps stdout parseable by `JSON.parse(stdout.trim())`

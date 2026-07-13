@@ -97,7 +97,12 @@ function initExtensions(opts) {
   async function dispatch(eventName, payload) {
     const ctx = createCtx({ event: eventName, payload });
     try {
-      await eventBus.dispatch(eventName, payload, ctx);
+      // Per-handler errors are isolated inside eventBus.dispatch and reported
+      // via onError so one broken extension can't suppress the rest (R6). The
+      // outer catch remains a safety net for non-handler dispatch failures.
+      await eventBus.dispatch(eventName, payload, ctx, (err) =>
+        logHandlerError(log, eventName, err)
+      );
     } catch (err) {
       logHandlerError(log, eventName, err);
     }
@@ -111,7 +116,11 @@ function initExtensions(opts) {
     return statusEntries.slice();
   }
 
-  const api = { dispatch, status };
+  // Expose listHandlers so response-matched dispatch (fireAgentResponseMatched)
+  // can iterate the registered OnAgentResponseMatched handlers in production —
+  // without it the hook's `typeof api.listHandlers === 'function'` guard falls
+  // through to an empty list and the event never fires.
+  const api = { dispatch, status, listHandlers: eventBus.listHandlers };
   cache.set(key, api);
   return api;
 }

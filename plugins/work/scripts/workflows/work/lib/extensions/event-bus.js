@@ -138,18 +138,31 @@ function listHandlers(eventName) {
 
 /**
  * Dispatch an event: await each handler in priority order; passthrough returns continue the chain.
+ *
+ * Failures are isolated PER HANDLER (R6): a throwing/rejecting handler does not
+ * abort the chain, so a broken high-priority extension can never suppress
+ * lower-priority ones. The optional `onError(err, record)` callback is invoked
+ * for each failure (used by the public entry point to log); when omitted, the
+ * error is swallowed (fail-open).
+ *
  * @param {string} eventName
  * @param {object} payload
  * @param {object} ctx
+ * @param {(err: Error, record: object) => void} [onError]
  * @returns {Promise<void>}
  */
-async function dispatch(eventName, payload, ctx) {
+async function dispatch(eventName, payload, ctx, onError) {
   const handlers = registry[eventName];
   if (!handlers || handlers.length === 0) {
     return;
   }
   for (const record of handlers) {
-    await record.handler(payload, ctx);
+    try {
+      await record.handler(payload, ctx);
+    } catch (err) {
+      if (typeof onError === 'function') onError(err, record);
+      /* else fail-open — one broken handler must not suppress the rest */
+    }
   }
 }
 
