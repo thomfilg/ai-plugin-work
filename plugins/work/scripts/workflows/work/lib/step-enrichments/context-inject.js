@@ -118,6 +118,41 @@ function clearResumeHandoff(ctx) {
   }
 }
 
+/**
+ * Collect the brief/spec/tasks artifacts that exist on disk for a ticket, in
+ * required-reading order. Returns `{ name, path }` entries; empty when none
+ * exist.
+ *
+ * @param {string} tasksDir resolved ticket task directory
+ * @param {object} p path module (from ctx, falls back to node `path`)
+ * @param {object} fs fs module (from ctx)
+ * @returns {Array<{ name: string, path: string }>}
+ */
+function collectArtifacts(tasksDir, p, fs) {
+  const candidates = [
+    { name: 'Brief', file: 'brief.md' },
+    { name: 'Spec', file: 'spec.md' },
+    { name: 'Tasks', file: 'tasks.md' },
+  ];
+  const artifacts = [];
+  for (const { name, file } of candidates) {
+    const full = p.join(tasksDir, file);
+    if (fs.existsSync(full)) artifacts.push({ name, path: full });
+  }
+  return artifacts;
+}
+
+/** Build the "Required Reading" block text for the given artifacts. */
+function buildRequiredReadingBlock(artifacts) {
+  const lines = ['\n\n## Required Reading (MUST read before starting)'];
+  for (const a of artifacts) {
+    lines.push(`- **${a.name}:** ${a.path}`);
+  }
+  lines.push('');
+  lines.push('Read these files IN FULL before implementing. Do NOT skip or skim.');
+  return lines.join('\n');
+}
+
 module.exports = function registerContextInject(register) {
   // Inject ticket context (small — always inline)
   for (const stepName of TICKET_CONTEXT_STEPS) {
@@ -139,30 +174,15 @@ module.exports = function registerContextInject(register) {
   // by the resume handoff block when a `.continue-here.md` exists.
   for (const stepName of ARTIFACT_STEPS) {
     register(stepName, (entry, ctx) => {
-      const { tasksDir, path: p, fs } = ctx;
-
-      const artifacts = [];
-      const briefFile = p.join(tasksDir, 'brief.md');
-      const specFile = p.join(tasksDir, 'spec.md');
-      const tasksFile = p.join(tasksDir, 'tasks.md');
-
-      if (fs.existsSync(briefFile)) artifacts.push({ name: 'Brief', path: briefFile });
-      if (fs.existsSync(specFile)) artifacts.push({ name: 'Spec', path: specFile });
-      if (fs.existsSync(tasksFile)) artifacts.push({ name: 'Tasks', path: tasksFile });
-
+      const artifacts = collectArtifacts(ctx.tasksDir, ctx.path, ctx.fs);
       if (artifacts.length === 0) return;
 
-      const lines = ['\n\n## Required Reading (MUST read before starting)'];
-      artifacts.forEach((a) => {
-        lines.push(`- **${a.name}:** ${a.path}`);
-      });
-      lines.push('');
-      lines.push('Read these files IN FULL before implementing. Do NOT skip or skim.');
+      const requiredReading = buildRequiredReadingBlock(artifacts);
 
       // Prepend the resume handoff AHEAD of Required Reading when one exists.
       const continueHere = buildContinueHereBlock(ctx);
-      const block = continueHere ? continueHere + lines.join('\n') : lines.join('\n');
       if (continueHere) setResumeHandoffPending(ctx, true);
+      const block = continueHere ? continueHere + requiredReading : requiredReading;
 
       entry.agentPrompt = (entry.agentPrompt || '') + block;
     });
