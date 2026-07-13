@@ -1,0 +1,368 @@
+#!/usr/bin/env node
+
+/**
+ * config.js
+ *
+ * Centralized configuration loader for the work-workflow plugin.
+ * Resolution order: .env file → environment variables → defaults
+ *
+ * Usage:
+ *   const config = require('./config');
+ *   console.log(config.JIRA_PROJECT_KEY); // e.g., 'MYPROJ'
+ *   console.log(config.REPO_NAME);        // e.g., 'my-project'
+ */
+
+const { execSync, execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// ─── .env Loader ────────────────────────────────────────────────────────────
+
+const QUOTE_RE = /^(['"])(.*)\1$/;
+
+function _parseEnvLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed[0] === '#') return null;
+  const eqIdx = trimmed.indexOf('=');
+  if (eqIdx === -1) return null;
+  const key = trimmed.slice(0, eqIdx).trim();
+  const rawValue = trimmed.slice(eqIdx + 1).trim();
+  const quoteMatch = rawValue.match(QUOTE_RE);
+  return { key, value: quoteMatch ? quoteMatch[2] : rawValue };
+}
+
+function _applyEnvFile(envPath) {
+  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+    const parsed = _parseEnvLine(line);
+    if (parsed && !process.env[parsed.key]) {
+      process.env[parsed.key] = parsed.value;
+    }
+  }
+}
+
+function loadEnvFile() {
+  const locations = [
+    // __dirname = plugins/work/scripts/workflows/lib → repo root is 5 levels up
+    path.join(__dirname, '..', '..', '..', '..', '..', '.env'),
+    path.join(process.cwd(), '.env'),
+  ];
+  for (const envPath of locations) {
+    if (fs.existsSync(envPath)) {
+      _applyEnvFile(envPath);
+      break;
+    }
+  }
+}
+
+loadEnvFile();
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+// Default model-keyed pricing table (USD per 1,000,000 tokens). Shipped so cost
+// reports produce a non-zero "estimated" figure out of the box (GH-311 R11).
+const DEFAULT_PRICING = {
+  'claude-opus-4': { usdPer1MTokens: 15 },
+};
+
+const config = {
+  // Legacy Jira vars (backward compatible)
+  JIRA_PROJECT_KEY: process.env.JIRA_PROJECT_KEY || 'PROJ',
+  JIRA_BASE_URL: process.env.JIRA_BASE_URL || 'your-org.atlassian.net',
+  JIRA_ASSIGNEE_EMAIL: process.env.JIRA_ASSIGNEE_EMAIL || '',
+
+  // Provider-agnostic aliases (fall back to Jira vars for backward compat)
+  TICKET_PROVIDER: process.env.TICKET_PROVIDER || (process.env.JIRA_PROJECT_KEY ? 'jira' : ''),
+  TICKET_PROJECT_KEY: process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ',
+
+  REPO_NAME: process.env.REPO_NAME || 'my-project',
+  GITHUB_ORG: process.env.GITHUB_ORG || '',
+  WORKTREES_BASE:
+    process.env.WORKTREES_BASE ||
+    (() => {
+      try {
+        const repoRoot = execSync('git rev-parse --show-toplevel', {
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        return path.dirname(repoRoot);
+      } catch {
+        return null; // Fail open — downstream helpers are null-safe, hooks use getConfig.orExit()
+      }
+    })(),
+  TASKS_BASE: null, // set below after WORKTREES_BASE is resolved
+  ENABLE_SYMLINK: process.env.ENABLE_SYMLINK ?? '0',
+  FOLLOW_UP_PR_POLL_REVIEWS:
+    (process.env.FOLLOW_UP_PR_POLL_REVIEWS || 'true').toLowerCase() === 'true',
+
+  // Comma-separated relative paths to docs agents should read during their workflows
+  // Example: .rulesync/rules/code-quality.md,.rulesync/rules/types.md
+  READ_DOCS_ON_REVIEW: process.env.READ_DOCS_ON_REVIEW || '',
+  READ_DOCS_ON_QA: process.env.READ_DOCS_ON_QA || '',
+  READ_DOCS_ON_DEV: process.env.READ_DOCS_ON_DEV || '',
+  READ_DOCS_ON_E2E: process.env.READ_DOCS_ON_E2E || '',
+  READ_DOCS_ON_TEST: process.env.READ_DOCS_ON_TEST || '',
+  READ_DOCS_ON_STORYBOOK: process.env.READ_DOCS_ON_STORYBOOK || '',
+  READ_DOCS_ON_PR: process.env.READ_DOCS_ON_PR || '',
+  READ_DOCS_ON_BRIEF: process.env.READ_DOCS_ON_BRIEF || '',
+  READ_DOCS_ON_SPEC: process.env.READ_DOCS_ON_SPEC || '',
+
+  // Base branch — each repo can set this (e.g., 'dev', 'main', 'master')
+  // Used as last-resort fallback when git symbolic-ref detection fails
+  // Example .env: BASE_BRANCH=dev
+  BASE_BRANCH: process.env.BASE_BRANCH || '',
+
+  // Custom commands per repo — override defaults for non-standard project setups
+  // Example .env:
+  //   DEV_COMMAND=~/g2i/scripts/dev-squire.sh    (start dev environment)
+  //   TEST_COMMAND=pnpm vitest run                (run tests — legacy, prefer TEST_*_COMMAND below)
+  //   LINT_COMMAND=pnpm biome check               (run linter)
+  //   TYPECHECK_COMMAND=pnpm tsc --noEmit         (run type checker)
+  DEV_COMMAND: process.env.DEV_COMMAND || '',
+  TEST_COMMAND: process.env.TEST_COMMAND || '',
+  LINT_COMMAND: process.env.LINT_COMMAND || '',
+  TYPECHECK_COMMAND: process.env.TYPECHECK_COMMAND || '',
+
+  // Per-suite test commands used by developer agents during implementation.
+  // The literal "$CHANGED_FILES" placeholder is substituted by the agent at run
+  // time with the list of files it has changed (space-separated paths). Use
+  // these for fast, scoped iteration on the agent's own diff.
+  // Example .env:
+  //   TEST_UNIT_COMMAND="pnpm test $CHANGED_FILES"
+  //   TEST_INTEGRATION_COMMAND="pnpm test:integration $CHANGED_FILES"
+  //   TEST_E2E_COMMAND="pnpm test:e2e $CHANGED_FILES"
+  TEST_UNIT_COMMAND: process.env.TEST_UNIT_COMMAND || '',
+  TEST_INTEGRATION_COMMAND: process.env.TEST_INTEGRATION_COMMAND || '',
+  TEST_E2E_COMMAND: process.env.TEST_E2E_COMMAND || '',
+
+  // Per-suite "run affected" scripts used by /check during quality verification.
+  // These run the project's own affected-detection logic (typically scanning
+  // the full diff vs base branch) and are NOT scoped to a single agent's
+  // changes. Set them to a script that knows how to compute affected internally.
+  // Example .env:
+  //   SCRIPT_RUN_AFFECTED_UNIT="pnpm exec tsx ./scripts/run-affected-tests.ts --unit"
+  //   SCRIPT_RUN_AFFECTED_INTEGRATION="pnpm exec tsx ./scripts/run-affected-tests.ts --integration"
+  //   SCRIPT_RUN_AFFECTED_E2E="pnpm exec tsx ./scripts/run-affected-e2e.ts"
+  SCRIPT_RUN_AFFECTED_UNIT: process.env.SCRIPT_RUN_AFFECTED_UNIT || '',
+  SCRIPT_RUN_AFFECTED_INTEGRATION: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION || '',
+  SCRIPT_RUN_AFFECTED_E2E: process.env.SCRIPT_RUN_AFFECTED_E2E || '',
+
+  // Model-keyed pricing table for cost estimation (GH-311).
+  // Shape: { <model>: { usdPer1MTokens: <number> } } — rate is USD per 1,000,000 tokens.
+  // Ships a non-zero default so cost reports show an estimate without operator config.
+  // Override via WORK_PRICING env var (JSON); invalid JSON falls back to the default table.
+  // Example .env: WORK_PRICING='{"opus":{"usdPer1MTokens":15}}'
+  WORK_PRICING: (() => {
+    const raw = process.env.WORK_PRICING;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch {
+        // fall through to default table
+      }
+    }
+    return DEFAULT_PRICING;
+  })(),
+
+  // Web apps list — each repo defines its own via WEB_APPS env var (JSON)
+  // Example .env: WEB_APPS='[{"name":"my-app","defaultPort":3000,"type":"vite"}]'
+  // Fields per app: name (string), defaultPort (number), type (string: "vite"|"remix")
+  WEB_APPS: (() => {
+    try {
+      const parsed = JSON.parse(process.env.WEB_APPS || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })(),
+};
+
+// Derive TASKS_BASE from resolved WORKTREES_BASE — null-safe (hooks use getConfig.orExit)
+config.TASKS_BASE =
+  process.env.TASKS_BASE ||
+  (config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, 'tasks') : null);
+
+config.jiraBrowseUrl = (ticketId) => `https://${config.JIRA_BASE_URL}/browse/${ticketId}`;
+
+config.ticketBrowseUrl = (ticketId) => {
+  const tp = require('./ticket-provider');
+  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+  if (providerConfig) return tp.ticketUrl(ticketId, providerConfig);
+  return config.jiraBrowseUrl(ticketId);
+};
+
+config.worktreeDir = (ticketId) =>
+  config.WORKTREES_BASE
+    ? path.join(config.WORKTREES_BASE, `${config.REPO_NAME}-${ticketId}`)
+    : null;
+
+config.repoDir = () =>
+  config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, config.REPO_NAME) : null;
+
+/**
+ * Sanitize ticket ID for file-system paths (#N → GH-N for GitHub Issues).
+ * Cached: provider config is resolved once per process.
+ */
+let _cachedProviderConfig;
+let _providerConfigLoaded = false;
+config.safeTicketId = (ticketId) => {
+  try {
+    if (!_providerConfigLoaded) {
+      const tp = require('./ticket-provider');
+      _cachedProviderConfig = tp.getProviderConfig({ skipPrompt: true });
+      _providerConfigLoaded = true;
+    }
+    const tp = require('./ticket-provider');
+    return tp.sanitizeTicketIdForPath(ticketId, _cachedProviderConfig);
+  } catch {
+    return ticketId;
+  }
+};
+
+config.tasksDir = (ticketId) => {
+  if (!config.TASKS_BASE) return null;
+  return path.join(config.TASKS_BASE, config.safeTicketId(ticketId));
+};
+
+config.webAppNames = () => config.WEB_APPS.filter((app) => app && app.name).map((app) => app.name);
+
+config.webAppsMap = () => {
+  const map = Object.create(null);
+  for (const app of config.WEB_APPS) {
+    if (!app || !app.name) continue;
+    const appType = app.appType || 'web';
+    map[app.name] = {
+      defaultPort: app.defaultPort,
+      type: app.type,
+      appType,
+      healthEndpoint: app.healthEndpoint || (appType === 'api' ? '/health' : '/'),
+      startCommand: app.startCommand || `pnpm dev --filter=${app.name}`,
+    };
+  }
+  return map;
+};
+
+/**
+ * GH-693 (PR #716): resolve the EXPLICITLY configured base branch, reporting
+ * whether one is configured and whether `origin/<name>` actually resolves.
+ * Strict consumers (the commit-evidence gate) must fail closed on a
+ * configured-but-unresolvable base instead of silently counting commits
+ * against an auto-detected fallback (origin/main), which can fabricate
+ * commit evidence for a branch with zero commits ahead of its real base.
+ *
+ * Reads env dynamically, not via the cached config.BASE_BRANCH snapshot:
+ * a parent process may export BASE_BRANCH after this module is first
+ * loaded, and ECHO-4450 hit that case (BASE_BRANCH=dev was set but ignored).
+ *
+ * @param {object} [options] - Optional settings
+ * @param {string} [options.cwd] - Working directory for git commands
+ * @returns {{configured: false} | {configured: true, raw: string, sanitized: string, ref: string|null}}
+ */
+config.getExplicitBase = (options = {}) => {
+  const explicitBase = process.env.BASE_BRANCH || config.BASE_BRANCH;
+  if (!explicitBase) return { configured: false };
+  // Sanitize to prevent shell injection; strip ".."/"..." revspec operators.
+  const sanitized = explicitBase
+    .replace(/^refs\/remotes\//, '')
+    .replace(/^origin\//, '')
+    .replace(/[^a-zA-Z0-9._\-/]/g, '')
+    .replace(/\.{2,}/g, '');
+  let ref = null;
+  if (sanitized) {
+    const candidate = `origin/${sanitized}`;
+    try {
+      // execFileSync array args (no shell) + --end-of-options: an
+      // env-derived ref can never be parsed as a git option.
+      const out = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', candidate], {
+        encoding: 'utf8',
+        cwd: options.cwd || undefined,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      if (out) ref = candidate;
+    } catch {
+      /* unresolvable — caller decides whether to fall back or fail closed */
+    }
+  }
+  return { configured: true, raw: explicitBase, sanitized, ref };
+};
+
+/**
+ * Detect the correct base branch for the repository.
+ * Priority: repo config (BASE_BRANCH) → git symbolic-ref → probe common names → fallback
+ * @param {object} [options] - Optional settings
+ * @param {string} [options.cwd] - Working directory for git commands
+ */
+config.getBaseBranch = (options = {}) => {
+  const cwd = options.cwd || undefined;
+  const safeExec = (cmd) => {
+    try {
+      return execSync(cmd, { encoding: 'utf8', cwd }).trim();
+    } catch {
+      return '';
+    }
+  };
+
+  // 1. Explicit repo config (highest priority). Invalid or non-existent
+  // BASE_BRANCH falls through to auto-detection here (lenient, historical
+  // behavior for scope-diff callers); strict consumers use getExplicitBase
+  // directly and fail closed instead (PR #716).
+  const explicit = config.getExplicitBase({ cwd });
+  if (explicit.configured && explicit.ref) return explicit.ref;
+
+  // 2. Git symbolic ref detection
+  const headRef = safeExec('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null');
+  if (headRef) return headRef.replace('refs/remotes/', '');
+
+  // 3. Probe common branch names
+  for (const branch of ['origin/main', 'origin/dev', 'origin/master']) {
+    if (safeExec(`git rev-parse --verify ${branch} 2>/dev/null`)) return branch;
+  }
+
+  return 'origin/main';
+};
+
+/**
+ * Resolve the ordered list of git refs to try when diffing a branch against
+ * its base — `[origin/<base>, <base>]`. Honors BASE_BRANCH env / repo
+ * symbolic-ref via getBaseBranch(). Used by scope-diff callers (check,
+ * code-checker, completion-checker) so all three pick the same base and
+ * one is not behind merges of the others. Replaces the hardcoded
+ * ['origin/main','main','origin/dev','dev'] list that picked origin/main
+ * even on dev-based repos and surfaced phantom files (ECHO-4451/ECHO-4578).
+ *
+ * @param {{cwd?: string}} [options]
+ * @returns {string[]}
+ */
+config.getDiffBaseCandidates = (options = {}) => {
+  let base = 'main';
+  try {
+    base = config.getBaseBranch({ cwd: options.cwd }) || 'main';
+  } catch {
+    /* fall through with default */
+  }
+  const bare = String(base).replace(/^origin\//, '');
+  return [...new Set([`origin/${bare}`, bare])];
+};
+
+config.prefixTicketId = (input) => {
+  if (/^\d+$/.test(input)) {
+    return `${config.TICKET_PROJECT_KEY}-${input}`;
+  }
+  return input.toUpperCase();
+};
+
+/**
+ * Safe config getter — env var takes priority over config value.
+ * Use from files that may fail to load config.js (hooks, agents).
+ *
+ * @param {string} key - Config key (e.g., 'TASKS_BASE', 'WORKTREES_BASE')
+ * @param {object} [_cfg] - Optional pre-loaded config object (for files that already loaded config with try/catch)
+ * @returns {string|undefined}
+ */
+config.get = function get(key, _cfg) {
+  return process.env[key] || _cfg?.[key] || config[key];
+};
+
+module.exports = config;

@@ -1,0 +1,13 @@
+{
+  "session_id": "c0ffee00-1111-4222-8333-444455556666",
+  "transcript_path": "/home/user/.claude/projects/-tmp-claude-fixture-repo/c0ffee00-1111-4222-8333-444455556666.jsonl",
+  "cwd": "/tmp/claude-fixture-repo",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/tmp/claude-fixture-repo/.claude/settings.json",
+    "old_string": "\"old\": true",
+    "new_string": "\"new\": true"
+  }
+}

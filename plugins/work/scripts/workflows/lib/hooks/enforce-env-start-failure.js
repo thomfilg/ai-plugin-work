@@ -1,0 +1,297 @@
+#!/usr/bin/env node
+
+/**
+ * Enforce dev environment failure handling via hard blocks.
+ *
+ * PHASE 1 (PostToolUse on Bash):
+ *   When check-start-env.js output has "started": false,
+ *   writes marker to /tmp/check-env-failed-<ticket>.
+ *
+ * PHASE 2 (PreToolUse on Task/Skill):
+ *   BLOCKS ALL Task/Skill launches while marker exists.
+ *   Only AskUserQuestion is allowed (to force user choice).
+ *   stderr tells AI exactly what to do.
+ *
+ * PHASE 3 (PostToolUse on AskUserQuestion):
+ *   When AskUserQuestion is called and marker exists,
+ *   deletes the marker (unblocks everything).
+ *   If user chose "Skip QA", writes skip-qa marker instead.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { ACCESS_FAILED } = require(
+  path.join(__dirname, '..', '..', 'check', 'lib', 'app-access-status')
+);
+// Vendored dual-runtime adapter: runtime detection (codex reads tool output
+// from the payload, not the claude transcript) + instruction vocabulary
+// (AskUserQuestion → plain-chat numbered options in emitted guidance).
+const { getRuntime } = require(path.join(__dirname, '..', 'runtime'));
+const { renderInstruction } = require(path.join(__dirname, '..', 'runtime', 'vocab'));
+
+// Both runtimes' question tools — the hooks.json matcher already carries
+// `AskUserQuestion|request_user_input`; these are the in-code equivalents.
+const QUESTION_TOOLS = new Set(['AskUserQuestion', 'request_user_input']);
+// Agent-dispatch tools gated by phase 2: claude Task/Skill plus the codex
+// spawn_agent (the `Agent` matcher alias selects it — ground truth §2.4.2).
+const GATED_DISPATCH_TOOLS = new Set(['Task', 'Skill', 'spawn_agent']);
+
+let didBlock = false;
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+
+let config;
+try {
+  config = require('../config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/config['"]/.test(err.message)) {
+    config = null;
+  } else {
+    throw err;
+  }
+}
+if (!config) process.exit(0);
+
+const MARKER_DIR = '/tmp';
+
+function getTicketId() {
+  try {
+    const { execSync } = require('child_process');
+    const branch = execSync('git branch --show-current 2>/dev/null', { encoding: 'utf8' }).trim();
+    const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+', 'i'));
+    return match ? match[0].toUpperCase() : 'UNKNOWN';
+  } catch {
+    return 'UNKNOWN';
+  }
+}
+
+function markerPath(ticketId) {
+  return path.join(MARKER_DIR, `check-env-failed-${ticketId}`);
+}
+
+function skipQaMarkerPath(ticketId) {
+  return path.join(MARKER_DIR, `check-skip-qa-${ticketId}`);
+}
+
+// ─── PHASE 1: PostToolUse/Bash — detect failure, write marker ───
+
+function readTranscriptOutput(transcriptPath) {
+  let output = '';
+  try {
+    const content = fs.readFileSync(transcriptPath, 'utf8');
+    const lines = content.split('\n').filter(Boolean);
+    for (const line of lines.slice(-30)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type === 'tool_result' || entry.content) {
+          const text =
+            typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content || '');
+          output += text + '\n';
+        }
+      } catch {
+        /* skip */
+      }
+    }
+  } catch {
+    return null;
+  }
+  return output;
+}
+
+function extractFailedApps(output) {
+  const failedMatches = output.match(/"name":\s*"([^"]+)"[^}]*"started":\s*false/g) || [];
+  return failedMatches.map((m) => {
+    const n = m.match(/"name":\s*"([^"]+)"/);
+    return n ? n[1] : 'unknown';
+  });
+}
+
+function extractPorts(output) {
+  const portMatches = output.match(/"port":\s*(\d+)/g) || [];
+  return portMatches
+    .map((m) => {
+      const p = m.match(/(\d+)/);
+      return p ? parseInt(p[1], 10) : null;
+    })
+    .filter(Boolean);
+}
+
+function extractUrls(output) {
+  const urlMatches = output.match(/"url":\s*"([^"]+)"/g) || [];
+  return urlMatches
+    .map((m) => {
+      const u = m.match(/"url":\s*"([^"]+)"/);
+      return u ? u[1] : null;
+    })
+    .filter(Boolean);
+}
+
+function writeFailureMarker(mp, ticketId, output, hasFail, hasEmptyApps) {
+  const failedApps = extractFailedApps(output);
+  const ports = extractPorts(output);
+  const urls = extractUrls(output);
+  fs.writeFileSync(
+    mp,
+    JSON.stringify({
+      failedApps,
+      status: ACCESS_FAILED,
+      timestamp: new Date().toISOString(),
+      ticketId,
+      diagnostic: { ports, urls, hasEmptyApps, hasFail },
+    })
+  );
+  process.stderr.write(
+    `ENV_FAILURE [${ACCESS_FAILED}]: marker written (${failedApps.join(', ')})\n`
+  );
+}
+
+function detectFailureSignals(output) {
+  const hasFail =
+    /"started":\s*false/.test(output) || /Timeout waiting for app to start/.test(output);
+  const hasEmptyApps = /"runningApps":\s*\{\s*\}/.test(output) && /"apps":\s*\{/.test(output);
+  return { hasFail, hasEmptyApps };
+}
+
+function unlinkMarkerQuiet(mp) {
+  try {
+    fs.unlinkSync(mp);
+  } catch {
+    /* */
+  }
+}
+
+function getCheckStartEnvOutput(hookData, runtime) {
+  const command = hookData.tool_input?.command || '';
+  if (!command.includes('check-start-env')) return null;
+  // Codex: the transcript is a session rollout the claude scan below cannot
+  // read, but PostToolUse payloads carry the Bash output directly as a plain
+  // string in tool_response (ground truth §2.5.4).
+  if (runtime === 'codex') {
+    return typeof hookData.tool_response === 'string' ? hookData.tool_response : null;
+  }
+  const transcriptPath = hookData.transcript_path;
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return null;
+  return readTranscriptOutput(transcriptPath);
+}
+
+function phase1_detectFailure(hookData, runtime) {
+  const output = getCheckStartEnvOutput(hookData, runtime);
+  if (output === null) return;
+
+  const { hasFail, hasEmptyApps } = detectFailureSignals(output);
+  const ticketId = getTicketId();
+  const mp = markerPath(ticketId);
+
+  if (hasFail || hasEmptyApps) {
+    writeFailureMarker(mp, ticketId, output, hasFail, hasEmptyApps);
+  } else {
+    unlinkMarkerQuiet(mp);
+  }
+}
+
+// ─── PHASE 2: PreToolUse/Task+Skill — block everything until user chooses ───
+
+function phase2_blockUntilUserChoice(hookData, runtime) {
+  const ticketId = getTicketId();
+  const mp = markerPath(ticketId);
+
+  if (!fs.existsSync(mp)) return; // No failure, allow
+
+  let failInfo = {};
+  try {
+    failInfo = JSON.parse(fs.readFileSync(mp, 'utf8'));
+  } catch {
+    /* */
+  }
+  const appList = (failInfo.failedApps || []).join(', ') || 'apps';
+
+  // renderInstruction is a no-op on claude (byte-identical guidance); on
+  // codex it swaps AskUserQuestion → plain-chat numbered options (vocab layer, C13).
+  process.stderr.write(
+    renderInstruction(
+      `BLOCKED: Dev apps failed to start (${appList}). ` +
+        'Call AskUserQuestion with options: "Retry" | "Start manually" | "Skip QA" | "Abort /check". ' +
+        `Marker: ${mp}\n`,
+      runtime
+    )
+  );
+  didBlock = true;
+  process.exit(2);
+}
+
+// ─── PHASE 3: PostToolUse/AskUserQuestion — user chose, unblock ───
+
+function phase3_unblockAfterChoice(hookData) {
+  const ticketId = getTicketId();
+  const mp = markerPath(ticketId);
+
+  if (!fs.existsSync(mp)) return; // No marker, nothing to do
+
+  // Delete the block marker — user has been consulted
+  try {
+    fs.unlinkSync(mp);
+  } catch {
+    /* */
+  }
+  process.stderr.write(`ENV_FAILURE: marker cleared after AskUserQuestion\n`);
+
+  // Check if user chose to skip QA (look at transcript for the answer)
+  const transcriptPath = hookData.transcript_path;
+  if (transcriptPath && fs.existsSync(transcriptPath)) {
+    try {
+      const content = fs.readFileSync(transcriptPath, 'utf8');
+      const lines = content.split('\n').filter(Boolean);
+      const recent = lines.slice(-10).join(' ');
+      if (/skip\s*qa/i.test(recent)) {
+        fs.writeFileSync(
+          skipQaMarkerPath(ticketId),
+          JSON.stringify({ ticketId, timestamp: new Date().toISOString() })
+        );
+        process.stderr.write('Skip-QA marker written. QA agents will be skipped.\n');
+      }
+    } catch {
+      /* */
+    }
+  }
+}
+
+// ─── Main ───
+
+async function main() {
+  let input = '';
+  for await (const chunk of process.stdin) {
+    input += chunk;
+  }
+
+  const hookData = JSON.parse(input);
+  const runtime = getRuntime(hookData).name;
+  const hookType = process.env.CLAUDE_HOOK_TYPE || hookData.hook_event_name || 'PostToolUse';
+  const toolName = hookData.tool_name;
+
+  if (hookType === 'PreToolUse') {
+    // Phase 2: Block agent dispatch (Task/Skill/spawn_agent) while marker exists
+    if (GATED_DISPATCH_TOOLS.has(toolName)) {
+      phase2_blockUntilUserChoice(hookData, runtime);
+    }
+  } else if (hookType === 'PostToolUse') {
+    if (toolName === 'Bash') {
+      // Phase 1: Detect check-start-env failure
+      phase1_detectFailure(hookData, runtime);
+    } else if (QUESTION_TOOLS.has(toolName)) {
+      // Phase 3: User made a choice, unblock
+      phase3_unblockAfterChoice(hookData);
+    }
+  }
+}
+
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});

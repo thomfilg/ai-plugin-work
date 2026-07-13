@@ -1,0 +1,4 @@
+{
+  "_description": "Initial working-tree snapshot for the ECHO-5361 chronological-collision fixture. Pass A simulates Task 1 GREEN deleting surfaces/foo.ts, then checks Task 2 RED against the projected tree.",
+  "files": ["surfaces/foo.ts", "surfaces/bar.ts", "package.json"]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "synapsys",
+  "version": "3.74.2",
+  "description": "Context-triggered memory injection. Memories declare trigger patterns + lifecycle events in frontmatter; matching memories are injected into Claude's context on the right hook.",
+  "author": {
+    "name": "Custom",
+    "email": "custom@local"
+  },
+  "keywords": ["memory", "hooks", "injection", "context", "recall"]
+}

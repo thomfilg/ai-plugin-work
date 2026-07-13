@@ -1,0 +1,20 @@
+{
+  "plugin": "heimdall",
+  "prefixes": ["HEIMDALL_"],
+  "internal": ["HEIMDALL_CALLER_UID", "HEIMDALL_TEST_SKIP_OWNER_CHECK"],
+  "vars": {
+    "HEIMDALL_COMMANDS_JSON": {
+      "type": "path",
+      "default": "",
+      "description": "Path to a JSON file defining custom lock/conceal command patterns",
+      "section": "Guards"
+    },
+    "HEIMDALL_DISABLE_SHIM": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Disable the LD_PRELOAD write-deny shim for this session",
+      "section": "Guards",
+      "advanced": true
+    }
+  }
+}

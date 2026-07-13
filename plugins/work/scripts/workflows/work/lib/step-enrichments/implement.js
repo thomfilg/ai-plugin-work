@@ -1,0 +1,222 @@
+/**
+ * Implement step enrichment.
+ *
+ * Self-paced TDD model: the developer agent receives a minimal prompt that
+ * tells it to invoke `task-next.js`, which then dictates RED → GREEN →
+ * REFACTOR instructions, runs tests, validates phase transitions, and
+ * records evidence via `tdd-phase-state.js`.
+ *
+ * This file selects the right developer agent type per task and builds the
+ * dispatch payload (single or parallel). It no longer embeds TDD rules,
+ * test commands, file-scope lists, or retry summaries into the prompt —
+ * task-next.js owns all of that.
+ */
+
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const { resolveTaskType } = require(path.join(__dirname, '..', 'resolve-task-type'));
+const { findReadyTasks } = require(path.join(__dirname, '..', 'task-graph'));
+const { T, renderDelegateForRuntime, getRuntime } = require(
+  path.join(__dirname, '..', '..', '..', 'lib', 'instruction-vocab')
+);
+
+const TASK_NEXT_SCRIPT = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'work-implement',
+  'task-next.js'
+);
+
+/**
+ * Resolve the developer agent type from task metadata. Same heuristics as
+ * the prior dispatcher — only the prompt body has been simplified.
+ */
+function resolveAgentType(tasksDir, taskNum) {
+  if (process.env.IMPLEMENT_AGENT) return process.env.IMPLEMENT_AGENT;
+
+  let taskType = null;
+  let scopeText = '';
+  try {
+    const content = fs.readFileSync(path.join(tasksDir, 'tasks.md'), 'utf8');
+    const pattern = new RegExp(
+      `## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n(\\w+)[\\s\\S]*?### Files in scope[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`,
+      'm'
+    );
+    const match = content.match(pattern);
+    if (match) {
+      taskType = match[1].trim().toLowerCase();
+      scopeText = match[2].trim().toLowerCase();
+    }
+  } catch {
+    /* no tasks.md */
+  }
+
+  const hasReactFiles = /\.(tsx|jsx)\b/.test(scopeText) || /react|component/i.test(scopeText);
+  const hasInfraFiles = /dockerfile|\.ya?ml|terraform|\.tf\b|ci\/cd|pipeline/i.test(scopeText);
+
+  if (hasReactFiles) return 'developer-react-senior';
+  if (hasInfraFiles) return 'developer-devops';
+  if (taskType === 'frontend') return 'developer-react-senior';
+  if (taskType === 'devops' || taskType === 'infra') return 'developer-devops';
+  return 'developer-nodejs-tdd';
+}
+
+/**
+ * Build the minimal agent prompt. The agent invokes task-next.js and follows
+ * the structured Markdown response it prints (current phase, what to touch,
+ * what to verify, how to advance). The script is the source of truth for
+ * everything else.
+ */
+function buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle) {
+  return [
+    `## Task ${taskNum}${totalTasks ? `/${totalTasks}` : ''} — ${taskTitle}`,
+    '',
+    'You are a self-paced TDD agent. Do NOT plan ahead, write tests, or change',
+    'source until you are told what phase you are in.',
+    '',
+    '### Single instruction',
+    '```bash',
+    `node ${TASK_NEXT_SCRIPT} ${ticket} task${taskNum}`,
+    '```',
+    '',
+    'Run that command. Follow the Markdown response verbatim:',
+    '- It will tell you the current phase (RED / GREEN / REFACTOR).',
+    '- It will tell you which files you may touch in this phase.',
+    '- It will tell you the test command it will run on your behalf.',
+    '- It will tell you what must be true to advance.',
+    '',
+    'When you finish a phase, re-invoke the same command. The script will run',
+    'the test, validate, record evidence, and either advance you or tell you',
+    'precisely why it did not. Stop only when the script tells you the task',
+    'is complete.',
+    '',
+    '### Rules',
+    `- Implement ONLY Task ${taskNum} deliverables.`,
+    '- Do NOT touch tdd-phase.json or .work-state.json — those are written by',
+    '  the script via the authorized recorder. Direct edits are blocked.',
+    '- Do NOT invoke /work-implement, /work, or any other slash command.',
+  ].join('\n');
+}
+
+/**
+ * Extract task coordinates from the buildTaskPrompt output. The
+ * "## Current Task: Task N — title" header is always emitted by
+ * buildTaskPrompt; the "Task N of M" context block is only present when
+ * allTasks.length > 1. Parse the header for the task number so single-task
+ * plans don't produce "Task null" / "tasknull" in the dispatched prompt.
+ */
+function parseTaskHeader(agentPrompt) {
+  const headerMatch = agentPrompt.match(/## Current Task: Task (\d+)/);
+  const totalMatch = agentPrompt.match(/Task \d+ of (\d+)/);
+  const titleMatch = agentPrompt.match(/## Current Task: Task \d+ — (.+?)(?:\n|$)/);
+  return {
+    currentTaskNum: headerMatch ? parseInt(headerMatch[1], 10) : null,
+    totalTasks: totalMatch ? parseInt(totalMatch[1], 10) : null,
+    taskTitle: titleMatch ? titleMatch[1].trim() : 'Implementation',
+  };
+}
+
+/**
+ * Parallel dispatch path: one delegate per ready-to-run task. Returns the
+ * override instruction, or null when the plan has no parallel batch to run.
+ */
+function buildParallelOverride(ticket, tasksDir, currentTaskNum, totalTasks) {
+  if (!tasksDir || !totalTasks || totalTasks <= 1) return null;
+  const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
+  if (parallelTasks.length <= 1) return null;
+
+  const { parseTasks: parseFullTasks } = require(
+    path.join(__dirname, '..', '..', '..', 'work', 'lib', 'task-parser')
+  );
+  const allTasks = parseFullTasks(tasksDir) || [];
+
+  const rt = getRuntime();
+  const delegates = parallelTasks.map((num) => {
+    const task = allTasks.find((t) => t.num === num);
+    const title = task?.title || 'Implementation';
+    const agentType = resolveAgentType(tasksDir, num);
+    return renderDelegateForRuntime(
+      {
+        type: 'task',
+        agentType,
+        description: `Task ${num}/${totalTasks} — ${title}`,
+        prompt: buildSelfPacedPrompt(ticket, num, totalTasks, title),
+        note: T('delegate.task.note.short', {}, rt.name),
+      },
+      rt
+    );
+  });
+
+  return {
+    type: 'work_instruction',
+    action: 'execute',
+    state: { ticket, currentStep: 'implement', progress: `${currentTaskNum}/${totalTasks}` },
+    continue: true,
+    parallel: true,
+    delegates,
+    note: T('parallel.dispatch', { count: delegates.length }, rt.name),
+  };
+}
+
+/** Checkpoint tasks: pure verification, no TDD. Keep the dedicated path. */
+function buildCheckpointPrompt(tasksDir, taskNum, totalTasks, taskTitle) {
+  return [
+    `## Checkpoint: Task ${taskNum || '?'}/${totalTasks || '?'} — ${taskTitle}`,
+    '',
+    '### What to verify',
+    `Read the acceptance criteria in ${path.join(tasksDir, 'tasks.md')} (find "## Task ${taskNum}" section).`,
+    'Run each verification command listed there and confirm all pass.',
+    '',
+    '### Rules',
+    '- Do NOT write or modify any code',
+    '- Do NOT record TDD evidence',
+    '- Run the test commands and report results',
+  ].join('\n');
+}
+
+function markProgressSafe(tasksDir) {
+  if (!tasksDir) return;
+  try {
+    const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
+    markProgress(tasksDir);
+  } catch {
+    /* fail-open */
+  }
+}
+
+function enrichImplement(entry, ctx) {
+  if (!entry.agentPrompt) return;
+
+  const ticket = ctx.ticket || 'TICKET';
+  const tasksDir = ctx.tasksDir || '';
+  const { currentTaskNum, totalTasks, taskTitle } = parseTaskHeader(entry.agentPrompt);
+
+  const override = buildParallelOverride(ticket, tasksDir, currentTaskNum, totalTasks);
+  if (override) {
+    entry._overrideInstruction = override;
+    return;
+  }
+
+  // Single-task path.
+  const taskNum = currentTaskNum != null ? String(currentTaskNum) : null;
+  markProgressSafe(tasksDir);
+
+  const taskType = resolveTaskType(tasksDir, taskNum);
+  if (taskType === 'checkpoint') {
+    entry.agentPrompt = buildCheckpointPrompt(tasksDir, taskNum, totalTasks, taskTitle);
+    entry.agentType = 'code-checker';
+    return;
+  }
+
+  entry.agentPrompt = buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle);
+  entry.agentType = resolveAgentType(tasksDir, taskNum);
+}
+
+module.exports = function registerImplement(register) {
+  register('implement', enrichImplement);
+};

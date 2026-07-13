@@ -1,0 +1,105 @@
+'use strict';
+
+/**
+ * Script-bypass detection: a Bash command that runs a script which itself
+ * writes to a protected directory. Only meaningful for directory entries.
+ */
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { commandAccessesProtectedPaths } = require('../command-analysis');
+const { expandHomePaths, markerOnlyInForeignPaths } = require('./paths');
+
+function isTrustedScript(scriptPath, entries) {
+  for (const entry of entries) {
+    for (const subdir of entry.trustedSubdirs || []) {
+      if (scriptPath.includes(path.join(entry.dir, subdir) + '/')) return true;
+    }
+  }
+  return false;
+}
+
+function scriptPatternsFor(entry) {
+  const patterns = [];
+  for (const marker of entry.markers) {
+    const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    patterns.push(new RegExp(`\\/${escaped}\\/`, 'i'));
+    patterns.push(new RegExp(`${escaped}\\/`, 'i'));
+  }
+  return patterns;
+}
+
+// Any write op in the script content. Kept intentionally BROAD and fail-closed:
+// a script that both references a protected marker and performs a write is
+// blocked, because static content analysis cannot reliably prove which path a
+// write targets (a target can be built via variables, path.join, concatenation,
+// etc.). This static check is now the FALLBACK: when the runtime write-guard
+// interposer is available (Linux/glibc, see lib/guard/fsguard.js), the command
+// is instead run with the interposer preloaded and this broad check is skipped
+// (GH-657) — the interposer denies the real write at runtime and clears the
+// read-elsewhere / test-run false positives. This check still applies on hosts
+// where the shim can't run. Legitimate scripts are exempted by location via
+// `trustedSubdirs`, or by the user speaking the unlock phrase once.
+const WRITE_OPS_IN_SCRIPT =
+  /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|rename|rmdir|rmdirSync|copyFileSync|exec|execSync|fs\.promises\.writeFile|fs\.promises\.rm|fs\.promises\.rename|fs\.writeFile|fs\.appendFile)\b/;
+
+function scriptHasWriteOps(content) {
+  return (
+    WRITE_OPS_IN_SCRIPT.test(content) ||
+    />{1,2}\s*['"]/.test(content) ||
+    />\|\s*['"]/.test(content) ||
+    /\btee\s+-a\b/.test(content) ||
+    /open\(.*['"]w/.test(content)
+  );
+}
+
+/**
+ * GH-689: does the script CONTENT actually reference this entry once its path
+ * tokens are resolved? A script whose only marker hits are foreign absolute
+ * paths (e.g. the agent toolchain under ~/.claude while the lock protects
+ * <repo>/.claude) is not a bypass of THIS entry. A pattern hit with no literal
+ * marker occurrence in the home-expanded content stays fail-closed. Relative
+ * refs in script SOURCE also stay fail-closed: a script's runtime cwd is
+ * unknowable from static analysis (the invoking command or the script itself
+ * may chdir), so `.claude/x` in source must keep counting as a reference.
+ */
+function contentReferencesEntry(content, entry) {
+  const scanText = expandHomePaths(content);
+  let sawMarker = false;
+  for (const marker of entry.markers) {
+    if (!scanText.includes(marker)) continue;
+    sawMarker = true;
+    if (!markerOnlyInForeignPaths(scanText, marker, entry)) return true;
+  }
+  return !sawMarker;
+}
+
+/**
+ * Inspect a command for script-driven writes to a protected dir entry.
+ *
+ * Fires for ANY non-trusted script the command runs whose content references
+ * the protected path AND performs a write — regardless of where the script
+ * lives. The whole point is to catch an EXTERNAL script (e.g. `node
+ * /tmp/eviL.js` or `node scripts/deploy.js`) that writes into a protected dir,
+ * so location-based gates (under-the-dir / temp-path) are intentionally NOT
+ * applied here; only `trustedSubdirs` scripts are exempt.
+ * @returns {{ blocked: true, error?: string } | { blocked: false }}
+ */
+function checkScriptBypass(collapsedCmd, entry, entries) {
+  const found = commandAccessesProtectedPaths(collapsedCmd, scriptPatternsFor(entry));
+  if (!found.found || isTrustedScript(found.scriptPath, entries)) {
+    return { blocked: false };
+  }
+  let content;
+  try {
+    content = fs.readFileSync(found.scriptPath, 'utf8');
+  } catch (err) {
+    return { blocked: true, error: `Cannot read script "${found.scriptPath}": ${err.message}` };
+  }
+  if (!contentReferencesEntry(content, entry)) return { blocked: false }; // GH-689
+  return scriptHasWriteOps(content)
+    ? { blocked: true, scriptPath: found.scriptPath }
+    : { blocked: false };
+}
+
+module.exports = { checkScriptBypass };

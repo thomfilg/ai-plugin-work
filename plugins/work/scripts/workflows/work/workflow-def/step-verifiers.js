@@ -1,0 +1,340 @@
+'use strict';
+
+/**
+ * workflow-def/step-verifiers.js — planning-side step verify functions for
+ * the /work workflow definition (extracted from workflow-definition.js).
+ *
+ * Covers the artifact-existence checks up to implementation:
+ * ticket, brief, spec, tasks, tasks_gate, implement, task_review, cleanup.
+ * All verifiers are fail-closed on read/parse errors.
+ *
+ * Top-level functions take the shared deps bag as their first argument;
+ * `createStepVerifiers(deps)` binds them for the workflow definition.
+ *
+ * @typedef {Object} StepDeps
+ * @property {string} TASKS_BASE
+ * @property {Function} safeTicketPath
+ * @property {string} workRoot - workflows/work directory (for lib requires)
+ * @property {(ticketId: string) => (boolean|null)} [tmuxHasSession] - optional
+ *   tri-state tmux probe seam (true=exists, false=gone, null=cannot prove);
+ *   defaults to the real execFileSync-based probe. Injected by tests so the
+ *   cleanup check is deterministic regardless of whether the runner has tmux.
+ */
+
+const path = require('path');
+const fs = require('fs');
+
+function ticketDir(deps, ticketId) {
+  return path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId));
+}
+
+/**
+ * GH-696: a step whose inner phase driver is still mid-flight (or whose
+ * ledger is corrupt) must not verify, even when the artifact file exists —
+ * on GH-689 the brief step advanced while brief-phase.json sat at `draft`.
+ * Absent ledger = legacy/pre-phase-driver ticket → not blocked (today's
+ * behavior). The plan matrix's RUN-resume branch is the repair route.
+ */
+function ledgerClear(deps, ticketId, step) {
+  const { phaseLedgerBlocked } = require(path.join(deps.workRoot, 'lib', 'phase-ledger'));
+  return !phaseLedgerBlocked(ticketDir(deps, ticketId), step).blocked;
+}
+
+/** @param {StepDeps} deps */
+function verifyTicket(deps, ticketId) {
+  // Ticket is proven if the work state file exists and is active for this ticket
+  try {
+    const stateFile = path.join(ticketDir(deps, ticketId), '.work-state.json');
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    return (
+      state?.status === 'in_progress' &&
+      (state?.ticketId === ticketId || state?.ticketId === deps.safeTicketPath(ticketId))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** @param {StepDeps} deps */
+function verifyBrief(deps, ticketId) {
+  try {
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'brief.md')) &&
+      ledgerClear(deps, ticketId, 'brief')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GH-253: spec is always mandatory — no env toggle bypass.
+ * safeTicketPath() converts #N -> GH-N via cached config.safeTicketId()
+ * @param {StepDeps} deps
+ */
+function verifySpec(deps, ticketId) {
+  try {
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'spec.md')) &&
+      ledgerClear(deps, ticketId, 'spec')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** @param {StepDeps} deps */
+function verifyTasks(deps, ticketId) {
+  // verify remains active -- used by evidence checks
+  try {
+    return (
+      fs.existsSync(path.join(ticketDir(deps, ticketId), 'tasks.md')) &&
+      ledgerClear(deps, ticketId, 'tasks')
+    );
+  } catch {
+    return false;
+  } // fail-safe: assume tasks not generated
+}
+
+/**
+ * Gate C — tasks_gate. Verify passes when tasks.md parses and every
+ * task declares a non-empty `### Files in scope`
+ * (see lib/task-scope.js#validateTask).
+ * @param {StepDeps} deps
+ */
+function verifyTasksGate(deps, ticketId) {
+  try {
+    const { parseTasks } = require(path.join(deps.workRoot, 'lib', 'task-parser'));
+    const { validateAll } = require(path.join(deps.workRoot, '..', 'lib', 'task-scope'));
+    const tasks = parseTasks(ticketDir(deps, ticketId));
+    if (!tasks) return false;
+    return validateAll(tasks).valid;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Exception mode: config-only or mechanical changes that skip TDD.
+ * Accepts both legacy string format and structured { category, reason }.
+ * If exception-validator fails to load, the caller's catch returns false
+ * (fail-closed). Returns null when no exception is declared.
+ */
+function checkTddException(state, workRoot) {
+  if (typeof state.exception === 'string' && state.exception.trim() !== '') return true;
+  if (typeof state.exception === 'object' && state.exception !== null) {
+    const { ALLOWED_CATEGORIES } = require(
+      path.join(workRoot, '..', 'work-implement', 'exception-validator')
+    );
+    const cat = state.exception.category;
+    const reason = state.exception.reason;
+    return (
+      typeof cat === 'string' &&
+      ALLOWED_CATEGORIES.includes(cat) &&
+      typeof reason === 'string' &&
+      reason.trim() !== ''
+    );
+  }
+  return null;
+}
+
+/**
+ * GH-694: in multi-task mode, implement is only proven when EVERY tasksMeta
+ * task has status 'completed' — the hook-side evidence path previously never
+ * read tasksMeta, so implement could verify with unsatisfied tasks (the
+ * GH-689 task_4 dangle). Statuses only, no per-task evidence re-walk:
+ * evidence was already validated at advance time by the ONE shared validator
+ * (re-validating here risks the echo-4552 infinite-retry class). Malformed or
+ * missing-status entries count as pending (fail closed); a MISSING
+ * .work-state.json (ENOENT) or absent tasksMeta is single-task mode —
+ * unchanged. PR #717: a read/parse failure on an EXISTING state file is NOT
+ * single-task mode — a corrupt state file on a multi-task ticket must not
+ * verify on TDD evidence alone (refusal-to-vouch, the checkpoints.js
+ * precedent). Repair route: restore .work-state.json (git checkout / re-run
+ * `node work-next.js <ticket>` to rebuild it), then re-verify.
+ */
+function tasksMetaAllCompleted(deps, ticketId) {
+  const statePath = path.join(ticketDir(deps, ticketId), '.work-state.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(statePath, 'utf-8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return true; // single-task mode / no state file
+    return false; // EXISTING but unreadable state file — refuse to vouch
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false; // EXISTING but corrupt state file — refuse to vouch
+  }
+  if (!parsed || typeof parsed !== 'object' || !parsed.tasksMeta) {
+    return true; // falsy tasksMeta — single-task mode (repo-wide idiom), unchanged
+  }
+  // Once tasksMeta exists this IS a multi-task ticket: statuses must be
+  // present and checkable — a missing/non-array tasks field blocks.
+  const tasks = parsed.tasksMeta.tasks;
+  if (!Array.isArray(tasks)) return false;
+  return tasks.every((t) => t && t.status === 'completed');
+}
+
+/**
+ * tasks step gating is orchestrator-controlled via DEFER/RUN plan actions.
+ * Implement is proven if tdd-phase.json has at least one cycle with red +
+ * green evidence AND (GH-694) every tasksMeta task is completed.
+ * @param {StepDeps} deps
+ */
+function verifyImplement(deps, ticketId) {
+  try {
+    const state = JSON.parse(
+      fs.readFileSync(path.join(ticketDir(deps, ticketId), 'tdd-phase.json'), 'utf-8')
+    );
+    let tddProven;
+    const exception = checkTddException(state, deps.workRoot);
+    if (exception !== null) {
+      tddProven = exception;
+    } else if (!Array.isArray(state.cycles) || state.cycles.length === 0) {
+      tddProven = false;
+    } else {
+      // At least one cycle must have both red and green evidence
+      tddProven = state.cycles.some((c) => c.red && c.green);
+    }
+    if (!tddProven) return false;
+    return tasksMetaAllCompleted(deps, ticketId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GH-211: Per-task review gate. Soft check — advisory, not blocking.
+ * Verified iff at least one review artifact (task-review-tests.md or
+ * task-review-code.md) exists in the ticket's tasks dir.
+ * @param {StepDeps} deps
+ */
+function verifyTaskReview(deps, ticketId) {
+  try {
+    const dir = ticketDir(deps, ticketId);
+    return (
+      fs.existsSync(path.join(dir, 'task-review-tests.md')) ||
+      fs.existsSync(path.join(dir, 'task-review-code.md'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GH-283 R8: strict canonical completion-status matcher. Mirrors the
+ * completion_check phase's regex EXACTLY — intentionally rejects the
+ * `APPROVED` / `NOT_APPLICABLE` aliases so a mis-marked report cannot pass
+ * step verification.
+ */
+const STATUS_COMPLETE_RE = /^\s*\*\*Status:\*\*\s*COMPLETE\b/im;
+
+/**
+ * GH-283 R8: completion evidence is present iff `<tasksDir>/completion.check.md`
+ * exists AND contains the canonical `**Status:** COMPLETE` line. Fail-CLOSED on
+ * every failure mode: an unresolvable tasks-dir (`TASKS_BASE` unset or
+ * `safeTicketPath` throwing) means "completion evidence NOT proven" and returns
+ * `false`, exactly as a missing/wrong-status file does. This keeps the P1
+ * `verifyCleanup` backstop consistent with the primary `completion_check`
+ * phase, which already fails closed on an unresolvable dir — closing the
+ * residual cleanup bypass for a misconfigured/tampered runner (GH-283).
+ * @param {StepDeps} deps
+ * @returns {boolean} true=COMPLETE, false=unresolvable-dir OR present-but-wrong/missing
+ */
+function completionEvidencePresent(deps, ticketId) {
+  let dir;
+  try {
+    dir = ticketDir(deps, ticketId);
+  } catch {
+    return false; // tasks-dir unresolvable → fail closed (evidence not proven)
+  }
+  if (!dir) return false; // unresolvable dir → fail closed
+  let raw;
+  try {
+    raw = fs.readFileSync(path.join(dir, 'completion.check.md'), 'utf-8');
+  } catch {
+    return false; // absent or unreadable → fail closed
+  }
+  return STATUS_COMPLETE_RE.test(raw);
+}
+
+/**
+ * GH-283: probe whether the `<ticketId>-dev` tmux session exists. Returns a
+ * TRI-STATE so the caller can fail closed on "cannot prove":
+ *   - `false` → session provably GONE (`tmux has-session` exited 1).
+ *   - `true`  → session provably EXISTS (`tmux has-session` exited 0).
+ *   - `null`  → COULD NOT PROVE either way — tmux binary missing (ENOENT),
+ *               the 3000ms timeout killed it (`err.signal` set, e.g. SIGTERM),
+ *               a permission error, or any non-1 exit status. Only exit-1 is
+ *               the canonical "session not found" signal; every other failure
+ *               is indeterminate and must NOT be read as "gone".
+ * Default impl; overridable via `deps.tmuxHasSession` so tests are deterministic
+ * regardless of whether the CI runner has tmux installed.
+ * @returns {boolean|null}
+ */
+function defaultTmuxHasSession(ticketId) {
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync('tmux', ['has-session', '-t', `${ticketId}-dev`], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return true; // exit 0 → session exists
+  } catch (err) {
+    // execFileSync sets `.status` to the child exit code, `.signal` when the
+    // process was killed (timeout → SIGTERM), and `.code` to 'ENOENT' when the
+    // binary is missing. Only a genuine exit-1 proves the session is gone.
+    if (err && err.status === 1 && !err.signal && err.code !== 'ENOENT') {
+      return false; // session provably gone
+    }
+    return null; // ENOENT / timeout / permission / other status → cannot prove
+  }
+}
+
+/**
+ * GH-283 R8: cleanup is proven only when BOTH the dev tmux session is gone
+ * AND completion evidence (`**Status:** COMPLETE`) is present. This closes the
+ * runner-bypass gap where skipping the completion_check phase left no marker
+ * yet cleanup still verified on tmux-absence alone. Fail-CLOSED throughout:
+ * an unresolvable tasks-dir returns `false` (no tmux-only fallback), matching
+ * the primary completion_check phase and closing the residual bypass for a
+ * misconfigured/tampered runner (GH-283).
+ *
+ * The tmux probe is tri-state (see {@link defaultTmuxHasSession}): only a
+ * genuine `tmux has-session` exit-1 counts as "gone". A tmux exec that fails
+ * with ENOENT (binary missing), a timeout (SIGTERM), or a permission error
+ * proves NOTHING about the session — so we fail closed rather than treat those
+ * as cleanup success (a runner that cannot exec tmux must not pass cleanup).
+ * @param {StepDeps} deps
+ */
+function verifyCleanup(deps, ticketId) {
+  // 1) tmux dev session must be PROVABLY gone.
+  const tmuxProbe = deps.tmuxHasSession || defaultTmuxHasSession;
+  const sessionExists = tmuxProbe(ticketId); // true=exists, false=gone, null=unknown
+  // Only a proven-gone (false) result passes. `true` (still up) and `null`
+  // (indeterminate: ENOENT/timeout/permission/non-1 status) both fail closed.
+  if (sessionExists !== false) return false;
+
+  // 2) completion evidence must be present (fail-closed on unresolvable dir).
+  return completionEvidencePresent(deps, ticketId);
+}
+
+/** @param {StepDeps} deps */
+function createStepVerifiers(deps) {
+  return {
+    verifyTicket: (ticketId) => verifyTicket(deps, ticketId),
+    verifyBrief: (ticketId) => verifyBrief(deps, ticketId),
+    verifySpec: (ticketId) => verifySpec(deps, ticketId),
+    verifyTasks: (ticketId) => verifyTasks(deps, ticketId),
+    verifyTasksGate: (ticketId) => verifyTasksGate(deps, ticketId),
+    verifyImplement: (ticketId) => verifyImplement(deps, ticketId),
+    verifyTaskReview: (ticketId) => verifyTaskReview(deps, ticketId),
+    verifyCleanup: (ticketId) => verifyCleanup(deps, ticketId),
+  };
+}
+
+module.exports = { createStepVerifiers };

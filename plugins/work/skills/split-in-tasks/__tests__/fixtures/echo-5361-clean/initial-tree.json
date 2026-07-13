@@ -1,0 +1,4 @@
+{
+  "_description": "Initial tree snapshot for the ECHO-5361 clean fixture. Task 1 mutates a.ts, Task 2 asserts on b.ts — disjoint files, no collision.",
+  "files": ["a.ts", "b.ts", "package.json"]
+}

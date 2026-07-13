@@ -1,0 +1,125 @@
+{
+  "plugin": "maestro",
+  "prefixes": ["MAESTRO_"],
+  "internal": [
+    "MAESTRO_FORCE",
+    "MAESTRO_RESTART_MODE",
+    "MAESTRO_STATE_DIR",
+    "MAESTRO_SESSION_DIR",
+    "MAESTRO_STOP_GUARD",
+    "MAESTRO_STOP_GUARD_STATE",
+    "MAESTRO_LINE"
+  ],
+  "vars": {
+    "MAESTRO_SKILL": {
+      "type": "string",
+      "default": "work",
+      "description": "Skill launched per ticket session (work, follow-up, or custom)",
+      "section": "Orchestration"
+    },
+    "MAESTRO_BRANCH_TEMPLATE": {
+      "type": "string",
+      "default": "{ticket}",
+      "example": "feature/{ticket_lower}",
+      "description": "Branch naming template for agent worktrees",
+      "section": "Orchestration"
+    },
+    "MAESTRO_NS": {
+      "type": "string",
+      "default": "",
+      "description": "Namespace segment isolating concurrent orchestrations",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_INBOX_DIR": {
+      "type": "path",
+      "default": "",
+      "description": "File-mailbox directory for signal/listen IPC",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_TASKS_BASE": {
+      "type": "path",
+      "default": "",
+      "description": "Where per-ticket .maestro-skill files persist",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_AGENT_PERMISSIONS": {
+      "type": "string",
+      "default": "Bash(rm:*),Bash(pkill:*)",
+      "description": "Comma-separated permissions.allow rules bootstrap injects into each claude agent worktree's local settings so benign destructive commands (rm/pkill cleanups) can't raise blocking prompts unattended. Empty string disables injection",
+      "section": "Orchestration"
+    },
+    "MAESTRO_DISABLE_HOME_STORES": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Ignore home-directory session stores",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_GROOM_DELAY_SEC": {
+      "type": "number",
+      "default": "3",
+      "description": "Delay before session grooming (seconds)",
+      "section": "Conductor Tuning",
+      "advanced": true
+    },
+    "MAESTRO_SEND_VERIFY_DELAY_SEC": {
+      "type": "number",
+      "default": "0.7",
+      "description": "Delay when sending keys to tmux (seconds)",
+      "section": "Conductor Tuning",
+      "advanced": true
+    },
+    "MAESTRO_PENDING_WINDOW_MIN": {
+      "type": "number",
+      "default": "",
+      "description": "Window (min) a pending task may wait before alerting",
+      "section": "Conductor Tuning",
+      "advanced": true
+    },
+    "CONDUCT_WAKE_EVENTS": {
+      "type": "string",
+      "default": "question-pending,nudges-exhausted,wedged,dead-end,dead-end-probe,pr-ready,pr-broken,pr-comments-stuck,comment-loop,stuck-input,idle-blocked,auth-broken,spinner-hang,no-progress,kill-during-ci,stop-condition-met,commit-stall",
+      "description": "Allowlist of event kinds that wake the conductor model (all/* wakes on every kind). Custom lists replace this entirely — omitting a kind silences it (fail-closed)",
+      "section": "Conductor Tuning"
+    },
+    "HEARTBEAT_MIN": {
+      "type": "number",
+      "default": "30",
+      "description": "Minimum minutes between unchanged-state heartbeat emits (state changes emit immediately)",
+      "section": "Conductor Tuning"
+    },
+    "HEARTBEAT_MAX_MIN": {
+      "type": "number",
+      "default": "120",
+      "description": "Maximum minutes before an unchanged-state heartbeat is forced",
+      "section": "Conductor Tuning"
+    },
+    "PENDING_REWAKE_MIN": {
+      "type": "number",
+      "default": "30",
+      "description": "Backoff (min) before a repeat of the SAME cosmetic pending alert re-wakes the conductor; doubles per re-wake. 0 disables throttling for every tier (wake on every repeat)",
+      "section": "Conductor Tuning"
+    },
+    "PENDING_REWAKE_MAX_MIN": {
+      "type": "number",
+      "default": "240",
+      "description": "Cap (min) for the doubling re-wake backoff of an unhandled cosmetic pending alert",
+      "section": "Conductor Tuning"
+    },
+    "BLOCKING_REWAKE_MIN": {
+      "type": "number",
+      "default": "5",
+      "description": "Flat re-wake cadence (min) for BLOCKING alert repeats (action-required kinds: the agent is waiting on the operator). Never doubles — attention stays steady until handled. 0 wakes on every repeat",
+      "section": "Conductor Tuning"
+    },
+    "COMMIT_STALL_WAKE_MIN": {
+      "type": "number",
+      "default": "240",
+      "description": "Commit-stall threshold crossings at/above this (min) emit a waking commit-stall alert instead of a log line. 0 keeps every crossing log-only",
+      "section": "Conductor Tuning"
+    }
+  }
+}
