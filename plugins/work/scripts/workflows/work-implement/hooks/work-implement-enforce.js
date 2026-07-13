@@ -23,7 +23,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', '..', 'lib', 'hookEntrypoint'));
 // Vendored dual-runtime adapter: runtime detection (per-runtime block text)
 // and apply_patch target parsing.
 const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
@@ -295,13 +295,7 @@ function enforceFileGate(filePath, gate) {
   process.exit(2);
 }
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-
-  const hookData = JSON.parse(input);
+function main(hookData) {
   const rt = getRuntime(hookData);
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
@@ -343,8 +337,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  // On error, approve to avoid blocking legitimate operations
-  process.exit(0);
-});
+// runHook reads + parses stdin (malformed JSON → {}), runs the handler, and on
+// an uncaught throw logs the error and exits 0 (fail-open) to avoid blocking
+// legitimate operations. Intentional blocks exit 2 from inside main().
+runHook(main, { file: __filename });

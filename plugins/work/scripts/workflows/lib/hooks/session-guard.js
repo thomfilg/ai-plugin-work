@@ -30,6 +30,7 @@
 const path = require('path');
 
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', 'hookEntrypoint'));
 const commands = require(path.join(__dirname, 'session-guard', 'commands'));
 const { handlePreCompact, handleStop } = require(
   path.join(__dirname, 'session-guard', 'hook-handlers')
@@ -54,19 +55,9 @@ if (isHookMode) {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-async function runHookMode(hookType) {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-
-  let hookData = {};
-  try {
-    hookData = JSON.parse(input);
-  } catch {
-    /* empty/invalid — use default */
-  }
-
+// Hook-mode handler. runHook reads + parses stdin for us (empty/malformed JSON
+// → {}), so this receives the payload already parsed.
+function runHookMode(hookType, hookData) {
   // Prevent infinite loops in Stop hooks
   if (hookType === 'Stop' && hookData.stop_hook_active) {
     process.exit(0);
@@ -119,25 +110,20 @@ function runCli(args) {
   }
 }
 
-async function main() {
-  const hookType = process.env.CLAUDE_HOOK_TYPE;
+const hookType = process.env.CLAUDE_HOOK_TYPE;
 
-  // Hook mode: read stdin and dispatch by hook type
-  if (hookType) {
-    await runHookMode(hookType);
-    return;
-  }
-
-  // CLI mode: parse subcommand from argv
-  runCli(process.argv.slice(2));
-}
-
-main().catch((err) => {
-  if (isHookMode) {
-    logHookError(__filename, err);
-    process.exit(0); // fail-open in hook mode
-  } else {
+if (hookType) {
+  // Hook mode: route through the shared runHook protocol (reads + parses stdin,
+  // logs an uncaught throw and exits 0 — fail-open). Intentional flows call
+  // process.exit themselves inside the handlers.
+  runHook((hookData) => runHookMode(hookType, hookData), { file: __filename });
+} else {
+  // CLI mode: parse subcommand from argv and surface errors with a non-zero
+  // exit code for debuggability (never fail-open).
+  try {
+    runCli(process.argv.slice(2));
+  } catch (err) {
     process.stderr.write(`session-guard error: ${err.message}\n`);
-    process.exit(1); // surface errors in CLI mode
+    process.exit(1);
   }
-});
+}

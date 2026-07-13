@@ -31,7 +31,7 @@
 'use strict';
 
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', '..', 'lib', 'hookEntrypoint'));
 const { createFileProtector } = require(
   path.join(__dirname, '..', '..', 'lib', 'protect-state-files')
 );
@@ -135,17 +135,7 @@ const protector = createFileProtector({
   trustedScriptRoots: TRUSTED_ROOTS,
 });
 
-async function main() {
-  let raw = '';
-  for await (const chunk of process.stdin) raw += chunk;
-
-  let hookData;
-  try {
-    hookData = JSON.parse(raw);
-  } catch {
-    process.exit(0); // fail-open on malformed input
-  }
-
+function main(hookData) {
   const result = protector.check(hookData.tool_name, hookData.tool_input || {}, hookData);
   if (result && result.blocked) {
     process.stderr.write(result.message);
@@ -154,11 +144,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  try {
-    logHookError(__filename, err);
-  } catch {
-    /* swallow */
-  }
-  process.exit(0); // fail-open on uncaught error
-});
+// runHook reads + parses stdin (malformed JSON → {}), runs the handler, and on
+// an uncaught throw logs the error and exits 0 (fail-open). Intentional blocks
+// exit 2 from inside main().
+runHook(main, { file: __filename });

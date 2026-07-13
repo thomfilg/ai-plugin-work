@@ -51,6 +51,7 @@ const { isRunningInAgent, isDispatchedAgentContext, normalizeAgentName } = requi
   path.join(__dirname, '..', 'agent-detection')
 );
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', 'hookEntrypoint'));
 
 // Policy modules — pure decision functions (GH-206 Task 9)
 const { buildCommandIndex, parseTransition } = require(
@@ -366,17 +367,22 @@ function handlePostToolUse(hookData) {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-// (Patch 8) Harden main() — guard empty stdin and log errors
-async function main() {
+// (Patch 8) Harden main() — guard empty stdin and log errors. runHook parses
+// stdin for us (empty OR malformed JSON → {}); both must fail open (exit 0,
+// silent). The DEBUG telemetry (Patch 11) stays: transient parse/handler
+// failures surface on stderr ONLY under ENFORCE_HOOK_DEBUG, never otherwise.
+function main(hookData) {
   try {
-    let input = '';
-    for await (const chunk of process.stdin) {
-      input += chunk;
+    // runHook collapses empty AND malformed stdin to the {} fallback: no
+    // tool_name and no event name. Treat that as a transient no-payload case —
+    // fail open, and (Patch 11) surface it on stderr only under DEBUG.
+    if (!hookData || (!hookData.tool_name && !hookData.hook_event_name)) {
+      if (DEBUG) {
+        process.stderr.write('[enforce-step-workflow] fail-open: empty or malformed payload\n');
+      }
+      return;
     }
 
-    if (!input.trim()) return; // Empty stdin → allow
-
-    const hookData = JSON.parse(input);
     // CLAUDE_HOOK_TYPE prefix survives both runtimes; hook_event_name is the payload fallback (C12).
     const hookType = process.env.CLAUDE_HOOK_TYPE || hookData.hook_event_name || 'PostToolUse';
 
@@ -389,12 +395,21 @@ async function main() {
       handlePostToolUse(hookData);
     }
   } catch (err) {
+    // A handler that intends to BLOCK calls process.exit(2) itself and never
+    // lands here; this catch is the fail-open path for transient errors.
     if (DEBUG) process.stderr.write(`[enforce-step-workflow] fail-open: ${err?.message}\n`);
     logHookError(__filename, err);
   }
 }
 
-main().catch((err) => {
+// Route the entry through the shared runHook protocol (reads + parses stdin,
+// runs main, and on an uncaught throw logs the error and exits 0 — fail-open).
+// Intentional blocks call process.exit(2) from inside the handlers. The
+// pre-require uncaughtException/unhandledRejection handlers above still cover
+// the before-require window runHook cannot reach (they honour `didBlock` to
+// preserve an in-flight exit-2 decision). This trailing handler is the last
+// fail-open net for anything runHook surfaces as a rejection.
+runHook(main, { file: __filename }).catch((err) => {
   if (DEBUG) process.stderr.write(`[enforce-step-workflow] fatal: ${err?.message}\n`);
   logHookError(__filename, err);
 });
