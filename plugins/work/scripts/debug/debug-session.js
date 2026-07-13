@@ -162,6 +162,37 @@ function readSessionOrFail() {
   return fs.readFileSync(filePath, 'utf8');
 }
 
+/**
+ * Fail safe when `filePath` holds a session that must not be clobbered. A
+ * session file whose frontmatter is malformed (unparseable) or still `active`
+ * is refused so `init` never silently overwrites a live investigation; a
+ * terminal session (resolved/diagnosed/abandoned) is closed, so overwrite is
+ * allowed. A missing file is a no-op — a fresh `init` proceeds.
+ */
+function assertNoActiveSession(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  let fields;
+  try {
+    fields = parseFrontmatter(fs.readFileSync(filePath, 'utf8'));
+  } catch (err) {
+    failExit(
+      `${SESSION_FILE} already exists but its frontmatter is unreadable (${err.message}). ` +
+        'Refusing to overwrite it; inspect or remove the file before starting a new session.'
+    );
+    return;
+  }
+
+  if (!COMPLETED_STATUSES.includes(fields.status)) {
+    failExit(
+      `An active debug session already exists (trigger: ${fields.trigger || '(none)'}). ` +
+        'Run `/debug continue`, or resolve/abandon it before starting a new one.'
+    );
+  }
+}
+
 /** `init "<description>"` — seed a valid session file at cwd. */
 function cmdInit(args) {
   const trigger = args[0];
@@ -177,6 +208,8 @@ function cmdInit(args) {
     failExit(err.message);
     return;
   }
+
+  assertNoActiveSession(path.join(process.cwd(), relTarget));
 
   const today = isoDate();
   const content = serializeSession(trigger, DEFAULT_STATUS, today, today);
