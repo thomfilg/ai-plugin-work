@@ -1,17 +1,12 @@
 /**
- * policies/state-script-gate.js
- *
- * Strict Bash-command gating for state scripts, extracted from
- * enforce-step-workflow.js:
- *
- *   - shellTokenize(): quote-aware tokenizer (lives in ./shell-tokenize,
- *     re-exported here)
- *   - isTerminalCompleteBypass(): `work-state.js complete` allowed only at
- *     the terminal `complete` step (GH-276)
- *   - isTerminalSessionGuardBypass(): session-guard.js finish/reveal/complete
- *     allowed only at the terminal step (GH-338)
- *   - checkUnsafeSubcommands(): Rule 3b — block unsafe sub-commands on state
- *     scripts invoked via node (GH-89)
+ * policies/state-script-gate.js — strict Bash-command gating for state scripts,
+ * extracted from enforce-step-workflow.js:
+ *   - shellTokenize(): quote-aware tokenizer (./shell-tokenize, re-exported)
+ *   - isTerminalCompleteBypass(): `work-state.js complete` at the terminal step (GH-276)
+ *   - isTerminalCancelBypass(): `work-state.js cancel` in a planning phase (GH-339)
+ *   - isTerminalSessionGuardBypass(): session-guard.js finish/reveal/complete at
+ *     the terminal step, or a cancelled state (GH-338 + GH-339)
+ *   - checkUnsafeSubcommands(): Rule 3b — block unsafe sub-commands (GH-89)
  */
 
 const path = require('path');
@@ -25,29 +20,27 @@ const {
 // Quote-aware tokenizer — extracted verbatim to ./shell-tokenize (file-size
 // burndown); re-exported below so consumers keep this import path.
 const { shellTokenize } = require('./shell-tokenize');
+// GH-339: single source of truth for the planning-phase cancel boundary (the
+// gate must not re-derive the ceiling that work-state's cancelWork enforces).
+const { isCancellablePhase } = require('../../../work/work-state/steps');
 
-// Strict token walk for `node <path>/work-state.js complete <ticket>`.
-// Env-assignment prefixes (FOO=bar node ...) are DISALLOWED entirely — they
-// would let an attacker inject `NODE_OPTIONS=--require=/evil/module` (or
-// NODE_PATH, LD_PRELOAD, DYLD_*, NODE_TLS_REJECT_UNAUTHORIZED, etc.) which
-// Node.js honors before executing the legitimate script. The bypass is for
-// the orchestrator's strict, direct call only — no wrappers, no env prefix.
-function extractCompleteArgs(tokens, trace) {
+// Shared strict token walk for `node <path>/work-state.js <subCmd> <ticket>`.
+// Env-assignment prefixes (FOO=bar node ...) are DISALLOWED entirely — they'd let
+// an attacker inject NODE_OPTIONS/NODE_PATH/LD_PRELOAD/DYLD_* (honored by Node
+// before the script runs). Orchestrator's strict direct call only: no wrappers,
+// env prefix, or node flags. Returns `{ scriptPath, targetTicket, next }` (caller
+// validates trailing tokens from `next`), or null on a bad prefix shape.
+function extractWorkStatePrefix(tokens, subCmd, trace) {
   let i = 0;
   if (!/^(?:node|nodejs)$/.test(tokens[i])) {
     trace('reject: no node token', { i, token: tokens[i] });
     return null;
   }
   i++;
-
-  // Strict bypass: no node flags allowed before the script path.
   if (i < tokens.length && tokens[i].startsWith('-')) {
     trace('reject: node flag before script', { token: tokens[i] });
     return null;
   }
-
-  // Script path token. Quote-stripping is unnecessary after normalization but
-  // kept defensively for nested-quote pathological inputs.
   if (i >= tokens.length) {
     trace('reject: no script token');
     return null;
@@ -58,28 +51,49 @@ function extractCompleteArgs(tokens, trace) {
     trace('reject: not work-state.js', { scriptPath });
     return null;
   }
-
-  // Sub-command must be exactly `complete`.
-  if (i >= tokens.length || tokens[i] !== 'complete') {
-    trace('reject: sub-command not complete', { token: tokens[i] });
+  if (i >= tokens.length || tokens[i] !== subCmd) {
+    trace(`reject: sub-command not ${subCmd}`, { token: tokens[i] });
     return null;
   }
   i++;
-
-  // Ticket arg.
   if (i >= tokens.length) {
     trace('reject: no ticket token');
     return null;
   }
-  const targetTicket = tokens[i];
-  i++;
+  return { scriptPath, targetTicket: tokens[i], next: i + 1 };
+}
 
-  // No trailing tokens allowed — strict format only.
+function extractCompleteArgs(tokens, trace) {
+  const p = extractWorkStatePrefix(tokens, 'complete', trace);
+  if (p === null) return null;
+  if (p.next !== tokens.length) {
+    trace('reject: trailing tokens', { remaining: tokens.slice(p.next) });
+    return null;
+  }
+  return { scriptPath: p.scriptPath, targetTicket: p.targetTicket };
+}
+
+// GH-339: `node <path>/work-state.js cancel <ticket> --reason <text>`. Reuses
+// extractWorkStatePrefix' scaffold, allows exactly one trailing `--reason
+// <value>` pair (the reason value is opaque / recorded verbatim).
+function extractCancelArgs(tokens, trace) {
+  const p = extractWorkStatePrefix(tokens, 'cancel', trace);
+  if (p === null) return null;
+  let i = p.next;
+  if (i >= tokens.length || tokens[i] !== '--reason') {
+    trace('reject: missing --reason', { token: tokens[i] });
+    return null;
+  }
+  i += 2; // consume `--reason` + its value
+  if (i > tokens.length) {
+    trace('reject: --reason without value');
+    return null;
+  }
   if (i !== tokens.length) {
     trace('reject: trailing tokens', { remaining: tokens.slice(i) });
     return null;
   }
-  return { scriptPath, targetTicket };
+  return { scriptPath: p.scriptPath, targetTicket: p.targetTicket };
 }
 
 // Skip env-assignment prefixes and the node token; reject node flags.
@@ -144,7 +158,9 @@ const DISPATCHED_AGENT_GUIDANCE =
 // GH-695: whether this (scriptBase, subCmd) pair is one of the terminal
 // bypasses — the only allowlist entries the dispatched-agent rejection guards.
 function isTerminalBypassEligible(scriptBase, subCmd) {
-  if (scriptBase === 'work-state.js') return subCmd === 'complete';
+  // GH-339: `cancel` joins `complete` as a terminal-bypass sub-command on
+  // work-state.js so a dispatched agent attempting it gets the guidance below.
+  if (scriptBase === 'work-state.js') return subCmd === 'complete' || subCmd === 'cancel';
   if (scriptBase === 'session-guard.js') {
     return subCmd === 'finish' || subCmd === 'reveal' || subCmd === 'complete';
   }
@@ -187,111 +203,109 @@ function isAtTerminalStep(deps, ticketId, trace, debugBypass) {
   return false;
 }
 
-/**
- * Step-conditional bypass for `work-state.js complete` at the terminal step (GH-276).
- * Returns true ONLY when ALL conditions are met:
- *   1. The context is NOT a dispatched agent (GH-695 — orchestrator-only)
- *   2. Command is a strict `node <path>/work-state.js complete <ticketId>` invocation
- *   3. No shell operators, substitutions, or extra arguments
- *   4. Target ticket matches the active ticket
- *   5. The workflow is at the terminal `complete` step
- */
-function isTerminalCompleteBypass(deps, cmd, ticketId, hookData) {
-  const DEBUG_BYPASS = process.env.ENFORCE_HOOK_DEBUG === '1';
-  const trace = makeTrace(DEBUG_BYPASS);
+// Quote-aware tokenizer (work-state bypasses): treats quoted runs as one token
+// so paths with spaces survive; unbalanced quotes → null → reject.
+function tokenizeQuoteAware(cmd) {
+  return shellTokenize(String(cmd).trim());
+}
 
-  // GH-695: reject FIRST when the caller is ANY dispatched agent — gates that
-  // only bind the orchestrator are not gates.
+// GH-338 tokenizer (session-guard bypass): strip balanced quote pairs, then
+// split — quoted and unquoted forms tokenize identically on every Node / OS.
+function tokenizeStripQuotes(cmd) {
+  return String(cmd)
+    .trim()
+    .replace(/"([^"]*)"/g, '$1')
+    .replace(/'([^']*)'/g, '$1')
+    .split(/\s+/);
+}
+
+// Shared strict-invocation checks for the terminal bypasses (GH-276 complete,
+// GH-339 cancel, GH-338 session-guard): dispatched-agent rejection FIRST
+// (GH-695), no shell metachars, tokenize, extractor-parsed strict shape, trusted
+// script path, ticket match. Returns `true` when all pass; the caller then
+// applies its own step/status predicate.
+function passesStrictBypass(deps, cmd, ticketId, hookData, extractArgs, trace, tokenize) {
+  // GH-695: reject FIRST when the caller is ANY dispatched agent.
   if (isDispatchedContext(deps, hookData)) {
     trace('reject: dispatched-agent context');
     return false;
   }
-
-  // Reject shell operators and substitutions — cheapest syntactic fail-fast.
   if (/[;&|$`<>(){}\n]/.test(cmd)) {
     trace('reject: shell metachars');
     return false;
   }
-
-  // Quote-aware tokenizer: split on whitespace BUT treat quoted runs as one
-  // token. This is critical for paths containing spaces (e.g. macOS
-  // `/Users/John Smith/...`). Unbalanced quotes return null → reject.
-  const tokens = shellTokenize(String(cmd).trim());
+  const tokens = tokenize(cmd);
   if (tokens === null) {
     trace('reject: unbalanced quotes');
     return false;
   }
   trace('tokens', { count: tokens.length, tokens });
 
-  // Expect exactly: node <path/work-state.js> complete <ticket>
-  if (tokens.length !== 4) {
-    trace('reject: token count not 4');
-    return false;
-  }
-
-  const args = extractCompleteArgs(tokens, trace);
+  const args = extractArgs(tokens, trace);
   if (args === null) return false;
 
-  // Verify script path is trusted.
   const resolvedPath = expandPluginRoot(args.scriptPath);
   deps.debugLogCandidatePath(resolvedPath);
   if (!isTrustedScriptPath(resolvedPath, deps.trustedDirs)) {
     trace('reject: untrusted script path', { resolvedPath });
     return false;
   }
-
-  // Verify ticket arg matches active ticket.
   if (args.targetTicket !== ticketId) {
     trace('reject: ticket mismatch', { targetTicket: args.targetTicket, ticketId });
     return false;
   }
+  return true;
+}
 
+// Step-conditional bypass for `work-state.js complete` (GH-276): passesStrictBypass
+// (dispatched-rejected, strict shape, trusted path, ticket match) AND the workflow
+// is at the terminal `complete` step.
+function isTerminalCompleteBypass(deps, cmd, ticketId, hookData) {
+  const DEBUG_BYPASS = process.env.ENFORCE_HOOK_DEBUG === '1';
+  const trace = makeTrace(DEBUG_BYPASS);
+  const args = [deps, cmd, ticketId, hookData, extractCompleteArgs, trace, tokenizeQuoteAware];
+  if (!passesStrictBypass(...args)) return false;
   if (!isAtTerminalStep(deps, ticketId, trace, DEBUG_BYPASS)) return false;
   trace('allow');
   return true;
 }
 
-/**
- * Step-conditional bypass for session-guard.js finish/reveal/complete at
- * the terminal step (GH-338). Mirrors isTerminalCompleteBypass() but for
- * session-guard.js subcommands.
- */
-function isTerminalSessionGuardBypass(deps, cmd, ticketId, hookData) {
-  // GH-695: reject FIRST when the caller is ANY dispatched agent.
-  if (isDispatchedContext(deps, hookData)) {
-    makeTrace(
-      process.env.ENFORCE_HOOK_DEBUG === '1',
-      'isTerminalSessionGuardBypass'
-    )('reject: dispatched-agent context');
+// Step-conditional bypass for `work-state.js cancel <ticket> --reason <text>`
+// (GH-339): passesStrictBypass AND the workflow is at a cancellable (planning)
+// step. Gates on isCancellablePhase instead of the terminal `complete` step.
+function isTerminalCancelBypass(deps, cmd, ticketId, hookData) {
+  const trace = makeTrace(process.env.ENFORCE_HOOK_DEBUG === '1', 'isTerminalCancelBypass');
+  const args = [deps, cmd, ticketId, hookData, extractCancelArgs, trace, tokenizeQuoteAware];
+  if (!passesStrictBypass(...args)) return false;
+  const state = deps.loadStateFile(ticketId, '.work-state.json');
+  const currentStep = deps.getCurrentStep(state, deps.workSteps);
+  if (!isCancellablePhase(currentStep)) {
+    trace('reject: not a cancellable (planning) step', { currentStep });
     return false;
   }
+  trace('allow');
+  return true;
+}
 
-  // Reject shell operators and substitutions — cheapest syntactic fail-fast.
-  if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
-
-  // Normalize by stripping balanced surrounding quote pairs (see
-  // isTerminalCompleteBypass for rationale). Keeps quoted and unquoted forms
-  // tokenizing identically on every Node version / OS.
-  const normalized = String(cmd)
-    .trim()
-    .replace(/"([^"]*)"/g, '$1')
-    .replace(/'([^']*)'/g, '$1');
-
-  // Token-based parsing (see isTerminalCompleteBypass for rationale).
-  const tokens = normalized.split(/\s+/);
-  if (tokens.length < 4) return false;
-
-  const args = extractSessionGuardArgs(tokens);
-  if (args === null) return false;
-
-  const resolvedPath = expandPluginRoot(args.scriptPath);
-  deps.debugLogCandidatePath(resolvedPath);
-  if (!isTrustedScriptPath(resolvedPath, deps.trustedDirs)) return false;
-
-  if (args.targetTicket !== ticketId) return false;
-
+// Step-conditional bypass for session-guard.js finish/reveal/complete (GH-338):
+// passesStrictBypass (strip-quote tokenizer, env-prefix-tolerant extractor) AND
+// a released terminal state (complete step, or GH-339 cancelled status).
+function isTerminalSessionGuardBypass(deps, cmd, ticketId, hookData) {
+  const trace = makeTrace(process.env.ENFORCE_HOOK_DEBUG === '1', 'isTerminalSessionGuardBypass');
+  const args = [deps, cmd, ticketId, hookData, extractSessionGuardArgs, trace, tokenizeStripQuotes];
+  if (!passesStrictBypass(...args)) return false;
   const state = deps.loadStateFile(ticketId, '.work-state.json');
-  return deps.getCurrentStep(state, deps.workSteps) === 'complete';
+  // GH-338: the terminal `complete` step releases the guard. GH-339 additively
+  // allows release when the workflow was cancelled (status === 'cancelled'),
+  // WITHOUT weakening the dispatched-agent rejection above or the complete-step
+  // allowance — the cancel path is the sanctioned atomic teardown too.
+  return isReleasedTerminalState(deps.getCurrentStep(state, deps.workSteps), state);
+}
+
+// GH-339: guard release is sanctioned at the terminal `complete` step (GH-338)
+// OR when the state was cancelled — a named predicate keeps the OR additive.
+function isReleasedTerminalState(currentStep, state) {
+  return currentStep === 'complete' || state?.status === 'cancelled';
 }
 
 // Step-conditional bypasses shared by Rule 3 and Rule 3b.
@@ -299,6 +313,10 @@ function isTerminalBypassAllowed(deps, scriptBase, subCmd, cmd, ticketId, hookDa
   // work-state.js complete at terminal step (GH-276)
   if (scriptBase === 'work-state.js' && subCmd === 'complete') {
     return isTerminalCompleteBypass(deps, cmd, ticketId, hookData);
+  }
+  // work-state.js cancel in a planning phase (GH-339) — Rule 3b, dispatched first
+  if (scriptBase === 'work-state.js' && subCmd === 'cancel') {
+    return isTerminalCancelBypass(deps, cmd, ticketId, hookData);
   }
   // session-guard.js finish/reveal/complete at terminal step (GH-338)
   if (
