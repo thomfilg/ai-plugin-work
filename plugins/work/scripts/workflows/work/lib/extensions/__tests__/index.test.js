@@ -8,7 +8,7 @@
 
 'use strict';
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -191,5 +191,56 @@ module.exports = {
     const api = initExtensions({ repoRoot: root, tasksDir });
     // event-bus catches handler errors and logs — dispatch must resolve.
     await api.dispatch('OnTicketResolved', { ticketId: 'GH-522' });
+  });
+
+  it('a throwing handler does not suppress lower-priority handlers (R6)', async () => {
+    const { initExtensions } = loadIndex();
+    const { root, tasksDir } = freshRepo();
+    const extDir = makeExtensionsDir(root);
+    // Higher priority throws; lower priority must still run. The marker file it
+    // writes into tasksDir is the observable side effect proving it executed.
+    writeExt(
+      extDir,
+      'a-boom.js',
+      `module.exports = {
+        events: ['OnTicketResolved'],
+        priority: 100,
+        handler: () => { throw new Error('boom'); },
+      };`
+    );
+    writeExt(
+      extDir,
+      'b-ran.js',
+      `const fs = require('node:fs');
+       const path = require('node:path');
+       module.exports = {
+        events: ['OnTicketResolved'],
+        priority: 1,
+        handler: (payload) => { fs.writeFileSync(path.join(${JSON.stringify(tasksDir)}, 'ran.flag'), payload.ticketId); },
+      };`
+    );
+    const api = initExtensions({ repoRoot: root, tasksDir });
+    await api.dispatch('OnTicketResolved', { ticketId: 'GH-522' });
+    assert.equal(fs.readFileSync(path.join(tasksDir, 'ran.flag'), 'utf8'), 'GH-522');
+  });
+
+  it('exposes listHandlers so response-matching can enumerate handlers in production', async () => {
+    const { initExtensions } = loadIndex();
+    const { root, tasksDir } = freshRepo();
+    const extDir = makeExtensionsDir(root);
+    writeExt(
+      extDir,
+      'match.js',
+      `module.exports = {
+        events: ['OnAgentResponseMatched'],
+        match: 'flake',
+        handler: () => {},
+      };`
+    );
+    const api = initExtensions({ repoRoot: root, tasksDir });
+    assert.equal(typeof api.listHandlers, 'function');
+    const handlers = api.listHandlers('OnAgentResponseMatched');
+    assert.equal(handlers.length, 1);
+    assert.ok(handlers[0].match && handlers[0].match.compiled instanceof RegExp);
   });
 });
