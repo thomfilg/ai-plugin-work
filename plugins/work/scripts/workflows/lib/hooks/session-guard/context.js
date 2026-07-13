@@ -145,6 +145,64 @@ function readTicketArtifact(ticketId, fileName) {
   }
 }
 
+/**
+ * Resolve the tasks base for artifact writes/deletes. Prefers the live
+ * `TASKS_BASE` env var, deriving from `WORKTREES_BASE/tasks` when only the
+ * latter is exported (the orchestrator sets one or the other). Returns null
+ * when neither is present so the write/delete helpers fail-open on an unset
+ * base — reads (`readTicketArtifact`) tolerate config-file fallback, but a
+ * write must never target a stale auto-derived base.
+ */
+function getArtifactTasksBase() {
+  if (process.env.TASKS_BASE) return process.env.TASKS_BASE;
+  if (process.env.WORKTREES_BASE) return path.join(process.env.WORKTREES_BASE, 'tasks');
+  return null;
+}
+
+/**
+ * Write a per-ticket artifact file (`$TASKS_BASE/<safeId>/<fileName>`) with the
+ * given content, creating the ticket directory if needed. Returns the written
+ * absolute path, or null when TASKS_BASE is unset, the ticket id is empty, the
+ * resolved path escapes the tasks base, or the write fails — callers fail safe.
+ */
+function writeTicketArtifact(ticketId, fileName, content) {
+  try {
+    const tasksBase = getArtifactTasksBase();
+    if (!tasksBase || !ticketId) return null;
+    const safeId = safeTicketIdOrRaw(ticketId);
+    const resolved = path.resolve(tasksBase, safeId, fileName);
+    // Guard against path traversal — resolved path must stay under tasksBase
+    if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return null;
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, content, 'utf8');
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete a per-ticket artifact file (`$TASKS_BASE/<safeId>/<fileName>`). Returns
+ * true when a file was removed, false when TASKS_BASE is unset, the ticket id is
+ * empty, the resolved path escapes the tasks base, the file was absent, or the
+ * delete fails. Never throws — callers treat false as "nothing to clear".
+ */
+function deleteTicketArtifact(ticketId, fileName) {
+  try {
+    const tasksBase = getArtifactTasksBase();
+    if (!tasksBase || !ticketId) return false;
+    const safeId = safeTicketIdOrRaw(ticketId);
+    const resolved = path.resolve(tasksBase, safeId, fileName);
+    // Guard against path traversal — resolved path must stay under tasksBase
+    if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return false;
+    if (!fs.existsSync(resolved)) return false;
+    fs.unlinkSync(resolved);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Map a 1-based step index from .work-state.json to its step name, or undefined. */
 function stepNameFromIndex(stepIndex) {
   try {
@@ -223,10 +281,12 @@ function isCheckWorkflowActive(ticketId) {
 
 module.exports = {
   currentSessionId,
+  deleteTicketArtifact,
   getOwnerSessionId,
   getTicketId,
   isCheckWorkflowActive,
   isOtherOwner,
   readTicketArtifact,
   readWorkState,
+  writeTicketArtifact,
 };

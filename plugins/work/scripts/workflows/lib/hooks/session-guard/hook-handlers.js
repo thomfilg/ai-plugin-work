@@ -18,8 +18,18 @@ const {
   isOtherOwner,
   readTicketArtifact,
   readWorkState,
+  writeTicketArtifact,
 } = require(path.join(__dirname, 'context'));
 const { findActiveSessions } = require(path.join(__dirname, 'store'));
+// Task 2 handoff module — READ/WRITE/VALIDATE the `.continue-here.md` artifact.
+// Intentionally NOT the session store: the checkpoint path is context-only and
+// must never touch the lock (no reveal/finish/passphrase — see LOCK INTEGRITY).
+const {
+  HANDOFF_FILENAME,
+  REQUIRED_HANDOFF_SECTIONS,
+  readHandoff,
+  validateHandoffSections,
+} = require(path.join(__dirname, '..', '..', 'handoff'));
 
 /**
  * Active sessions owned by THIS terminal/worktree. Sessions owned by a
@@ -33,6 +43,61 @@ function ownedActiveSessions(hookData) {
   const csid = currentSessionId(hookData);
   const currentRoot = resolveWorktreeRoot();
   return findActiveSessions().filter((s) => !isOtherOwner(s, csid, currentRoot));
+}
+
+/**
+ * A `.continue-here.md` skeleton carrying the three REQUIRED headings with
+ * placeholder guidance. Written when no checkpoint exists yet so the artifact
+ * survives compaction with a valid structure; the in-session agent fills the
+ * prose (hooks NEVER author narrative — R14). Kept structurally valid so
+ * `validateHandoffSections` passes on the freshly-written skeleton.
+ * @returns {string}
+ */
+function handoffSkeleton() {
+  return REQUIRED_HANDOFF_SECTIONS.map(
+    (name) => `## ${name}\n\n<!-- fill in before this session is compacted -->\n`
+  ).join('\n');
+}
+
+/**
+ * Checkpoint write+validate for the PreCompact (and optional P2 auto-pause)
+ * path. Pushes reminder/checkpoint lines onto `lines`; does not print or exit.
+ *
+ * LOCK INTEGRITY (R3): this helper ONLY reads state + writes the
+ * `.continue-here.md` artifact. It never reveals the passphrase, never calls
+ * session-guard reveal/finish, and never satisfies `blockStop` — pause is
+ * context, not an unlock. It must remain free of any lock/session-store
+ * mutation.
+ *
+ * @param {string} ticketId the owning session's ticket id
+ * @param {string[]} lines stdout accumulator (mutated in place)
+ * @returns {void}
+ */
+function checkpointHandoff(ticketId, lines) {
+  try {
+    const existing = readHandoff(ticketId);
+    if (existing !== null) {
+      // Validate the agent-authored checkpoint; flag any missing heading.
+      const { ok, missing } = validateHandoffSections(existing);
+      if (!ok) {
+        lines.push(
+          `CHECKPOINT INCOMPLETE — ${HANDOFF_FILENAME} is missing required section(s): ${missing.join(', ')}`,
+          `Add the missing heading(s) before compaction so the resuming agent has full context.`,
+          ''
+        );
+      }
+      return;
+    }
+    // No checkpoint yet — write a valid skeleton and prompt the agent to fill it.
+    writeTicketArtifact(ticketId, HANDOFF_FILENAME, handoffSkeleton());
+    lines.push(
+      `CHECKPOINT WRITTEN — a ${HANDOFF_FILENAME} skeleton was created for this ticket.`,
+      `Fill its three sections (${REQUIRED_HANDOFF_SECTIONS.join('; ')}) from live context so the resuming agent can continue mid-thought.`,
+      ''
+    );
+  } catch {
+    // Fail-open: never let checkpointing block compaction (R14).
+  }
 }
 
 function handlePreCompact(hookData) {
@@ -59,6 +124,9 @@ function handlePreCompact(hookData) {
       `The session is locked with a passphrase. Complete all steps to unlock.`,
       ''
     );
+    // Write/validate a `.continue-here.md` checkpoint (not just a reminder).
+    // Context-only: never releases the session-guard lock.
+    checkpointHandoff(session.ticketId, lines);
   }
 
   process.stdout.write(lines.join('\n'));
