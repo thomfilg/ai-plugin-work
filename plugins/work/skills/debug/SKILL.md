@@ -64,7 +64,7 @@ Parse the argument (the text after `/debug`; under codex, the text after the
 |------------------------------|-----------------------------------------------------------------|------------------------------|
 | `/debug "<description>"`      | `debug-session.js init` → `Task(debugger)` mode **investigate** | Yes (mode investigate)       |
 | `/debug "<description>" --diagnose` | `debug-session.js init` → `Task(debugger)` mode **diagnose** | Yes (mode diagnose)     |
-| `/debug continue`            | verify session exists and is `active` → `Task(debugger)` mode **continue** | Yes (mode continue)  |
+| `/debug continue`            | parse `status:` value — dispatch `Task(debugger)` mode **continue** ONLY when `active`; terminal status (`resolved`/`diagnosed`/`abandoned`) or no session reports and stops | Only when `active`  |
 | `/debug status`             | `debug-session.js status`                                        | **No** — never a Task        |
 | `/debug list`               | `debug-session.js list`                                          | **No** — never a Task        |
 
@@ -111,12 +111,25 @@ node "$DEBUG_SESSION" list
 
 ### `/debug continue` — resume an active investigation
 
-1. Verify a session exists and its `status` is `active` (via
-   `node "$DEBUG_SESSION" status`). If there is no active session, report and
-   stop — do not dispatch.
-2. Dispatch the `debugger` agent with mode **continue**. The agent reads the
-   existing `.debug-session.md`, resumes from `## Current Focus`, and never
-   re-tests a hypothesis already marked TESTED.
+1. Run `node "$DEBUG_SESSION" status` and **capture the `status:` value** from
+   its output (parse the `status:` line — do NOT rely on the exit code alone).
+   The helper exits `0` for ANY parseable session, including the terminal
+   statuses `resolved`, `diagnosed`, and `abandoned`, so a success exit is
+   **not** proof the session is resumable.
+
+   ```bash
+   STATUS="$(node "$DEBUG_SESSION" status | sed -n 's/^status:[[:space:]]*//p' | head -n1)"
+   ```
+
+2. Dispatch `Task(debugger)` mode **continue** **only when `$STATUS` is exactly
+   `active`**. For a terminal status (`resolved`, `diagnosed`, or `abandoned`),
+   OR when there is no session file (the helper exits non-zero), report the
+   terminal status (or "no session") and **STOP without dispatching** — a
+   completed investigation is never resumed.
+
+3. On a genuinely `active` session, the `debugger` agent reads the existing
+   `.debug-session.md`, resumes from `## Current Focus`, and never re-tests a
+   hypothesis already marked TESTED.
 
 ## Task(debugger) dispatch
 
