@@ -57,6 +57,57 @@ Load-bearing facts when porting:
 - Transitions validated by `workflowCanTransition()` — only declared edges are allowed.
 - `transition-step.js` handles state persistence, artifact archival, and TDD gates.
 
+### Cancelling a workflow (`cancel` subcommand)
+
+`cancel` is a terminal orchestrator verb for aborting a `/work` run **during the
+planning phases** with full bookkeeping (state + audit + guard release +
+archive), instead of an ad-hoc abandon.
+
+- **Invocation:** `node work.workflow.js cancel <TICKET> --reason "<reason>"`.
+  Both `<TICKET>` and `--reason` are required — a parse failure or a missing
+  reason exits 1. The `--reason` string is recorded verbatim (an argv token, no
+  shell interpolation) in state and audit.
+- **Planning-phase-only window:** cancellation is permitted only from `ticket`
+  through `spec_gate`. The boundary is a single named constant
+  `CANCELLABLE_STEP_CEILING = 'spec_gate'` (in `work-state/steps.js`);
+  `isCancellablePhase(step)` derives the cancellable set from a `STEP_ORDER`
+  slice up to that ceiling. At `tasks` and beyond it is not cancellable.
+- **`cancelled` terminal status:** a successful cancel sets `.work-state.json`
+  `status` to a new value `cancelled` — distinct from `in_progress`/`completed`
+  and never reusing `completed` — plus additive `cancelReason` (verbatim) and
+  `cancelledTime` (ISO) fields. The `cancelWork` mutator is idempotent: a second
+  call while already `cancelled` returns the state unchanged.
+- **Release + archive sequence** (on a cancellable phase): the work-state
+  `cancel` mutator marks the state → the sanctioned guard `finish` teardown
+  releases the session guard (reveal + unlink the session file, exactly as the
+  complete step does — no direct bypass) → planning + enforcement artifacts
+  (`brief.md`, `spec.md`, `tasks.md`, `.work-actions.json`, `tdd-phase.json`)
+  are moved from `tasks/<TICKET>/` into `tasks/<TICKET>/archive/` (created +
+  merged into if it already exists, mirroring the complete step's archive
+  convention) → a one-line operator summary (ticket, reason, phase at cancel,
+  archive location) plus a JSON response is printed.
+- **Refuse at/after `implement`:** once code has been written the orchestrator
+  surfaces an **AskUserQuestion confirmation that defaults to refusing**, exits
+  non-zero, and does **not** mutate state or archive anything (status stays
+  `in_progress`). Before `implement` but past the cancel ceiling (e.g. `tasks`)
+  it rejects with a clear message and exits 1.
+- **Auth / gating:** the planning-phase precondition lives inside `cancelWork`
+  (script-side), so a direct state-script call cannot cancel an implement-phase
+  ticket. The work-state `cancel` sub-command is routed through the Rule-3b
+  terminal-bypass path (`isTerminalSessionGuardBypass` additively allows guard
+  release when status is `cancelled`, with the dispatched-agent context still
+  rejected first) so a dispatched subagent cannot invoke it — it is blocked with
+  the dispatched-agent guidance.
+- **Stop-hook allowance:** the session-guard Stop hook allows stopping (exit 0,
+  no "DO NOT ABANDON" block) when an owned session's `.work-state.json` status
+  is `cancelled`, scoped to owned sessions and mirroring the existing
+  allowances. An in-progress non-cancelled owned session still blocks (exit 2).
+- **`abort workflow` keyword redirect:** the legacy `abort workflow` Stop-hook
+  keyword still allows the stop, but now emits operator guidance pointing at the
+  bookkept `cancel` subcommand (`work.workflow.js cancel <TICKET> --reason
+  "<reason>"`) — the keyword is retained, its guidance is redirected, keeping
+  one auditable cancellation route.
+
 ### TDD Enforcement
 - `implement` step is TDD-gated: must record RED → GREEN cycle before transitioning out.
 - `tdd-phase-state.js` is the ONLY way to record evidence — agents cannot self-report.

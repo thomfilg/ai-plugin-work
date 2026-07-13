@@ -13,6 +13,7 @@ const {
   setCheckProgress,
   addError,
   completeWork,
+  cancelWork,
   getResumeInfo,
   formatState,
 } = require('./steps');
@@ -39,6 +40,14 @@ function exitIfError(result) {
     console.error(JSON.stringify(result));
     process.exit(1);
   }
+}
+
+// Extract the `--reason <value>` argv token, or '' when absent/empty. The value
+// is taken verbatim from the following argv slot (no shell interpolation).
+function parseReason(args) {
+  const idx = args.indexOf('--reason');
+  if (idx === -1) return '';
+  return args[idx + 1] || '';
 }
 
 const HANDLERS = {
@@ -73,6 +82,21 @@ const HANDLERS = {
 
   complete(_args, ticketId) {
     const result = completeWork(ticketId);
+    exitIfError(result);
+    printResult(result);
+  },
+
+  // GH-339: mark a planning-phase run cancelled. Parses `--reason "<string>"`
+  // from args (verbatim argv token — no shell interpolation), delegates the
+  // mutation to cancelWork (script-side planning-phase precondition lives
+  // there), then error-gates and prints the mutated state.
+  cancel(args, ticketId) {
+    const reason = parseReason(args);
+    if (!reason) {
+      console.error('Usage: node work-state.js cancel <ticket-id> --reason "<reason>"');
+      process.exit(1);
+    }
+    const result = cancelWork(ticketId, reason);
     exitIfError(result);
     printResult(result);
   },
@@ -154,7 +178,7 @@ async function main() {
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
     console.error(
-      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get, task-review-fix-rounds, task-review-fix-rounds-increment, task-review-fix-rounds-reset'
+      'Commands: init, get, set-step, set-check, add-error, complete, cancel, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get, task-review-fix-rounds, task-review-fix-rounds-increment, task-review-fix-rounds-reset'
     );
     process.exit(1);
   }

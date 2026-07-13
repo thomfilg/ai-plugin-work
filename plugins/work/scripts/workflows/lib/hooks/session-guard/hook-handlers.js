@@ -21,6 +21,15 @@ const {
 } = require(path.join(__dirname, 'context'));
 const { findActiveSessions } = require(path.join(__dirname, 'store'));
 
+// Operator guidance printed when a stop carries the `abort workflow` keyword.
+// The keyword still allows the stop; this redirects the operator toward the
+// single bookkept cancellation route (the `cancel` subcommand) so cancellation
+// stays auditable rather than an ad-hoc abandon.
+const ABORT_KEYWORD_GUIDANCE =
+  'Stop allowed via "abort workflow" keyword.\n' +
+  'To cancel this workflow with bookkeeping (state + audit + guard release + archive), run:\n' +
+  '  node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/engine/work.workflow.js" cancel <TICKET> --reason "<reason>"\n';
+
 /**
  * Active sessions owned by THIS terminal/worktree. Sessions owned by a
  * different terminal or worktree are dropped (lock bleed): without this, a
@@ -33,6 +42,23 @@ function ownedActiveSessions(hookData) {
   const csid = currentSessionId(hookData);
   const currentRoot = resolveWorktreeRoot();
   return findActiveSessions().filter((s) => !isOtherOwner(s, csid, currentRoot));
+}
+
+/**
+ * True when the ticket's `.work-state.json` marks the workflow as `cancelled`.
+ * A cancelled workflow is a bookkept terminal state (via the `cancel`
+ * subcommand), so the Stop guard should allow the stop with no block message —
+ * mirroring the `isCheckWorkflowActive` allowance. Fails safe (false) when the
+ * state file is missing or unreadable.
+ */
+function isCancelledWorkState(ticketId) {
+  try {
+    const raw = readTicketArtifact(ticketId, '.work-state.json');
+    if (!raw) return false;
+    return JSON.parse(raw)?.status === 'cancelled';
+  } catch {
+    return false; /* unreadable — fall through to the normal block path */
+  }
 }
 
 function handlePreCompact(hookData) {
@@ -194,6 +220,7 @@ function handleStop(hookData) {
   // Check for abort keyword in stop message
   const stopMessage = hookData?.stop_message || '';
   if (/abort\s+workflow/i.test(stopMessage)) {
+    process.stderr.write(ABORT_KEYWORD_GUIDANCE);
     process.exit(0);
     return;
   }
@@ -208,6 +235,13 @@ function handleStop(hookData) {
   // Check if any owned session is unrevealed (tests: cwd match, no-match, legacy without cwd)
   const unrevealed = ownedSessions.filter((s) => !s.revealed);
   if (unrevealed.length === 0) {
+    process.exit(0);
+    return;
+  }
+
+  // Allow stop when ALL unrevealed sessions are cancelled (bookkept terminal
+  // state via the `cancel` subcommand) — no block message, mirroring /check.
+  if (unrevealed.every((s) => isCancelledWorkState(s.ticketId))) {
     process.exit(0);
     return;
   }

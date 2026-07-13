@@ -10,6 +10,80 @@
 const { STEPS, loadState, saveState, initState, autoInitTdd } = require('./core');
 const { autoCompleteCheckpointTasks } = require('./checkpoints');
 const { appendAction } = require('../lib/work-actions');
+const { STEP_ORDER } = require('../step-registry');
+
+/**
+ * GH-339: Highest step at which a /work run may still be terminally cancelled.
+ * Planning phases (through the Gherkin spec_gate) are cancellable; once tasks
+ * are drafted and implementation begins, cancel is refused.
+ */
+const CANCELLABLE_STEP_CEILING = 'spec_gate';
+
+/**
+ * GH-339: True when `step` sits at or before the cancellable ceiling
+ * (spec_gate). Steps at `tasks` and beyond (implement, …) are NOT cancellable.
+ * Unknown steps are treated as non-cancellable (fail closed).
+ * @param {string} step
+ * @returns {boolean}
+ */
+function isCancellablePhase(step) {
+  const ceilingIndex = STEP_ORDER.indexOf(CANCELLABLE_STEP_CEILING);
+  const stepIndex = STEP_ORDER.indexOf(step);
+  if (stepIndex < 0) return false;
+  return stepIndex <= ceilingIndex;
+}
+
+/**
+ * Derive the current step from a work-state: the first step flagged
+ * 'in_progress', falling back to state.currentStep (1-indexed). Returns null
+ * when neither yields a known step.
+ * @param {object} state
+ * @returns {string|null}
+ */
+function currentStepOf(state) {
+  const stepStatus = state.stepStatus || {};
+  const inProgress = STEP_ORDER.find((step) => stepStatus[step] === 'in_progress');
+  if (inProgress) return inProgress;
+  const idx = Number(state.currentStep) - 1;
+  return STEP_ORDER[idx] || null;
+}
+
+/**
+ * GH-339: Terminally cancel a /work run during a planning phase.
+ * - Idempotent: if already cancelled, returns state untouched (reason/time
+ *   preserved).
+ * - Refused (returns { error }) once the run is past the spec_gate ceiling
+ *   (tasks, implement, …) — status is never mutated on refusal.
+ * - On success, stamps status='cancelled', cancelReason (verbatim), and an ISO
+ *   cancelledTime, and persists. Never becomes 'completed'.
+ * Returns { error } when no state found (caller must check).
+ * @param {string} ticketId
+ * @param {string} reason
+ */
+function cancelWork(ticketId, reason) {
+  const state = loadState(ticketId);
+  if (!state) {
+    return { error: 'No state found' };
+  }
+
+  // Idempotent: already cancelled — return as-is, preserving original reason/time.
+  if (state.status === 'cancelled') {
+    return state;
+  }
+
+  const step = currentStepOf(state);
+  if (!isCancellablePhase(step)) {
+    return {
+      error: `Cannot cancel workflow: step "${step}" is past the ${CANCELLABLE_STEP_CEILING} cancel ceiling`,
+    };
+  }
+
+  state.status = 'cancelled';
+  state.cancelReason = reason;
+  state.cancelledTime = new Date().toISOString();
+
+  return saveState(ticketId, state);
+}
 
 /**
  * Set step status
@@ -283,6 +357,9 @@ module.exports = {
   setCheckProgress,
   addError,
   completeWork,
+  cancelWork,
+  isCancellablePhase,
+  CANCELLABLE_STEP_CEILING,
   getResumeInfo,
   formatState,
 };

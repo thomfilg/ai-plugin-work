@@ -6,6 +6,8 @@
  *
  *   - EXEMPT_SCRIPTS: legitimate state-file writers exempt from Vector 3
  *   - SAFE_SUBCOMMANDS: read-only/idempotent sub-commands per state script
+ *   - TERMINAL_BYPASS_SUBCOMMANDS: mutating sub-commands gated via the Rule-3b
+ *     terminal-bypass path (GH-276 complete, GH-339 cancel) — not blanket-safe
  *   - CHECK_AGENTS: /check agents that bypass /work step blocking
  *   - TRUSTED_SCRIPT_DIRS: directories where exempt scripts may live,
  *     realpath-normalised at module load (GH-452)
@@ -42,8 +44,10 @@ const EXEMPT_SCRIPTS = new Set([
 // Sub-command filtering for state scripts (GH-89).
 // work-state.js: exempt for get, resume-info, init, active-subtask, add-error.
 // workflow-state.js: exempt for get, resume-info, add-error (init blocked — not idempotent).
-// Mutating sub-commands (set-step, set-check, complete, etc.) must go through the orchestrator.
-// Exception: 'complete' is step-conditionally allowed at the terminal step via strict match (GH-276).
+// Mutating sub-commands (set-step, set-check, complete, cancel, etc.) must go through the orchestrator.
+// Exception: 'complete' (GH-276) and 'cancel' (GH-339) are step-conditionally
+// allowed via strict match — but through the Rule-3b terminal-bypass path, NOT
+// this blanket-safe set. See TERMINAL_BYPASS_SUBCOMMANDS below.
 const SAFE_SUBCOMMANDS = {
   'work-state.js': new Set([
     'get',
@@ -62,6 +66,21 @@ const SAFE_SUBCOMMANDS = {
   ]),
   'workflow-state.js': new Set(['get', 'resume-info', 'add-error']), // init excluded: not idempotent (resets all steps). exemptPatterns aligned.
   'session-guard.js': new Set(['init', 'status']), // SAFE_SUBCOMMANDS session-guard (GH-338)
+};
+
+// Sub-commands routed through the Rule-3b terminal-bypass path rather than the
+// blanket-safe set above (GH-276 complete, GH-339 cancel). These are NOT
+// read-only: they mutate terminal state, so they are gated by a strict-match +
+// planning/terminal-step precondition and rejected first in a dispatched-agent
+// context. They must stay OUT of SAFE_SUBCOMMANDS (a blanket-safe entry would
+// let a dispatched subagent invoke them unguarded) and IN alignment with
+// state-script-gate.js's isTerminalBypassEligible — the single Rule-3b predicate
+// this map mirrors. Kept co-located with the GH-695 task-advance note above.
+const TERMINAL_BYPASS_SUBCOMMANDS = {
+  // 'complete' is step-conditionally allowed at the terminal step (GH-276);
+  // 'cancel' is step-conditionally allowed in a planning phase (GH-339). Both
+  // are gated-via-bypass, never blanket-safe.
+  'work-state.js': new Set(['complete', 'cancel']),
 };
 
 // Agents legitimately used by /check that should bypass /work step blocking
@@ -161,6 +180,7 @@ debugLogTrustedDirs();
 module.exports = {
   EXEMPT_SCRIPTS, // legitimate state-file writers (Vector 3 exempt)
   SAFE_SUBCOMMANDS, // read-only/idempotent sub-commands per state script
+  TERMINAL_BYPASS_SUBCOMMANDS, // gated-via-terminal-bypass sub-commands (GH-276/GH-339)
   CHECK_AGENTS, // /check agents that bypass /work step blocking
   TRUSTED_SCRIPT_DIRS, // realpath-normalised trusted directories (GH-452)
   debugLogCandidatePath, // GH-452 per-call diagnostic
