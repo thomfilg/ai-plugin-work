@@ -18,7 +18,7 @@
 
 'use strict';
 
-const { describe, it, before, after, beforeEach } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('child_process');
 const path = require('path');
