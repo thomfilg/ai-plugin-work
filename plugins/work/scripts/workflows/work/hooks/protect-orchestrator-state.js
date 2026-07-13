@@ -31,7 +31,7 @@
 'use strict';
 
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', '..', 'lib', 'hookEntrypoint'));
 const { createFileProtector } = require(
   path.join(__dirname, '..', '..', 'lib', 'protect-state-files')
 );
@@ -54,6 +54,15 @@ const CLAIMS_DIR_RE = /(?:^|[\\/])\.claims[\\/]/;
 const RUNS_RUN_DIR_RE = /(?:^|[\\/])runs[\\/]run\d+[\\/]/;
 const ARCHIVE_DIR_RE = /(?:^|[\\/])\.?archives?[\\/]/;
 
+// Directory-anchored patterns paired with the label prefix to emit on a match.
+// Each RE anchors on a path separator so a user file literally named
+// "myruns/foo" never collides with our "runs/run<N>/" pattern.
+const DIR_PATTERNS = [
+  { re: CLAIMS_DIR_RE, label: '.claims' },
+  { re: RUNS_RUN_DIR_RE, label: 'runs' },
+  { re: ARCHIVE_DIR_RE, label: 'archive' },
+];
+
 /**
  * Decide whether a candidate path is orchestrator-managed.
  * Returns a label (matched basename or directory-anchored hint) or null.
@@ -69,11 +78,10 @@ function isOrchestratorManaged(filePath) {
   const fp = String(filePath || '');
   if (!fp) return null;
   const bn = path.basename(fp);
-  if (PROTECTED_BASENAMES.has(bn)) return bn;
-  if (WORK_STATE_BAK_RE.test(bn)) return bn;
-  if (CLAIMS_DIR_RE.test(fp)) return `.claims/${bn || '<dir>'}`;
-  if (RUNS_RUN_DIR_RE.test(fp)) return `runs/${bn || '<dir>'}`;
-  if (ARCHIVE_DIR_RE.test(fp)) return `archive/${bn || '<dir>'}`;
+  if (PROTECTED_BASENAMES.has(bn) || WORK_STATE_BAK_RE.test(bn)) return bn;
+  for (const { re, label } of DIR_PATTERNS) {
+    if (re.test(fp)) return `${label}/${bn || '<dir>'}`;
+  }
   return null;
 }
 
@@ -135,17 +143,7 @@ const protector = createFileProtector({
   trustedScriptRoots: TRUSTED_ROOTS,
 });
 
-async function main() {
-  let raw = '';
-  for await (const chunk of process.stdin) raw += chunk;
-
-  let hookData;
-  try {
-    hookData = JSON.parse(raw);
-  } catch {
-    process.exit(0); // fail-open on malformed input
-  }
-
+function main(hookData) {
   const result = protector.check(hookData.tool_name, hookData.tool_input || {}, hookData);
   if (result && result.blocked) {
     process.stderr.write(result.message);
@@ -154,11 +152,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  try {
-    logHookError(__filename, err);
-  } catch {
-    /* swallow */
-  }
-  process.exit(0); // fail-open on uncaught error
-});
+// runHook reads + parses stdin (malformed JSON → {}), runs the handler, and on
+// an uncaught throw logs the error and exits 0 (fail-open). Intentional blocks
+// exit 2 from inside main().
+runHook(main, { file: __filename });

@@ -15,9 +15,28 @@
 
 'use strict';
 
-const { spawnSync } = require('node:child_process');
+const { safeSpawnSync } = require('../../lib/safeSubprocess');
 
 const { fileMatchesScope } = require('../../lib/task-scope');
+
+/**
+ * Distinguished error thrown by `detectChangedTestFilesInScope` when the git
+ * change-detection probes fail (nonzero/null exit, missing git binary, or the
+ * `safeSpawnSync` 15000ms timeout on a large/slow worktree). Named so callers
+ * can catch THIS case specifically and emit an accurate "git probe failed"
+ * block message + audit — instead of degrading to an empty changed-set that
+ * the tests-only GREEN gate reports as the misleading "No *.test.* file under
+ * scope has changes" (a git timeout is NOT "the agent wrote no test"). See
+ * GH-690: the safeSpawnSync migration added timeout as a new failure trigger,
+ * so the git-failure path must be loud and distinguishable, not silent.
+ */
+class GitProbeFailedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'GitProbeFailedError';
+    this.gitProbeFailed = true;
+  }
+}
 
 /**
  * Pure helper: filter a list of changed POSIX paths down to those that are
@@ -92,16 +111,16 @@ function detectChangedTestFilesInScope(repoRoot, scope) {
   // misleading "No *.test.* file under scope has changes" message.
   let gitFailed = false;
   try {
-    const r1 = spawnSync('git', ['diff', '--name-only'], { cwd: repoRoot, encoding: 'utf8' });
+    const r1 = safeSpawnSync('git', ['diff', '--name-only'], { cwd: repoRoot, encoding: 'utf8' });
     if (r1.status !== 0) gitFailed = true;
     diff = r1.stdout || '';
-    const r2 = spawnSync('git', ['diff', '--cached', '--name-only'], {
+    const r2 = safeSpawnSync('git', ['diff', '--cached', '--name-only'], {
       cwd: repoRoot,
       encoding: 'utf8',
     });
     if (r2.status !== 0) gitFailed = true;
     staged = r2.stdout || '';
-    const r3 = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], {
+    const r3 = safeSpawnSync('git', ['ls-files', '--others', '--exclude-standard'], {
       cwd: repoRoot,
       encoding: 'utf8',
     });
@@ -111,9 +130,17 @@ function detectChangedTestFilesInScope(repoRoot, scope) {
     gitFailed = true;
   }
   if (gitFailed) {
-    process.stderr.write(
-      'changed-test-files: git change detection failed (corrupt repo or detached state?); ' +
-        'treating changed-files as empty. Downstream gate may block with a misleading message.\n'
+    // GH-690: do NOT degrade to an empty changed-set here. On a git probe
+    // failure (nonzero/null exit, missing binary, or the safeSpawnSync 15s
+    // timeout) an empty set is indistinguishable from "the agent wrote no
+    // test", and the tests-only GREEN gate would block with the misleading
+    // "No *.test.* file under scope has changes" reason. Throw a distinguished
+    // error so both callers (task-next.js evaluateGreenTestsOnly and the gate
+    // writer's applyTestsOnlyGreenTrap) render an accurate, honest cause.
+    throw new GitProbeFailedError(
+      'git change detection failed (nonzero/null exit, missing git binary, or ' +
+        'the 15000ms probe timeout on a large/slow worktree). Cannot determine ' +
+        'whether an in-scope test file changed. This is NOT "no test was written".'
     );
   }
   const changed = [
@@ -129,4 +156,8 @@ function detectChangedTestFilesInScope(repoRoot, scope) {
   }, out);
 }
 
-module.exports = { filterChangedTestFilesByScope, detectChangedTestFilesInScope };
+module.exports = {
+  filterChangedTestFilesByScope,
+  detectChangedTestFilesInScope,
+  GitProbeFailedError,
+};

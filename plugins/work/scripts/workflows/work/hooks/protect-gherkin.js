@@ -26,7 +26,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', '..', 'lib', 'hookEntrypoint'));
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 
 /** Tag line: zero or more whitespace, then one or more `@token` tokens. */
@@ -51,6 +51,21 @@ const TAG_LINE_RE = /^\s*(@[\w:./-]+\s*)+$/;
  * @param {string} newString
  * @returns {boolean} true if every differing line is tag-only
  */
+/**
+ * A single zip-aligned line pair is "tag-safe" when every present side is a
+ * tag-only line. Insertion (old missing) checks the new line; deletion (new
+ * missing) checks the old line; modification checks both.
+ *
+ * @param {string|null} o old-side line (null = absent)
+ * @param {string|null} n new-side line (null = absent)
+ * @returns {boolean}
+ */
+function isTagSafeLinePair(o, n) {
+  if (o !== null && !TAG_LINE_RE.test(o)) return false;
+  if (n !== null && !TAG_LINE_RE.test(n)) return false;
+  return true;
+}
+
 function isTagOnlyGherkinEdit(oldString, newString) {
   if (typeof oldString !== 'string' || typeof newString !== 'string') return false;
   if (oldString === newString) return false; // No diff — let normal flow handle
@@ -65,11 +80,7 @@ function isTagOnlyGherkinEdit(oldString, newString) {
     const n = i < newLines.length ? newLines[i] : null;
     if (o === n) continue;
     sawDiff = true;
-    // Insertion: old side missing — new line must be tag-only.
-    // Deletion: new side missing — old line must be tag-only.
-    // Modification: both sides present — both must be tag-only.
-    if (o !== null && !TAG_LINE_RE.test(o)) return false;
-    if (n !== null && !TAG_LINE_RE.test(n)) return false;
+    if (!isTagSafeLinePair(o, n)) return false;
   }
   return sawDiff;
 }
@@ -162,36 +173,61 @@ const protector = createArtifactProtector({
 const BYPASS_LINE =
   'BYPASS: edit gherkin.feature via /work spec_gate — re-enter spec_gate to recover and fix structural Gherkin changes.';
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
+/**
+ * Normalise an Edit/MultiEdit tool input into the list of {old_string,
+ * new_string} edits to diff-check. MultiEdit carries an `edits` array; a plain
+ * Edit is a single pair.
+ *
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @returns {Array<{old_string: string, new_string: string}>}
+ */
+function collectGherkinEdits(toolName, toolInput) {
+  if (toolName === 'MultiEdit' && Array.isArray(toolInput.edits)) return toolInput.edits;
+  return [{ old_string: toolInput.old_string, new_string: toolInput.new_string }];
+}
 
-  const hookData = JSON.parse(input);
+/**
+ * True only when the tool call targets gherkin.feature during `implement`.
+ * Gates the tag-only allow-path so the diff check runs only in that context.
+ *
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @param {object} [hookData]
+ * @returns {boolean}
+ */
+function isImplementGherkinEdit(toolName, toolInput, hookData) {
+  if (toolName !== 'Edit' && toolName !== 'MultiEdit') return false;
+  const filePath = toolInput?.file_path || '';
+  if (!filePath || path.basename(filePath) !== 'gherkin.feature') return false;
+  const ticketId = getTicketId(hookData);
+  return !!ticketId && getStepInProgress(ticketId) === 'implement';
+}
+
+/**
+ * Tag-only allow-path (GH-392 P0 #5): during `implement`, Edit/MultiEdit diffs
+ * that touch ONLY tag lines on gherkin.feature are permitted. Default-block on
+ * uncertainty: return true ONLY when we can positively prove the diff is
+ * tag-only. Any other case returns false so `main` falls through to the
+ * protector.
+ *
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @param {object} [hookData]
+ * @returns {boolean}
+ */
+function isTagOnlyAllowPath(toolName, toolInput, hookData) {
+  if (!isImplementGherkinEdit(toolName, toolInput, hookData)) return false;
+  const edits = collectGherkinEdits(toolName, toolInput);
+  return edits.length > 0 && edits.every((e) => isTagOnlyGherkinEdit(e.old_string, e.new_string));
+}
+
+function main(hookData) {
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
 
-  // Tag-only allow-path (GH-392 P0 #5): during `implement`, Edit/MultiEdit
-  // diffs that touch ONLY tag lines on gherkin.feature are permitted.
-  // Default-block on uncertainty: only short-circuit when we can positively
-  // prove the diff is tag-only.
-  if (toolName === 'Edit' || toolName === 'MultiEdit') {
-    const filePath = toolInput?.file_path || '';
-    if (filePath && path.basename(filePath) === 'gherkin.feature') {
-      const ticketId = getTicketId(hookData);
-      if (ticketId && getStepInProgress(ticketId) === 'implement') {
-        const edits =
-          toolName === 'MultiEdit' && Array.isArray(toolInput.edits)
-            ? toolInput.edits
-            : [{ old_string: toolInput.old_string, new_string: toolInput.new_string }];
-        const allTagOnly =
-          edits.length > 0 && edits.every((e) => isTagOnlyGherkinEdit(e.old_string, e.new_string));
-        if (allTagOnly) {
-          process.exit(0);
-        }
-      }
-    }
+  if (isTagOnlyAllowPath(toolName, toolInput, hookData)) {
+    process.exit(0);
   }
 
   const result = protector.check(toolName, toolInput, hookData);
@@ -206,9 +242,9 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  process.exit(0); // fail-open
-});
+// runHook reads + parses stdin (malformed JSON → {}), runs the handler, and on
+// an uncaught throw logs the error and exits 0 (fail-open). Intentional blocks
+// exit 2 from inside main().
+runHook(main, { file: __filename });
 
 module.exports = { isTagOnlyGherkinEdit };

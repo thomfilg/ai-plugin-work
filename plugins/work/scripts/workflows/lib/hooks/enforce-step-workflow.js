@@ -51,6 +51,7 @@ const { isRunningInAgent, isDispatchedAgentContext, normalizeAgentName } = requi
   path.join(__dirname, '..', 'agent-detection')
 );
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { runHook } = require(path.join(__dirname, '..', 'hookEntrypoint'));
 
 // Policy modules — pure decision functions (GH-206 Task 9)
 const { buildCommandIndex, parseTransition } = require(
@@ -253,7 +254,6 @@ function prShaMatchesHead(ticketId) {
 
 // (Patch 13) isExempt uses String() coercion — kept inline so the source-pattern test
 // can verify the coercion remains in place (logic lives in policies/command-matching.js).
-// eslint-disable-next-line no-unused-vars
 function isExemptLocal(toolName, toolInput, exemptPatterns) {
   if (toolName !== 'Bash') return false;
   const cmd = String(toolInput?.command || '');
@@ -286,35 +286,18 @@ function exitBlocked(message) {
 
 // ─── PreToolUse ─────────────────────────────────────────────────────────────
 
-// Rules 3 → 3b → 3c → 4 → 5, in order. Each blocked result exits 2.
-function runPreBlockingRules(toolName, toolInput, hookData, ticketId) {
+// Rule 5: Enforce agent identity for agent-gated writer scripts — runs even
+// without a ticket so token minting works outside a worktree. Kept in the
+// entrypoint so its intentional exit-2 stays alongside exitBlocked (Patch 2).
+function runRule5(toolName, toolInput, hookData, ticketId) {
+  if (toolName !== 'Bash') return;
   const cmd = String(toolInput?.command || '');
-
-  // Rule 3: block state-file writes; hookData → terminal bypasses reject dispatched agents (GH-695)
-  const rule3 = checkStateFileRule(toolName, toolInput, ticketId, hookData);
-  if (rule3.blocked) exitBlocked(rule3.message);
-
-  // Rule 3b (GH-89): unsafe state-script sub-commands. Fail-open without a ticket context.
-  if (toolName === 'Bash' && ticketId) {
-    const rule3b = checkUnsafeSubcommands(cmd.trim(), ticketId, hookData);
-    if (rule3b) exitBlocked(rule3b.message);
+  const rule5 = agentGateRule.check(cmd, hookData, ticketId);
+  if (rule5) {
+    didBlock = true;
+    process.stderr.write(rule5.message);
+    process.exit(2);
   }
-
-  // Rule 3c (follow-up PR state files) + Rule 4 (step-gated artifact files)
-  const protector = checkProtectors(toolName, toolInput, hookData);
-  if (protector.blocked) exitBlocked(protector.message);
-
-  // Rule 5: Enforce agent identity for agent-gated writer scripts — runs even
-  // without a ticket so token minting works outside a worktree.
-  if (toolName === 'Bash') {
-    const rule5 = agentGateRule.check(cmd, hookData, ticketId);
-    if (rule5) {
-      didBlock = true;
-      process.stderr.write(rule5.message);
-      process.exit(2);
-    }
-  }
-  return rule3;
 }
 
 // Check each workflow independently (Rules 1+2); block-exit on the first hit.
@@ -330,21 +313,21 @@ function runPreWorkflowLoop(ticketId, toolName, toolInput) {
   }
 }
 
-function handlePreToolUse(hookData) {
-  const toolName = hookData.tool_name || '';
-  const toolInput = hookData.tool_input || {};
-
-  // Find active ticket. May be null when the hook's CWD is not a worktree.
-  // Do NOT early-return on null — Rule 5 (token mint) does not need a ticket.
-  const ticketId = getTicketId(hookData);
-
-  const rule3 = runPreBlockingRules(toolName, toolInput, hookData, ticketId);
-  if (rule3.skipRemainingChecks) return; // Edit/Write/MultiEdit — skip per-workflow loop
-
-  // The per-workflow state/transition loop needs a ticketId to load any state.
-  if (!ticketId) return;
-  runPreWorkflowLoop(ticketId, toolName, toolInput);
-}
+// Rules 3/3b/3c/4 + handlePreToolUse orchestration live in the sibling module
+// (GH-690: keeps this entrypoint under the 400-line threshold). Rule 5 and
+// runPreWorkflowLoop stay here so their exit-2 / transition-target invariants do.
+const { createHandlePreToolUse } = require(
+  path.join(__dirname, 'enforce-step-workflow', 'pretooluse-rules')
+);
+const handlePreToolUse = createHandlePreToolUse({
+  checkStateFileRule,
+  checkUnsafeSubcommands,
+  checkProtectors,
+  exitBlocked,
+  runRule5,
+  runPreWorkflowLoop,
+  getTicketId: (hookData) => getTicketId(hookData),
+});
 
 // ─── PostToolUse ────────────────────────────────────────────────────────────
 
@@ -366,35 +349,52 @@ function handlePostToolUse(hookData) {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
-// (Patch 8) Harden main() — guard empty stdin and log errors
-async function main() {
+// Route a well-formed payload to its per-event handler. Empty/malformed stdin
+// (runHook collapses both to {}) fails open, surfaced only under DEBUG (Patch 11).
+function dispatchHook(hookData) {
+  if (!hookData || (!hookData.tool_name && !hookData.hook_event_name)) {
+    if (DEBUG) {
+      process.stderr.write('[enforce-step-workflow] fail-open: empty or malformed payload\n');
+    }
+    return;
+  }
+
+  // CLAUDE_HOOK_TYPE prefix survives both runtimes; hook_event_name is the payload fallback (C12).
+  const hookType = process.env.CLAUDE_HOOK_TYPE || hookData.hook_event_name || 'PostToolUse';
+
+  // Telemetry: log every fire so we can prove the hook ran. JSONL.
+  logHookFired(hookType, hookData);
+
+  if (hookType === 'PreToolUse') {
+    handlePreToolUse(hookData);
+  } else if (hookType === 'PostToolUse') {
+    handlePostToolUse(hookData);
+  }
+}
+
+// (Patch 8) Harden main() — dispatch + log errors. runHook parses stdin for us
+// (empty OR malformed JSON → {}); both fail open (exit 0, silent). DEBUG
+// telemetry (Patch 11): transient failures surface on stderr ONLY under
+// ENFORCE_HOOK_DEBUG.
+function main(hookData) {
   try {
-    let input = '';
-    for await (const chunk of process.stdin) {
-      input += chunk;
-    }
-
-    if (!input.trim()) return; // Empty stdin → allow
-
-    const hookData = JSON.parse(input);
-    // CLAUDE_HOOK_TYPE prefix survives both runtimes; hook_event_name is the payload fallback (C12).
-    const hookType = process.env.CLAUDE_HOOK_TYPE || hookData.hook_event_name || 'PostToolUse';
-
-    // Telemetry: log every fire so we can prove the hook ran. JSONL.
-    logHookFired(hookType, hookData);
-
-    if (hookType === 'PreToolUse') {
-      handlePreToolUse(hookData);
-    } else if (hookType === 'PostToolUse') {
-      handlePostToolUse(hookData);
-    }
+    dispatchHook(hookData);
   } catch (err) {
+    // A handler that intends to BLOCK calls process.exit(2) itself and never
+    // lands here; this catch is the fail-open path for transient errors.
     if (DEBUG) process.stderr.write(`[enforce-step-workflow] fail-open: ${err?.message}\n`);
     logHookError(__filename, err);
   }
 }
 
-main().catch((err) => {
+// Route the entry through the shared runHook protocol (reads + parses stdin,
+// runs main, and on an uncaught throw logs the error and exits 0 — fail-open).
+// Intentional blocks call process.exit(2) from inside the handlers. The
+// pre-require uncaughtException/unhandledRejection handlers above still cover
+// the before-require window runHook cannot reach (they honour `didBlock` to
+// preserve an in-flight exit-2 decision). This trailing handler is the last
+// fail-open net for anything runHook surfaces as a rejection.
+runHook(main, { file: __filename }).catch((err) => {
   if (DEBUG) process.stderr.write(`[enforce-step-workflow] fatal: ${err?.message}\n`);
   logHookError(__filename, err);
 });

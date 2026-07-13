@@ -43,7 +43,7 @@ const { isEmptyTestOutput } = require('./record-helpers');
 // GH-694 — the recorder's exact tests-only "declared test files actually
 // changed" rule (GH-528), shared via the extracted module so the gate and
 // task-next.js can never drift (unification invariant).
-const { detectChangedTestFilesInScope } = require('../lib/changed-test-files');
+const { detectChangedTestFilesInScope, GitProbeFailedError } = require('../lib/changed-test-files');
 const { gateContractFor } = require(
   path.join(__dirname, '..', '..', '..', '..', 'skills', 'split-in-tasks', 'lib', 'task-types')
 );
@@ -56,6 +56,7 @@ const {
   gateEmptyOutputRejection,
   gateTestsOnlyUnchangedRejection,
   gateTestsOnlyScopeUnresolvedRejection,
+  gateTestsOnlyGitProbeFailedRejection,
 } = require('./gate-rejections');
 
 /**
@@ -159,7 +160,20 @@ function applyTestsOnlyGreenTrap(p) {
   if (!Array.isArray(p.scope)) {
     return gateTestsOnlyScopeUnresolvedRejection(p);
   }
-  const changedTestFiles = detectChangedTestFilesInScope(p.workingDir, p.scope);
+  let changedTestFiles;
+  try {
+    changedTestFiles = detectChangedTestFilesInScope(p.workingDir, p.scope);
+  } catch (err) {
+    // GH-690: a git probe failure (nonzero/null exit, missing binary, or the
+    // 15000ms safeSpawnSync timeout) must fail CLOSED with an honest cause,
+    // not be reported as the misleading "no in-scope test changed" rejection
+    // and not fall through to persist-gate-green's generic "Failed to write
+    // tdd-phase.json" catch. Everything else (a real bug) still propagates.
+    if (err instanceof GitProbeFailedError) {
+      return gateTestsOnlyGitProbeFailedRejection({ ...p, gitProbeError: err.message });
+    }
+    throw err;
+  }
   if (changedTestFiles.length === 0) {
     return gateTestsOnlyUnchangedRejection(p);
   }
