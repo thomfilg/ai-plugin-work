@@ -1,0 +1,53 @@
+{
+  "name": "gh-727-strategy-entry-outside-scope",
+  "incident": "GH-727",
+  "incidentClass": 3,
+  "taskKind": "tdd-code",
+  "description": "GH-313 task 3: the planner declared a Test Strategy entry file (context-monitor.integration.test.js) that was not in Files-in-scope and never existed; the GREEN command embedded it verbatim and failed forever, while protect-task-scope forbade creating the mis-named file. The agent's real test and source were correct.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "plugins/maestro/scripts/lib/context-monitor.js",
+        "plugins/maestro/scripts/__tests__/context-monitor.test.js"
+      ],
+      "scopeGlobs": [
+        "plugins/maestro/scripts/lib/context-monitor.js",
+        "plugins/maestro/scripts/__tests__/context-monitor.test.js"
+      ],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["plugins/maestro/scripts/__tests__/context-monitor.integration.test.js"],
+      "missing": ["plugins/maestro/scripts/__tests__/context-monitor.integration.test.js"]
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 3,
+      "failures": 3
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 3,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured",
+      "notes": "the agent's actual tests pass; only the plan-declared entry file is unrunnable"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": 88 }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I2"],
+    "exit": "reopen-artifact",
+    "rationale": "The plan promises a deliverable the task's own scope forbids creating (entry not within Files-in-scope) — a planner defect only editable at the tasks step; retry can never converge."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/727",
+    "notes": "Exit-selection rule pinned here: missing deliverable OUTSIDE the task's scope globs routes to reopen-artifact; missing deliverable inside scope routes to retry (see gh-724). Under derive-tests-from-diff (plan 5.3) the declared-entry substrate disappears entirely."
+  }
+}
