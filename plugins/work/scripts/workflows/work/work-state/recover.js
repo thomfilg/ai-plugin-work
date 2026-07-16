@@ -134,7 +134,9 @@ function doAbandonCycle(ticketId, state, taskNum) {
   if (cleared.length === 0 && !archivedTo) {
     return { noop: true, message: 'nothing to abandon — no in-flight cycle state found' };
   }
-  saveState(ticketId, state);
+  // Archive-only recoveries mutate no state fields — skip the write so the
+  // state file's timestamp only moves when its content does.
+  if (cleared.length > 0) saveState(ticketId, state);
   return { cleared, archivedEvidence: archivedTo };
 }
 
@@ -151,6 +153,26 @@ function rebuildEntry(parsedTask, oldEntry) {
     }
   }
   return entry;
+}
+
+/** One tasksMeta entry equals its rebuilt counterpart on controlled fields. */
+function entryMatches(oldEntry, rebuiltEntry) {
+  return (
+    oldEntry?.id === rebuiltEntry.id &&
+    oldEntry?.status === rebuiltEntry.status &&
+    JSON.stringify(oldEntry?.dependencies || []) === JSON.stringify(rebuiltEntry.dependencies || [])
+  );
+}
+
+/** tasksMeta equals the rebuilt meta on every field resync-meta controls. */
+function metaMatchesRebuilt(oldMeta, rebuilt) {
+  return (
+    oldMeta.totalTasks === rebuilt.totalTasks &&
+    oldMeta.currentTaskIndex === rebuilt.currentTaskIndex &&
+    Array.isArray(oldMeta.tasks) &&
+    oldMeta.tasks.length === rebuilt.tasks.length &&
+    rebuilt.tasks.every((t, i) => entryMatches(oldMeta.tasks[i], t))
+  );
 }
 
 /** resync-meta: rebuild tasksMeta from tasks.md, preserving completed-by-id. */
@@ -176,7 +198,11 @@ function doResyncMeta(ticketId, state) {
     tasks,
   };
 
-  if (JSON.stringify(rebuilt) === JSON.stringify(oldMeta)) {
+  // Field-wise noop check over the fields resync-meta actually controls
+  // (count, pointer, ids, statuses, dependencies) — a stringify comparison
+  // would treat unknown extra fields or key order as a difference and
+  // silently drop those fields on every invocation.
+  if (metaMatchesRebuilt(oldMeta, rebuilt)) {
     return { noop: true, message: 'tasksMeta already matches tasks.md — nothing to resync' };
   }
   state.tasksMeta = rebuilt;
@@ -216,8 +242,15 @@ function countRecoveries(ticketId) {
   try {
     const auditPath = path.join(path.dirname(getStatePath(ticketId)), '.work-actions.json');
     const rows = JSON.parse(fs.readFileSync(auditPath, 'utf8'));
-    return rows.filter((r) => r.kind === 'enforcement' && /^recover-/.test(String(r.action || '')))
-      .length;
+    // No-op probes stay in the audit trail but do NOT count against the
+    // tripwire: four diagnostic probes on a healthy task are zero actual
+    // recoveries, and alarming on them would mask the real signal.
+    return rows.filter(
+      (r) =>
+        r.kind === 'enforcement' &&
+        /^recover-/.test(String(r.action || '')) &&
+        !(r.meta && r.meta.outcome && r.meta.outcome.noop === true)
+    ).length;
   } catch {
     return 0;
   }
