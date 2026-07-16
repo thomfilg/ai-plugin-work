@@ -10,7 +10,6 @@
       "filesChanged": ["plugins/work/scripts/workflows/work/scripts/commit-and-push.js"],
       "scopeGlobs": ["plugins/work/scripts/workflows/work/{scripts,hooks}/**"],
       "outOfScope": [],
-      "scopeUnresolved": true,
       "notes": "brace-expansion glob accepted by the declaring validator but unsupported by the consuming resolver"
     },
     "deliverables": {

@@ -31,7 +31,7 @@
   },
   "expected": {
     "verdict": "UNVERIFIED",
-    "flags": ["runner-unknown"],
+    "flags": ["runner-unknown", "no-structured-reporter"],
     "rationale": "Docs profile is deliverable-exists-only and the deliverable is present; the harness MODULE_NOT_FOUND is verifier-side tooling failure, which may flag but never contradict."
   },
   "provenance": {
