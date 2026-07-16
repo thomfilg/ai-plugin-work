@@ -114,6 +114,11 @@ function validateRun(errors, run, label) {
   );
   pushIf(
     errors,
+    run.failures !== undefined && !Number.isInteger(run.failures),
+    `${label}.failures must be an integer when present`
+  );
+  pushIf(
+    errors,
     run.exitCode !== undefined && run.exitCode !== null && !Number.isInteger(run.exitCode),
     `${label}.exitCode must be an integer or null when present`
   );
@@ -252,8 +257,9 @@ function loadFixtureFile(dir, file, fixtures, errors) {
     errors.push(`${file}: ${problem}`);
   }
   const stem = file.replace(/\.json$/, '');
-  if (parsed && parsed.name !== stem) {
-    errors.push(`${file}: fixture.name "${parsed && parsed.name}" must equal filename stem`);
+  const parsedName = parsed && typeof parsed === 'object' ? parsed.name : null;
+  if (parsedName !== stem) {
+    errors.push(`${file}: fixture.name "${parsedName}" must equal filename stem`);
   }
   fixtures.push(parsed);
 }
