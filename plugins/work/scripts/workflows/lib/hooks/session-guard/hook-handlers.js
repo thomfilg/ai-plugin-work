@@ -20,6 +20,7 @@ const {
   readWorkState,
 } = require(path.join(__dirname, 'context'));
 const { findActiveSessions } = require(path.join(__dirname, 'store'));
+const { assessStop, surfaceStandDown } = require(path.join(__dirname, 'stand-down'));
 
 /**
  * Active sessions owned by THIS terminal/worktree. Sessions owned by a
@@ -219,7 +220,17 @@ function handleStop(hookData) {
     return;
   }
 
-  blockStop(nonCheckSessions[0]);
+  // GH-752 stand-down: the guard's value lives in the first few fires. On a
+  // rate-limited/abandoned session, or past the identical-consecutive-block
+  // cap, allow the stop and surface once instead of re-firing forever.
+  const session = nonCheckSessions[0];
+  const verdict = assessStop(hookData, session);
+  if (verdict.action === 'stand-down') {
+    surfaceStandDown(verdict, session);
+    process.exit(0);
+    return;
+  }
+  blockStop(session);
 }
 
 module.exports = { handlePreCompact, handleStop };
