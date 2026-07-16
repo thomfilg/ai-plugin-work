@@ -28,6 +28,21 @@ const fs = require('fs');
 const path = require('path');
 
 /**
+ * Wrap an edge probe so a broken/renamed module reads as a CLEAN `false`
+ * (the liveness test's assertion message) instead of a require() stack
+ * trace that would abort the remaining edge checks.
+ */
+function verifySafely(probe) {
+  return function verify() {
+    try {
+      return probe();
+    } catch {
+      return false;
+    }
+  };
+}
+
+/**
  * The sanctioned exit edges. Each edge carries a `verify()` that mechanically
  * proves the mechanism still exists (consumed by the liveness test).
  */
@@ -36,35 +51,35 @@ const EXIT_EDGES = Object.freeze({
     mechanism:
       'gate retry loop: planner-hold.persistRetryFailure records the failure and the ' +
       'orchestrator re-dispatches the task with the reason as guidance',
-    verify() {
+    verify: verifySafely(() => {
       const plannerHold = require(path.join(__dirname, 'planner-hold'));
       return typeof plannerHold.persistRetryFailure === 'function';
-    },
+    }),
   },
   'reopen-artifact': {
     mechanism:
       'planner hold: planner-hold.resolvePlannerHold / buildPlannerHoldInstruction park the ' +
       'workflow so tasks.md becomes editable, then release on planner edit',
-    verify() {
+    verify: verifySafely(() => {
       const plannerHold = require(path.join(__dirname, 'planner-hold'));
       return (
         typeof plannerHold.resolvePlannerHold === 'function' &&
         typeof plannerHold.buildPlannerHoldInstruction === 'function'
       );
-    },
+    }),
   },
   escalate: {
     mechanism:
       'operator recovery: work-state.js recover --action abandon-cycle|resync-meta|reopen-task ' +
       '(operator-approved, audited; GH-753)',
-    verify() {
+    verify: verifySafely(() => {
       const { RECOVER_ACTIONS } = require(
         path.join(__dirname, '..', '..', '..', 'work-state', 'recover')
       );
       return ['abandon-cycle', 'resync-meta', 'reopen-task'].every((a) =>
         RECOVER_ACTIONS.includes(a)
       );
-    },
+    }),
   },
 });
 
@@ -197,7 +212,12 @@ function gateRejectionActionsFromSource() {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const literal = source.match(/tdd-[a-z-]+-rejected/g) || [];
   // Phase-templated actions (`tdd-${p.phase}-hang-rejected`) expand over the
-  // phases the gate captures for.
+  // phases the gate CAPTURES runs for — red (pre-implement) and green
+  // (post-implement) only; the refactor phase never spawns a gate-side run,
+  // so no `tdd-refactor-*-rejected` action can exist (gate-writer.js W11
+  // design). If a third captured phase is ever added, extend this expansion
+  // AND declare the new verdicts above — the coverage test will then fail
+  // until both halves agree.
   const templated = [];
   for (const m of source.match(/tdd-\$\{[^}]+\}-([a-z-]+-rejected)/g) || []) {
     const suffix = m.replace(/^tdd-\$\{[^}]+\}-/, '');
