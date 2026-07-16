@@ -1,0 +1,50 @@
+{
+  "name": "gh-721-broken-test-harness-catch22",
+  "incident": "GH-721",
+  "incidentClass": 2,
+  "taskKind": "tdd-code",
+  "description": "A RED test carried a harness bug (orphaned emit('error') -> uncaughtException): the production code was correct and the assertion passed, but the run always exited nonzero. GREEN could never record; rewinding green->red demanded green evidence (catch-22); fixing the test was blocked by phase edit-locks and ablation byte-pinning. Permanent deadlock.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "plugins/work/scripts/workflows/lib/hooks/session-guard/store.js",
+        "plugins/work/scripts/workflows/lib/hooks/__tests__/session-guard-store.test.js"
+      ],
+      "scopeGlobs": ["plugins/work/scripts/workflows/lib/hooks/**"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["plugins/work/scripts/workflows/lib/hooks/session-guard/store.js"],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 1,
+      "failures": 1
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 1,
+      "failures": 1,
+      "exitCode": 1,
+      "reporterKind": "structured",
+      "notes": "assertion passes but the process dies on an uncaughtException from the test's own monkeypatched stream"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": 85 }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I4"],
+    "exit": "retry",
+    "rationale": "Tests do not pass on head — nonzero exit is nonzero exit even when the assertion itself passes. The retry dispatch may freely rewrite the defective test: no phase state, no pinned bytes, no evidence catch-22. A recoverable block, never a dead end."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/721",
+    "notes": "Old-system error: 'No evidence recorded for green phase. Run record-green first.' The stateless boundary check dissolves the rewind catch-22 by construction."
+  }
+}

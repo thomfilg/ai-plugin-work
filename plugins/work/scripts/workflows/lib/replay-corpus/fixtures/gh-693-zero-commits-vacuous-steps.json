@@ -1,0 +1,40 @@
+{
+  "name": "gh-693-zero-commits-vacuous-steps",
+  "incident": "GH-693",
+  "incidentClass": 4,
+  "taskKind": "tdd-code",
+  "description": "The driver marked commit and task_review completed while 'git log origin/main..HEAD' was EMPTY and all six implementation files sat uncommitted in the working tree; no .last-commit-sha existed, so the review gate fell back to base branch and reviewed a no-op diff. Both steps verified vacuously.",
+  "observations": {
+    "diff": {
+      "empty": true,
+      "filesChanged": [],
+      "scopeGlobs": ["plugins/work/scripts/workflows/work/**"],
+      "outOfScope": [],
+      "notes": "committed diff empty; work exists only as uncommitted working-tree files, invisible to a commits-only observer"
+    },
+    "deliverables": {
+      "promised": ["plugins/work/scripts/workflows/work/lib/driver-integrity.js"],
+      "missing": ["plugins/work/scripts/workflows/work/lib/driver-integrity.js"]
+    },
+    "baseRun": { "attempted": false, "supported": true, "outcome": "not-run" },
+    "headRun": {
+      "attempted": false,
+      "supported": true,
+      "outcome": "not-run",
+      "testsRan": 0,
+      "reporterKind": "none",
+      "notes": "no test run occurred at the boundary"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I1", "I2"],
+    "exit": "retry",
+    "rationale": "A stateless observer of commits sees literally nothing — an empty branch is positive evidence, not absence of evidence. Retry with guidance: commit the working-tree changes."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/693",
+    "notes": "Log line: 'task-review-gate: No .last-commit-sha found for #689, falling back to base branch'. The commit-ahead invariants from GH-693/GH-539 are kept unchanged in the outcome model (plan 5.7)."
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "gh-694-tests-only-untouched-suite-auto-pass",
+  "incident": "GH-694",
+  "incidentClass": 4,
+  "taskKind": "tests-only",
+  "description": "GH-689 task 2 (tests-only): RED auto-skipped and GREEN just re-ran the pre-existing, untouched guard-codex.test.js (exit 0, 20 tests). The promised new parity describe-block was never written; the task was recorded satisfied with a byte-identical test file.",
+  "observations": {
+    "diff": {
+      "empty": true,
+      "filesChanged": [],
+      "scopeGlobs": ["plugins/work/scripts/workflows/lib/__tests__/guard-codex.test.js"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["plugins/work/scripts/workflows/lib/__tests__/guard-codex.test.js"],
+      "missing": ["plugins/work/scripts/workflows/lib/__tests__/guard-codex.test.js"]
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 20,
+      "failures": 0
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 20,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured",
+      "notes": "all 20 tests pre-existing; test file byte-identical to base"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I1", "I2"],
+    "exit": "retry",
+    "rationale": "Tests-only's pass-on-base allowance never excuses an EMPTY diff: the kind requires the diff to touch test files, and the promised describe-block is absent. Exit-0 on an untouched suite is not delivery."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/694",
+    "notes": "Old-system record: 'RED skipped: task type tests-only does not require TDD' followed by a GREEN over pre-existing tests."
+  }
+}

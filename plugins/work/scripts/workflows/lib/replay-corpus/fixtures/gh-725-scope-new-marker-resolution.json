@@ -1,0 +1,52 @@
+{
+  "name": "gh-725-scope-new-marker-resolution",
+  "incident": "GH-725",
+  "incidentClass": 1,
+  "taskKind": "tdd-code",
+  "description": "GH-690 task 3: the scope bullet ended in ' (NEW)'; one resolver stripped the marker, another did not, so the recorder looked for a file literally named '... .integration.test.js (NEW)', found nothing, and rejected RED forever ('no in-scope test/spec file on disk contains it()/test() blocks'). The real test file existed at the correct path.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "plugins/heimdall/scripts/__tests__/heimdall-readstdin-reject.integration.test.js",
+        "plugins/heimdall/scripts/lib/readstdin.js"
+      ],
+      "scopeGlobs": [
+        "plugins/heimdall/scripts/__tests__/heimdall-readstdin-reject.integration.test.js (NEW)"
+      ],
+      "outOfScope": [],
+      "notes": "scope entry carries a non-path annotation the observer failed to normalize"
+    },
+    "deliverables": {
+      "promised": [
+        "plugins/heimdall/scripts/__tests__/heimdall-readstdin-reject.integration.test.js"
+      ],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": false,
+      "outcome": "not-run",
+      "notes": "observer could not resolve the annotated scope entry to a runnable path"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": false,
+      "outcome": "error",
+      "testsRan": 0,
+      "exitCode": 1,
+      "reporterKind": "none",
+      "notes": "Could not find '.../heimdall-readstdin-reject.integration.test.js (NEW)'"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "UNVERIFIED",
+    "flags": ["scope-resolution-failed"],
+    "rationale": "The failure is the observer's own path resolution, not the work; a mechanism failure must advance with a flag, never block (the old recorder wedged the task in RED)."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/725",
+    "notes": "A verifier that normalizes the ' (NEW)' marker itself would label this VERIFIED; the fixture pins the worst-case behavior (resolution fails -> flag, not block)."
+  }
+}

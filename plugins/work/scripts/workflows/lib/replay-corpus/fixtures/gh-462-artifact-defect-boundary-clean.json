@@ -1,0 +1,44 @@
+{
+  "name": "gh-462-artifact-defect-boundary-clean",
+  "incident": "GH-462",
+  "incidentClass": 2,
+  "taskKind": "tdd-code",
+  "description": "Third occurrence of the Requirement Coverage deadlock: completion-checker required a '## Requirement Coverage' heading in tasks.md, the heading was absent (a planner-artifact defect), and protect-tasks-md blocked every edit path — while the implementing task's own work was entirely sound. Resolved historically by out-of-band manual edits on three tickets in 24h.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "src/features/alerts/escalation.js",
+        "src/features/alerts/__tests__/escalation.test.js"
+      ],
+      "scopeGlobs": ["src/features/alerts/**"],
+      "outOfScope": []
+    },
+    "deliverables": { "promised": ["src/features/alerts/escalation.js"], "missing": [] },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 4,
+      "failures": 4
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 4,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": 91 }
+  },
+  "expected": {
+    "verdict": "VERIFIED",
+    "rationale": "At the task boundary every invariant holds — the defect lives in tasks.md, not in the task's commits. The verifier must NOT block clean work for an artifact defect; that defect surfaces downstream (check step) and routes through the reopen-artifact exit, where editing tasks.md is legal."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/462",
+    "notes": "Signal name requirement_coverage_missing; recurred on GH-440/GH-445/GH-444. Fixture pins the separation of concerns: boundary verdict judges the task's commits only; artifact-consistency defects get the reopen-artifact edge at the step that discovers them."
+  }
+}

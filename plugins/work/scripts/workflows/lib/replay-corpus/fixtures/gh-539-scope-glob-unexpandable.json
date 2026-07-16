@@ -1,0 +1,46 @@
+{
+  "name": "gh-539-scope-glob-unexpandable",
+  "incident": "GH-539",
+  "incidentClass": 3,
+  "taskKind": "tdd-code",
+  "description": "Validator-split class (plan §2 class 3): one validator REQUIRES a scope glob form that the other component cannot expand, so the observer cannot resolve the task's Files-in-scope into concrete paths at the boundary — while the agent's work itself is present and green.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["plugins/work/scripts/workflows/work/scripts/commit-and-push.js"],
+      "scopeGlobs": ["plugins/work/scripts/workflows/work/{scripts,hooks}/**"],
+      "outOfScope": [],
+      "notes": "brace-expansion glob accepted by the declaring validator but unsupported by the consuming resolver"
+    },
+    "deliverables": {
+      "promised": ["plugins/work/scripts/workflows/work/scripts/commit-and-push.js"],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 7,
+      "failures": 2
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 7,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": 87 }
+  },
+  "expected": {
+    "verdict": "UNVERIFIED",
+    "flags": ["scope-resolution-failed"],
+    "rationale": "I1's scope check cannot be evaluated when the resolver cannot expand the declared glob — a mechanism failure on the observer's side; advance with a flag (the ONE-shared-resolver rule from GH-650/GH-651/GH-654 prevents the split from recurring)."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/539",
+    "notes": "FRAMING NOTE: GH-539 itself is the commit-writer->validator replacement (script-verifies-result trajectory); the plan §2 class-3 row cites it for the glob-split defect class, which is what this fixture encodes. Provenance kept on the issue the plan cites."
+  }
+}

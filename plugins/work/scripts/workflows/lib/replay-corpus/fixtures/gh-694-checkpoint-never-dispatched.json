@@ -1,0 +1,44 @@
+{
+  "name": "gh-694-checkpoint-never-dispatched",
+  "incident": "GH-694",
+  "incidentClass": 4,
+  "taskKind": "checkpoint",
+  "description": "GH-689 task 4 (checkpoint) was never dispatched: the driver closed the implement step with task_4 pending because autoCompleteCheckpointTasks grepped reports for the literal token 'task_4' while reports write 'Task 4'. At the (never-reached) boundary nothing was delivered.",
+  "observations": {
+    "diff": {
+      "empty": true,
+      "filesChanged": [],
+      "scopeGlobs": ["tasks/GH-689/completion.check.md"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["tasks/GH-689/completion.check.md"],
+      "missing": ["tasks/GH-689/completion.check.md"]
+    },
+    "baseRun": {
+      "attempted": false,
+      "supported": true,
+      "outcome": "not-run",
+      "notes": "checkpoint profile runs no tests"
+    },
+    "headRun": {
+      "attempted": false,
+      "supported": true,
+      "outcome": "not-run",
+      "testsRan": 0,
+      "reporterKind": "none",
+      "notes": "checkpoint profile runs no tests; verification is deliverable-exists"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I2"],
+    "exit": "retry",
+    "rationale": "Even with no test requirements, the checkpoint profile still demands its deliverable exist; a pending task with zero commits and no artifact is positive evidence the step closed vacuously — dispatch it."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/694",
+    "notes": "Root cause was string-matching step verification (literal 'task_4' vs prose 'Task 4') — incident class 4. Kind profiles as data replace that special-casing."
+  }
+}

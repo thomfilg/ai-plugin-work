@@ -1,0 +1,41 @@
+{
+  "name": "gh-653-custom-kind-harness-noop",
+  "incident": "GH-653",
+  "incidentClass": 1,
+  "taskKind": "docs",
+  "description": "A docs/config (kind: custom) task's .md-only scope filtered CHANGED_FILES empty, so the runner synthesized 'node --test' with no args -> MODULE_NOT_FOUND -> the recorder's structural-failure guard rejected RED forever. The prose deliverable itself was complete and correct.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["docs/runbooks/deploy.md"],
+      "scopeGlobs": ["docs/runbooks/deploy.md"],
+      "outOfScope": []
+    },
+    "deliverables": { "promised": ["docs/runbooks/deploy.md"], "missing": [] },
+    "baseRun": {
+      "attempted": true,
+      "supported": false,
+      "outcome": "error",
+      "notes": "same harness no-op crash as head; tooling failure, not signal"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": false,
+      "outcome": "error",
+      "testsRan": 0,
+      "exitCode": 1,
+      "reporterKind": "none",
+      "notes": "node --test with zero args -> MODULE_NOT_FOUND at load; 0 tests collected"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "UNVERIFIED",
+    "flags": ["runner-unknown", "no-structured-reporter"],
+    "rationale": "Docs profile is deliverable-exists-only and the deliverable is present; the harness MODULE_NOT_FOUND is verifier-side tooling failure, which may flag but never contradict."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/653",
+    "notes": "Old-system rejection: 'Rejected RED: detected MODULE_NOT_FOUND ... structurally broken (load-time error or zero tests collected)'. Command shape: node --test $CHANGED_FILES with CHANGED_FILES=''."
+  }
+}

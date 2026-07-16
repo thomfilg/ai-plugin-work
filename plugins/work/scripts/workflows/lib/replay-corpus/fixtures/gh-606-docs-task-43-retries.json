@@ -1,0 +1,42 @@
+{
+  "name": "gh-606-docs-task-43-retries",
+  "incident": "GH-606",
+  "incidentClass": 2,
+  "taskKind": "docs",
+  "description": "A Type: docs task (GH-517 documentation review) had its deliverable committed before the gate ran RED; the fallback 'node --test $CHANGED_FILES' filtered .md files out, ran with empty args, crashed MODULE_NOT_FOUND, and rejected RED 43 consecutive times (~4h). The work itself was correct and pushed the whole time.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["README.md", "plugins/work/skills/work/SKILL.md"],
+      "scopeGlobs": ["README.md", "plugins/work/skills/work/SKILL.md"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["README.md", "plugins/work/skills/work/SKILL.md"],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": false,
+      "supported": true,
+      "outcome": "not-run",
+      "notes": "docs profile: no test requirements"
+    },
+    "headRun": {
+      "attempted": false,
+      "supported": true,
+      "outcome": "not-run",
+      "testsRan": 0,
+      "reporterKind": "none",
+      "notes": "docs profile: no test requirements (the old system's 43 rejected runs were harness no-ops)"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "VERIFIED",
+    "rationale": "Docs profile is deliverable-exists-only: non-empty in-scope diff and both promised files present. The old system deadlocked purely on gate traversal (_tddRetryCount: 43) with no real defect anywhere."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/606",
+    "notes": "The canonical wedge->VERIFIED fixture. Old-system strings: '[task-next] RED: filtered 2 non-test scope entries from CHANGED_FILES (README.md, SKILL.md)'; 'Rejected RED: detected MODULE_NOT_FOUND ...'."
+  }
+}

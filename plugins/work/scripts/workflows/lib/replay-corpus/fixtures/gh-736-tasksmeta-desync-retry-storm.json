@@ -1,0 +1,47 @@
+{
+  "name": "gh-736-tasksmeta-desync-retry-storm",
+  "incident": "GH-736",
+  "incidentClass": 2,
+  "taskKind": "tdd-code",
+  "description": "Mid-fleet plugin bump regenerated tasks.md but tasksMeta was never rebuilt: the persisted pointer said task 5 was 'context-inject (done)' while tasks.md task 5 was a different task. /work looped 34+ TDD retries pulling a nonexistent test file; the hook-protected state file had no operator bypass.",
+  "observations": {
+    "diff": {
+      "empty": true,
+      "filesChanged": [],
+      "scopeGlobs": ["plugins/work/scripts/workflows/work/hooks/**"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["plugins/work/scripts/workflows/lib/__tests__/context-inject.test.js"],
+      "missing": ["plugins/work/scripts/workflows/lib/__tests__/context-inject.test.js"]
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "error",
+      "testsRan": 0,
+      "notes": "test file from the stale task pointer does not exist under the current plan"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "error",
+      "testsRan": 0,
+      "failures": 0,
+      "exitCode": 1,
+      "reporterKind": "none",
+      "notes": "could-not-find errors; retry counter climbing with no diff delta (34+ identical retries)"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I2"],
+    "exit": "reopen-artifact",
+    "rationale": "The task-as-recorded references a deliverable that cannot exist under the current plan (missing deliverable outside any resolvable scope); retrying the same dispatch can never succeed — plan state must be reconciled."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/736",
+    "notes": "Version skew 3.69->3.74; recovery required a hand edit (.bak-preresync). GH-753's resync-meta is the escalate-adjacent recovery for this class; the verifier routes it to reopen-artifact instead of infinite retry."
+  }
+}

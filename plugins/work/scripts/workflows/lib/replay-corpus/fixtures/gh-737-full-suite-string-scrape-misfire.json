@@ -1,0 +1,47 @@
+{
+  "name": "gh-737-full-suite-string-scrape-misfire",
+  "incident": "GH-737",
+  "incidentClass": 1,
+  "taskKind": "tdd-code",
+  "description": "run-tests.sh ignored its positional file arg so 'pnpm test <entry>' ran the whole suite; a sibling test's TITLE contained the literal string MODULE_NOT_FOUND and the stdout-scraping load-failure guard rejected a genuine assertion-only RED as structurally broken. The agent's work was correct throughout.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "plugins/work/scripts/workflows/work-implement/__tests__/strategy-custom.test.js"
+      ],
+      "scopeGlobs": ["plugins/work/scripts/workflows/work-implement/**"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": [
+        "plugins/work/scripts/workflows/work-implement/__tests__/strategy-custom.test.js"
+      ],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "notes": "whole-suite run; entry-scoped signal drowned in prose output"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "exitCode": 0,
+      "reporterKind": "exit-code-only",
+      "notes": "runner not scoped to the entry file; test count unavailable; stdout contains a passing test title with the literal string MODULE_NOT_FOUND"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "UNVERIFIED",
+    "flags": ["no-structured-reporter"],
+    "rationale": "The work is fine; the only defect is observational (unscoped run, prose scraping). Absence of clean scoped evidence must advance with a flag, never block — the old gate wedged here."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/737",
+    "notes": "With a structured JSON reporter this same boundary is VERIFIED (fail-on-base, pass-on-head, count>0). Fixture pins the UNVERIFIED-not-CONTRADICTED behavior for stdout-scrape ambiguity."
+  }
+}

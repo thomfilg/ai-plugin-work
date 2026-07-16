@@ -1,0 +1,47 @@
+{
+  "name": "gh-749-no-test-files-exit0-false-green",
+  "incident": "GH-749",
+  "incidentClass": 1,
+  "taskKind": "tdd-code",
+  "description": "FUT-105: pre-implement probe captured a contaminated RED (sibling task's failure, empty testFiles); after the sibling was fixed, the post-test targeted never-authored test files and vitest printed 'No test files found, exiting with code 0' — exit 0 recorded as GREEN. Tasks 3, 4 and 6 auto-completed with zero code on disk.",
+  "observations": {
+    "diff": {
+      "empty": true,
+      "filesChanged": [],
+      "scopeGlobs": ["apps/web/lib/mcp/oauth/**"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["apps/web/lib/mcp/oauth/jwt.ts", "apps/web/lib/mcp/oauth/jwt.test.ts"],
+      "missing": ["apps/web/lib/mcp/oauth/jwt.ts", "apps/web/lib/mcp/oauth/jwt.test.ts"]
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 0,
+      "failures": 0
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 0,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "exit-code-only",
+      "notes": "No test files found, exiting with code 0"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I1", "I2", "I4"],
+    "exit": "retry",
+    "rationale": "Empty diff, missing promised deliverables and 0 tests ran for a test-requiring kind — positive evidence of a vacuous pass, regardless of exit code 0."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/749",
+    "notes": "RED record had testExitCode 1 with empty outputTail and empty testFiles (contamination). The catastrophic false-GREEN fixture; the structured-count>0 invariant (I4) exists for this case."
+  }
+}
