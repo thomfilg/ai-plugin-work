@@ -1,0 +1,45 @@
+{
+  "name": "gh-722-tests-only-authors-its-test",
+  "incident": "GH-722",
+  "incidentClass": 2,
+  "taskKind": "tests-only",
+  "description": "GH-690 task 7 (tests-only): RED auto-skipped into GREEN, where the phase-edit hook blocks ALL test-file writes ('TDD GREEN phase: test files cannot be modified.') — but the sole deliverable IS a new test file. No phase existed in which authoring it was legal; the task deadlocked. This fixture captures the same task AFTER the agent works freely under the outcome model.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["plugins/maestro/scripts/__tests__/conductor-restart.test.js"],
+      "scopeGlobs": ["plugins/maestro/scripts/__tests__/conductor-restart.test.js"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["plugins/maestro/scripts/__tests__/conductor-restart.test.js"],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 6,
+      "failures": 0,
+      "notes": "tests-only tasks test EXISTING behavior; passing on base is legitimate for this kind"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 6,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "VERIFIED",
+    "rationale": "Tests-only profile: the diff touches only test files, the deliverable exists, tests pass on head with a real count; pass-on-base is exempt (I3) because the tests ARE the deliverable. The old system's deadlock was pure phase-choreography — no outcome invariant was ever at risk."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/722",
+    "notes": "Wedge-class fixture: must never block. The phase-edit hook class (work-implement-enforce) is deleted in outcome mode (plan 5.6)."
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "gh-720-parallel-wave-contamination",
+  "incident": "GH-720",
+  "incidentClass": 7,
+  "taskKind": "tdd-code",
+  "description": "Parallel implement wave shared one worktree and one state file: task 1's uncommitted edit broke a globally-sensitive spec, and task 4's RED probe captured task 1's test file as its own RED evidence (cross-task contamination). Viewed at task 4's boundary against task 4's OWN commits: nothing was ever done.",
+  "observations": {
+    "diff": {
+      "empty": true,
+      "filesChanged": [],
+      "scopeGlobs": ["factories/registryValidator/**"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["factories/registryValidator/registryValidator.js"],
+      "missing": ["factories/registryValidator/registryValidator.js"]
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 0,
+      "failures": 0,
+      "notes": "task 4's own test surface never existed; the recorded RED belonged to a sibling task's file"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 0,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured",
+      "notes": "no derived test files in task 4's diff — there is no diff"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I1", "I3"],
+    "exit": "retry",
+    "rationale": "Per-task verification over the task's own commits is structurally immune to sibling working-tree contamination: task 4 has an empty diff and no genuine fail-on-base, so it is re-dispatched cleanly."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/720",
+    "notes": "Contaminated record: cycles[0].red.testFiles = ['factories/hookEntrypoint/__tests__/hookEntrypoint.test.js'] (task 1's file inside task 4's phase state). Scope attribution for parallel waves remains a Phase 5 item."
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "gh-248-docs-profile-framing",
+  "incident": "GH-248",
+  "incidentClass": 4,
+  "taskKind": "docs",
+  "description": "Docs-profile boundary: the deliverable exists and the diff is in scope, but there is nothing mechanically runnable to verify prose content with — the runner cannot interpret a docs verification, so the content-quality judgment belongs to downstream review, carried by a flag with FULL context (never silently downgraded or truncated).",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["docs/adr/0009-retry-policy.md"],
+      "scopeGlobs": ["docs/adr/**"],
+      "outOfScope": []
+    },
+    "deliverables": { "promised": ["docs/adr/0009-retry-policy.md"], "missing": [] },
+    "baseRun": { "attempted": false, "supported": false, "outcome": "not-run" },
+    "headRun": {
+      "attempted": false,
+      "supported": false,
+      "outcome": "not-run",
+      "testsRan": 0,
+      "reporterKind": "none",
+      "notes": "no runnable verification exists for prose content"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "UNVERIFIED",
+    "flags": ["runner-unknown"],
+    "rationale": "Deliverable exists (I2 holds) but content cannot be mechanically checked — advance with a flag so task_review scrutinizes the prose; plan §6 Phase 0 labels the docs case 'UNVERIFIED advance'."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/248",
+    "notes": "FRAMING NOTE: the real GH-248 is follow-up-pr comment triage (auto-downgrading position-outdated comments, truncating bodies) — not a task-boundary event. Its transferable lesson is encoded here: evidence handed downstream must keep full fidelity; flags must carry complete context rather than being silently downgraded. The plan's §6 reference to '#248 docs task' does not match the issue's actual content."
+  }
+}

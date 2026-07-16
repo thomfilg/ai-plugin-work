@@ -1,0 +1,51 @@
+{
+  "name": "gh-466-empty-command-instant-green",
+  "incident": "GH-466",
+  "incidentClass": 1,
+  "taskKind": "tdd-code",
+  "description": "The gate's hook spawned the test command without sourcing .envrc, so $TEST_UNIT_COMMAND was empty and 'eval \"\"' exited 0 instantly with zero output bytes — recorded as an authentic GREEN 1.1 seconds after RED with no source change. Task 1 was marked completed with no implementation.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "plugins/work/scripts/workflows/lib/hooks/__tests__/enforce-step-workflow.test.js"
+      ],
+      "scopeGlobs": ["plugins/work/scripts/workflows/lib/hooks/**"],
+      "outOfScope": [],
+      "notes": "test-file-only diff; no source change between the recorded RED and GREEN"
+    },
+    "deliverables": {
+      "promised": ["plugins/work/scripts/workflows/lib/hooks/enforce-step-workflow.js"],
+      "missing": ["plugins/work/scripts/workflows/lib/hooks/enforce-step-workflow.js"]
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 0,
+      "failures": 0,
+      "notes": "same empty command; exit 0 with zero output"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 0,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "none",
+      "notes": "zero stdout bytes; ~1s wall clock; resolved command was empty"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I2", "I4"],
+    "exit": "retry",
+    "rationale": "Zero tests ran for a test-requiring kind (exit-0 with no structured count is not a pass) and the promised implementation is missing from the diff."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/466",
+    "notes": "Green log header: '# command: CHANGED_FILES=\"...\" eval \"$TEST_UNIT_COMMAND\"' / '# exitCode: 0' with zero output bytes; RED->GREEN delta 1.1s; follow-on retry loop reached _tddRetryCount: 8 on task 2."
+  }
+}
