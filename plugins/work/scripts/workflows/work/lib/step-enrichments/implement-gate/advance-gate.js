@@ -24,6 +24,24 @@ const {
   resolvePlannerHold,
 } = require(path.join(__dirname, 'planner-hold'));
 
+/**
+ * GH-755 shadow mode: when WORK_TDD_MODE=shadow, log the outcome verifier's
+ * verdict for this boundary alongside the incumbent gate outcome. Zero
+ * authority, never throws, lazily loaded so the hot path pays nothing when
+ * the flag is off.
+ */
+function runShadowObserver(safeName, ctx, taskNum, taskType, incumbent) {
+  if (process.env.WORK_TDD_MODE !== 'shadow') return;
+  try {
+    const { maybeRunShadow } = require(
+      path.join(__dirname, '..', '..', '..', '..', 'task-verify', 'shadow')
+    );
+    maybeRunShadow({ safeName, tasksDir: ctx && ctx.tasksDir, taskNum, taskType, incumbent });
+  } catch {
+    /* shadow must never affect the gate */
+  }
+}
+
 /** Derive TASKS_BASE + a subprocess env from ctx.tasksDir. */
 function deriveGateExecEnv(ctx) {
   const gateTASKS_BASE = ctx.tasksDir ? path.dirname(ctx.tasksDir) : process.env.TASKS_BASE;
@@ -217,12 +235,15 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
 
   const flow = runNonCheckpointFlow(state);
   if (flow.handled) {
+    runShadowObserver(safeName, ctx, taskNum, taskType, 'blocked');
     // W3 — a planner-defect retry recorded on THIS pass must not fall back to
     // null (work-next.js would re-dispatch a developer agent at a defect it
     // cannot fix). Emit the operator-hold immediately — no retry burn.
     if (ws._tddRetryPlannerDefect) return buildPlannerHoldInstruction(ws, safeName);
     return null;
   }
+
+  runShadowObserver(safeName, ctx, taskNum, taskType, 'advance');
 
   // Evidence valid — clear retry state.
   clearRetryState(ws);
