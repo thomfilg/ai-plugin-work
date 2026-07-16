@@ -18,6 +18,7 @@
 
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
 const { computeTaskDiff } = require('../gates/task-review-gate');
@@ -129,7 +130,6 @@ function computeDiffRange(reviewTasksDir, ticket) {
  */
 function outcomeFlagsNote(ctx, taskNum) {
   try {
-    const fs = require('fs');
     const ws = JSON.parse(fs.readFileSync(path.join(ctx.tasksDir, '.work-state.json'), 'utf8'));
     const entry = (ws.outcomeFlags || []).find((e) => e && e.task === taskNum && !e.waived);
     if (!entry || !entry.flags || entry.flags.length === 0) return '';

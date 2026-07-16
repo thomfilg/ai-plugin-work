@@ -157,6 +157,10 @@ function advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks) {
  * GH-756 OUTCOME MODE: the outcome verifier decides the boundary. CONTRADICTED
  * rides the existing typed exits (retry guidance / planner hold); flags land
  * on the work state for task_review and the check step's hard-fail.
+ *
+ * Invariant: `gate.recordRetry` (the persistRetryFailure closure from
+ * dispatchAdvanceGate) MUST persist the work state before returning — the
+ * blocked paths below return without a saveWorkState of their own.
  */
 function runOutcomeModeGate(safeName, ctx, deps, gate) {
   const { ws, currentIdx, totalTasks, taskNum, taskType, recordRetry } = gate;

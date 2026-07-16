@@ -76,14 +76,15 @@ function buildHeadRun({ repoDir, testFiles, profile, runner, timeoutMs }) {
     };
   }
   if (testFiles.length === 0) {
+    // No test files in the task's diff is NOT the same observation as a real
+    // runner reporting 0 tests (GH-749): the task's coverage may live in
+    // untouched pre-existing tests. Absence of derived-test evidence flags
+    // (no-test-files-in-diff → UNVERIFIED); it never fabricates a "pass".
     return {
-      attempted: true,
+      attempted: false,
       supported: true,
-      outcome: 'pass',
-      testsRan: 0,
-      failures: 0,
-      exitCode: 0,
-      reporterKind: 'structured',
+      outcome: 'not-run',
+      reporterKind: 'none',
       notes: 'no test files derived from the diff',
     };
   }

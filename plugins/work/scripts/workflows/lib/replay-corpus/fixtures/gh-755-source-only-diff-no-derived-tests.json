@@ -1,0 +1,39 @@
+{
+  "name": "gh-755-source-only-diff-no-derived-tests",
+  "incident": "GH-755",
+  "incidentClass": 2,
+  "taskKind": "tdd-code",
+  "description": "Review finding on the Phase 2 verifier: a tdd-code task whose diff touches only source files (its coverage lives in pre-existing tests untouched by this task) must NOT be contradicted as '0 tests ran' — no run happened. Absence of derived-test evidence is a flag for task_review scrutiny, never a block; only a REAL runner reporting 0 executed tests (GH-749) contradicts I4.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["src/service/rate-limiter.js"],
+      "scopeGlobs": ["src/service/**"],
+      "outOfScope": []
+    },
+    "deliverables": { "promised": [], "missing": [] },
+    "baseRun": {
+      "attempted": false,
+      "supported": true,
+      "outcome": "not-run",
+      "notes": "no derived test files to overlay"
+    },
+    "headRun": {
+      "attempted": false,
+      "supported": true,
+      "outcome": "not-run",
+      "reporterKind": "none",
+      "notes": "no test files derived from the diff"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "UNVERIFIED",
+    "flags": ["no-test-files-in-diff"],
+    "rationale": "The task changed real in-scope source but authored no tests: fail-on-base is unprovable (absence of evidence, not contradiction) — advance with a flag so task_review checks whether existing coverage genuinely exercises the change."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/755",
+    "notes": "Fixture-before-fix for the code-review finding on PR #761 (fixed in PR #762): the synthetic zero-derived-tests observation previously fabricated a structured pass with testsRan 0, which I4 falsely contradicted — recreating the false-block class the plan eliminates."
+  }
+}

@@ -143,7 +143,7 @@ function evaluateCoverage(ctx) {
 
 /** Observation-mechanism flags for the head run (any kind). */
 function collectRunnerFlags(ctx) {
-  const { headRun, diff } = ctx;
+  const { headRun, diff, profile } = ctx;
   if (diff.scopeUnresolved === true) return; // scope failure is the root cause
   if (headRun.supported === false) {
     ctx.flags.add(FLAG_KINDS.runnerUnknown);
@@ -151,6 +151,18 @@ function collectRunnerFlags(ctx) {
   }
   if (headRun.attempted && headRun.reporterKind !== 'structured') {
     ctx.flags.add(FLAG_KINDS.noStructuredReporter);
+  }
+  // A test-requiring kind whose diff derived NO test files: the coverage may
+  // live in pre-existing tests, so this is absence of evidence (flag for
+  // task_review scrutiny), never a contradiction. Real 0-test RUNS (GH-749)
+  // still contradict via I4 — this branch only fires when nothing ran.
+  if (
+    profile.requiresTests &&
+    headRun.attempted === false &&
+    diff.empty !== true &&
+    !(diff.filesChanged || []).some(isTestPath)
+  ) {
+    ctx.flags.add(FLAG_KINDS.noTestFilesInDiff);
   }
 }
 
