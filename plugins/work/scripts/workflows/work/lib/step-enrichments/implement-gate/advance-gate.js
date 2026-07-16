@@ -29,6 +29,13 @@ const {
  * verdict for this boundary alongside the incumbent gate outcome. Zero
  * authority, never throws, lazily loaded so the hot path pays nothing when
  * the flag is off.
+ *
+ * repoDir is intentionally NOT passed: the /work orchestrator's contract is
+ * cwd == the ticket worktree (the same assumption every gate git call makes),
+ * and the repo path is NOT derivable from ctx.tasksDir — tasks dirs live
+ * under TASKS_BASE, worktrees under WORKTREES_BASE. A wrong-cwd invocation
+ * degrades to an audited task-verify-shadow-error row, never a wrong verdict
+ * with authority (shadow has none).
  */
 function runShadowObserver(safeName, ctx, taskNum, taskType, incumbent) {
   if (process.env.WORK_TDD_MODE !== 'shadow') return;
