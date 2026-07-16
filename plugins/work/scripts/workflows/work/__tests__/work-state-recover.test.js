@@ -302,6 +302,19 @@ describe('work-state recover (GH-753)', () => {
   });
 
   describe('tripwire', () => {
+    it('no-op probes do not count against the tripwire', async () => {
+      writeState(baseState());
+      // Three diagnostic probes on a healthy task — all no-ops.
+      for (let i = 0; i < 3; i++) {
+        const r = await recover(['--action', 'abandon-cycle', '--task', '2', ...APPROVAL], {
+          WORK_RECOVER_TRIPWIRE: '1',
+        });
+        assert.equal(r.code, 0);
+        assert.equal(r.result.noop, true);
+        assert.equal(r.result.tripwire, undefined, `noop probe ${i + 1} must not trip`);
+      }
+    });
+
     it('warns loudly past the recovery threshold', async () => {
       writeState(baseState({ _tddRetryCount: 5, _tddRetryTask: 2 }));
       const first = await recover(['--action', 'abandon-cycle', '--task', '2', ...APPROVAL], {
