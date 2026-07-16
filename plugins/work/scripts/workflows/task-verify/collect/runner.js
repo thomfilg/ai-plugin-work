@@ -33,7 +33,7 @@ function detectRunner(repoDir) {
   if (deps.vitest) return 'vitest';
   if (deps.jest) return 'jest';
   const testScript = (pkg.scripts && pkg.scripts.test) || '';
-  if (deps['node:test'] !== undefined || /node (?:--test|--experimental-test)/.test(testScript)) {
+  if (/node (?:--test|--experimental-test)/.test(testScript)) {
     return 'node-test';
   }
   // A bare repo with no framework often still runs node --test files fine.
@@ -52,17 +52,37 @@ function parseNodeTestSummary(output) {
   };
 }
 
-/** Parse vitest/jest --json output. Returns null when unparseable. */
-function parseJsonReporter(output) {
-  const start = output.indexOf('{');
-  if (start === -1) return null;
+/** Try one candidate JSON slice for reporter counts. */
+function tryReporterDoc(candidate) {
   try {
-    const doc = JSON.parse(output.slice(start));
+    const doc = JSON.parse(candidate);
     if (typeof doc.numTotalTests !== 'number') return null;
     return { testsRan: doc.numTotalTests, failures: doc.numFailedTests || 0 };
   } catch {
     return null;
   }
+}
+
+/**
+ * Parse vitest/jest --json output. Returns null when unparseable.
+ * Runners occasionally print warnings (which may contain `{`) before the
+ * JSON blob, so anchoring on the FIRST `{` is not enough: fall back to
+ * scanning lines from the END for the JSON document.
+ */
+function parseJsonReporter(output) {
+  const start = output.indexOf('{');
+  if (start !== -1) {
+    const fromFirst = tryReporterDoc(output.slice(start));
+    if (fromFirst) return fromFirst;
+  }
+  const lines = output.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line.startsWith('{')) continue;
+    const fromLine = tryReporterDoc(line);
+    if (fromLine) return fromLine;
+  }
+  return null;
 }
 
 const RUNNER_COMMANDS = {

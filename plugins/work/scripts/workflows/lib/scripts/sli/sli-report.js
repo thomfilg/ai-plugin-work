@@ -26,7 +26,11 @@ const {
   listTicketDirs,
   analyzeTicket,
 } = require('./scan');
-const { formatDuration } = require('../../../../stats/stats');
+// Shared duration formatter (ONE implementation) — deliberately the tiny
+// standalone statusline module, not stats/stats.js, whose top-level requires
+// pull in the whole workflow-state subsystem and would break this tool's
+// standalone contract on a bare checkout.
+const { formatDurationMs } = require('../../statusline/duration');
 
 /** Aggregate the per-ticket reports. */
 function aggregate(reports) {
@@ -192,7 +196,7 @@ function renderTable(reports, agg, options) {
     r.escapedTasks.length > 0 ? `${r.escapedTasks.length} (#${r.escapedTasks.join(',#')})` : '0',
     String(r.retriesTotal),
     String(r.dispatches.usageRows),
-    formatDuration(r.timeInImplementMs),
+    formatDurationMs(r.timeInImplementMs),
   ]);
   const widths = header.map((h, col) => Math.max(h.length, ...rows.map((row) => row[col].length)));
   const renderRow = (cells) => cells.map((c, col) => c.padEnd(widths[col])).join('  ');
@@ -210,7 +214,7 @@ function renderTable(reports, agg, options) {
   lines.push(
     `           retries ${agg.retriesTotal}, dispatches ${agg.dispatchesTotal} ` +
       `(${agg.implementDispatchesTotal} implement), ` +
-      `time-in-implement ${formatDuration(agg.timeInImplementMsTotal)}, ` +
+      `time-in-implement ${formatDurationMs(agg.timeInImplementMsTotal)}, ` +
       `implement re-entries ${agg.implementReentriesTotal}, ` +
       `wedge threshold ${options.wedgeThreshold}`
   );
