@@ -168,6 +168,11 @@ function advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks) {
  * Invariant: `gate.recordRetry` (the persistRetryFailure closure from
  * dispatchAdvanceGate) MUST persist the work state before returning — the
  * blocked paths below return without a saveWorkState of their own.
+ *
+ * repoDir is intentionally not passed — same cwd contract as
+ * runShadowObserver above; a wrong-cwd invocation degrades to an advance
+ * WITH a runner-unknown flag plus a task-verify-error audit row, which the
+ * check step's flag hard-fail then surfaces (never a silent wrong verdict).
  */
 function runOutcomeModeGate(safeName, ctx, deps, gate) {
   const { ws, currentIdx, totalTasks, taskNum, taskType, recordRetry } = gate;
