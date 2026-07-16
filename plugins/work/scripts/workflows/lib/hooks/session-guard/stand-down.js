@@ -31,8 +31,14 @@ const getConfig = require(path.join(__dirname, '..', '..', 'get-config'));
 const { readTicketArtifact } = require(path.join(__dirname, 'context'));
 const { writeSessionAtomic } = require(path.join(__dirname, 'store'));
 
-const STAND_DOWN_CAP = Number.parseInt(process.env.WORK_GUARD_STAND_DOWN_CAP, 10) || 3;
-const ABANDON_MS = Number.parseInt(process.env.WORK_GUARD_ABANDON_MS, 10) || 4 * 60 * 60 * 1000;
+// NaN-guarded (not `||`) so an explicit 0 is honored: CAP=0 stands down on
+// the first identical fire; ABANDON_MS=0 treats any stopped session as
+// abandoned. The guard blocks CAP times; the (CAP+1)th identical fire stands
+// down.
+const _cap = Number.parseInt(process.env.WORK_GUARD_STAND_DOWN_CAP, 10);
+const STAND_DOWN_CAP = Number.isNaN(_cap) ? 3 : _cap;
+const _abandonMs = Number.parseInt(process.env.WORK_GUARD_ABANDON_MS, 10);
+const ABANDON_MS = Number.isNaN(_abandonMs) ? 4 * 60 * 60 * 1000 : _abandonMs;
 const TRANSCRIPT_TAIL_BYTES = 8192;
 
 // Rate-limit / API-error markers. Kept deliberately narrow: a stand-down on a
@@ -43,19 +49,26 @@ const RATE_LIMIT_RE =
 /** Read the last chunk of a transcript file; '' on any failure. */
 function readTranscriptTail(transcriptPath) {
   if (!transcriptPath) return '';
+  let fd;
   try {
-    const stat = fs.statSync(transcriptPath);
+    // Open first, then fstat the descriptor — no check-then-use window
+    // between stat and read (CodeQL js/file-system-race).
+    fd = fs.openSync(transcriptPath, 'r');
+    const stat = fs.fstatSync(fd);
     const start = Math.max(0, stat.size - TRANSCRIPT_TAIL_BYTES);
-    const fd = fs.openSync(transcriptPath, 'r');
-    try {
-      const buf = Buffer.alloc(stat.size - start);
-      fs.readSync(fd, buf, 0, buf.length, start);
-      return buf.toString('utf8');
-    } finally {
-      fs.closeSync(fd);
-    }
+    const buf = Buffer.alloc(stat.size - start);
+    fs.readSync(fd, buf, 0, buf.length, start);
+    return buf.toString('utf8');
   } catch {
     return '';
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
   }
 }
 
@@ -115,39 +128,64 @@ function detectImmediateReason(hookData, session, now) {
   return null;
 }
 
-/**
- * Decide block vs stand-down for one Stop fire and persist the counter.
- * @returns {{ action: 'block'|'stand-down', reason?: string, fingerprint: string, count: number }}
- */
-function assessStop(hookData, session, now = Date.now()) {
-  const fingerprint = computeBlockFingerprint(session);
-
-  const immediate = detectImmediateReason(hookData, session, now);
-  if (immediate) {
-    return { action: 'stand-down', reason: immediate, fingerprint, count: 0 };
-  }
-
-  const prior = session.standDown;
-  const count = prior && prior.fingerprint === fingerprint ? prior.count + 1 : 1;
-  try {
-    writeSessionAtomic(session.ticketId, {
-      ...session,
-      standDown: { fingerprint, count, lastAt: new Date(now).toISOString() },
+/** Immediate stand-down (rate-limit/abandoned): announce once per reason. */
+function standDownImmediately(session, prior, reason, fingerprint) {
+  const announce = !(prior && prior.announcedReason === reason);
+  if (announce) {
+    persistStandDown(session, {
+      ...(prior || { fingerprint, count: 0 }),
+      announcedReason: reason,
     });
+  }
+  return { action: 'stand-down', reason, fingerprint, count: prior?.count || 0, announce };
+}
+
+/** Persist the stand-down bookkeeping on the session file; never throws. */
+function persistStandDown(session, standDown) {
+  try {
+    writeSessionAtomic(session.ticketId, { ...session, standDown });
   } catch {
     /* counter persistence is best-effort — never break the hook */
   }
+}
+
+/**
+ * Decide block vs stand-down for one Stop fire and persist the counter.
+ * `announce` is true only on the FIRST stand-down for a given reason +
+ * fingerprint — later fires stand down silently, so a long-stalled session
+ * cannot grow the audit trail without bound.
+ * @returns {{ action: 'block'|'stand-down', reason?: string,
+ *             fingerprint: string, count: number, announce?: boolean }}
+ */
+function assessStop(hookData, session, now = Date.now()) {
+  const fingerprint = computeBlockFingerprint(session);
+  const prior = session.standDown;
+
+  const immediate = detectImmediateReason(hookData, session, now);
+  if (immediate) return standDownImmediately(session, prior, immediate, fingerprint);
+
+  const count = prior && prior.fingerprint === fingerprint ? prior.count + 1 : 1;
+  persistStandDown(session, { fingerprint, count, lastAt: new Date(now).toISOString() });
 
   if (count > STAND_DOWN_CAP) {
-    return { action: 'stand-down', reason: 'repeat-cap', fingerprint, count };
+    return {
+      action: 'stand-down',
+      reason: 'repeat-cap',
+      fingerprint,
+      count,
+      announce: count === STAND_DOWN_CAP + 1,
+    };
   }
   return { action: 'block', fingerprint, count };
 }
 
 /**
- * Surface ONE conductor-visible line and audit the stand-down. Never throws.
+ * Surface ONE conductor-visible line and audit the stand-down — only on the
+ * announcing fire (verdict.announce); repeats stand down silently. Never
+ * throws.
  */
 function surfaceStandDown(verdict, session) {
+  if (!verdict.announce) return;
   const workflow = session.workflow || '/work';
   process.stderr.write(
     `[session-guard] STAND-DOWN (${verdict.reason}): allowing stop for ${session.ticketId} ` +

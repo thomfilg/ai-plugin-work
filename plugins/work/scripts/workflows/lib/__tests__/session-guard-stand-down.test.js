@@ -117,6 +117,15 @@ describe('session-guard stand-down (GH-752)', () => {
     assert.equal(rows[0].allow, true);
     assert.equal(rows[0].reason, 'repeat-cap');
     assert.equal(rows[0].meta.count, 4);
+
+    // 5th-and-beyond fires stand down SILENTLY: still exit 0, but no new
+    // conductor line and no new audit row — a long-stalled session cannot
+    // grow the trail without bound.
+    const fifth = await fireStop();
+    assert.equal(fifth.code, 0, '5th fire still allows the stop');
+    assert.doesNotMatch(fifth.stderr, /STAND-DOWN/, 'repeat stand-down is silent');
+    const rowsAfter = readAuditRows().filter((row) => row.action === 'session-guard-stand-down');
+    assert.equal(rowsAfter.length, 1, 'no audit-row growth on repeat stand-downs');
   });
 
   it('workflow progress (fingerprint change) re-arms the counter', async () => {
@@ -137,13 +146,19 @@ describe('session-guard stand-down (GH-752)', () => {
     assert.equal(readSessionFile().standDown.count, 1, 'counter reset on progress');
   });
 
-  it('stands down immediately on a rate-limited stop message', async () => {
+  it('stands down immediately on a rate-limited stop message (announcing once)', async () => {
     await runCli(['init', TICKET, WORKFLOW]);
     const r = await fireStop({ stop_message: 'request failed: API rate limit reached (429)' });
     assert.equal(r.code, 0);
     assert.match(r.stderr, /STAND-DOWN \(rate-limit\)/);
     const rows = readAuditRows().filter((row) => row.action === 'session-guard-stand-down');
     assert.equal(rows[0].reason, 'rate-limit');
+
+    const again = await fireStop({ stop_message: 'request failed: API rate limit reached (429)' });
+    assert.equal(again.code, 0);
+    assert.doesNotMatch(again.stderr, /STAND-DOWN/, 'repeat rate-limit stand-down is silent');
+    const rowsAfter = readAuditRows().filter((row) => row.action === 'session-guard-stand-down');
+    assert.equal(rowsAfter.length, 1, 'one audit row per stand-down reason');
   });
 
   it('stands down immediately when the transcript tail shows a rate limit', async () => {
