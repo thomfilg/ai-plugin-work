@@ -1,0 +1,45 @@
+{
+  "name": "gh-509-resume-with-work-already-done",
+  "incident": "GH-509",
+  "incidentClass": 2,
+  "taskKind": "tdd-code",
+  "description": "Resuming GH-504 after an interrupted session: the task's implementation and tests were already committed and code-reviewed on the branch, but the live gate demanded a fresh chronological RED — impossible since the test command now exits 0. No escape hatch applied; the workflow stalled and the user abandoned /work.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["src/alerts.js", "src/__tests__/alerts-escalation.test.js"],
+      "scopeGlobs": ["src/alerts.js", "src/__tests__/alerts-escalation.test.js"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["src/alerts.js", "src/__tests__/alerts-escalation.test.js"],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 5,
+      "failures": 5,
+      "notes": "reconstructed against a base worktree: the implementation is absent there, so the task's tests genuinely fail"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 5,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": 95 }
+  },
+  "expected": {
+    "verdict": "VERIFIED",
+    "rationale": "All five invariants hold; the CHRONOLOGY of when a failing run was observed is irrelevant to a stateless boundary check — retroactive fail-on-base against a base worktree proves the same property the live RED tried to."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/509",
+    "notes": "The strongest argument for boundary-time fail-on-base over live RED recording. Old-system block: 'Your test command exits 0. RED requires a real failing test.' If base-worktree setup fails here, the label degrades to UNVERIFIED + base-setup-failed — never a dead end."
+  }
+}

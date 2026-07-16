@@ -1,0 +1,50 @@
+{
+  "name": "gh-532-load-crash-as-failing-test",
+  "incident": "GH-532",
+  "incidentClass": 1,
+  "taskKind": "tdd-code",
+  "description": "GH-508 task 6's test file referenced undefined symbols and crashed at load ('ReferenceError: setupStagedHook is not defined', exit 1, 0 tests collected). RED validation only checked exit != 0, so the load crash was recorded as a valid failing test; GREEN could then never pass (same crash regardless of source changes).",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "plugins/work/scripts/workflows/work/scripts/__tests__/follow-up-auto-advance-surface.test.js",
+        "plugins/work/scripts/workflows/work/scripts/follow-up-pr.js"
+      ],
+      "scopeGlobs": ["plugins/work/scripts/workflows/work/scripts/**"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["plugins/work/scripts/workflows/work/scripts/follow-up-pr.js"],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "load-failure",
+      "testsRan": 0,
+      "notes": "identical crash on base — only tautologically 'failing'"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "load-failure",
+      "testsRan": 0,
+      "failures": 0,
+      "exitCode": 1,
+      "reporterKind": "structured",
+      "notes": "ReferenceError: setupStagedHook is not defined; 0 tests collected"
+    },
+    "coverage": { "supported": true, "changedLineCoveragePct": 0 }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I4"],
+    "exit": "retry",
+    "rationale": "Tests fail on head AND zero tests ran for a test-requiring kind — a load crash is not a failing assertion. Structured-reporter count > 0 is exactly the invariant that separates the two."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/532",
+    "notes": "The retry dispatch may rewrite the broken test freely (contrast the old GREEN edit-lock that wedged this)."
+  }
+}

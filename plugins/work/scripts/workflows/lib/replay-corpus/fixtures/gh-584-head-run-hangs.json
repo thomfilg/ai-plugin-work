@@ -1,0 +1,43 @@
+{
+  "name": "gh-584-head-run-hangs",
+  "incident": "GH-584",
+  "incidentClass": 1,
+  "taskKind": "tdd-code",
+  "description": "The runner wrote its timeout diagnostic to the host stderr, not the captured stream: a test killed by the 5-minute timeout (SIGTERM) surfaced as exit 1 with empty captured output and was recorded as a valid failing RED. A run that verified nothing counted as evidence. At this boundary the task's tests hang on head.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": ["src/watcher.js", "src/__tests__/watcher.test.js"],
+      "scopeGlobs": ["src/**"],
+      "outOfScope": []
+    },
+    "deliverables": { "promised": ["src/watcher.js"], "missing": [] },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 1,
+      "failures": 1
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "hang",
+      "testsRan": 0,
+      "exitCode": null,
+      "reporterKind": "none",
+      "notes": "killed by SIGTERM after 300s; zero reporter output; empty captured stderr"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
+  },
+  "expected": {
+    "verdict": "CONTRADICTED",
+    "violatedInvariants": ["I4"],
+    "exit": "retry",
+    "rationale": "For a test-requiring kind, a hang on head means tests demonstrably do not pass: a hang is neither a pass nor an assertion failure and must never satisfy any invariant. Retry with guidance: the test command timed out."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/584",
+    "notes": "signal SIGTERM, timeout 300s, empty result.stderr, recorded testExitCode 1. Had only the BASE run hung, the label would be UNVERIFIED + base-setup-failed (mechanism failure) instead."
+  }
+}
