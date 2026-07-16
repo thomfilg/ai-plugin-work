@@ -123,6 +123,28 @@ function computeDiffRange(reviewTasksDir, ticket) {
 }
 
 /**
+ * GH-756: surface the outcome verifier's flags for this task in the review
+ * prompt — a task that advanced UNVERIFIED (tautology suspicion, unscoped
+ * runner, ...) gets targeted scrutiny here instead of a rubber stamp.
+ */
+function outcomeFlagsNote(ctx, taskNum) {
+  try {
+    const fs = require('fs');
+    const ws = JSON.parse(fs.readFileSync(path.join(ctx.tasksDir, '.work-state.json'), 'utf8'));
+    const entry = (ws.outcomeFlags || []).find((e) => e && e.task === taskNum && !e.waived);
+    if (!entry || !entry.flags || entry.flags.length === 0) return '';
+    return (
+      ` OUTCOME FLAGS for this task: [${entry.flags.join(', ')}] — the boundary verifier ` +
+      `advanced it UNVERIFIED. Give the flagged dimension targeted scrutiny ` +
+      `(tautology → assertion quality; runner/scope flags → verify tests actually ` +
+      `exercise the change) and fail the review if it does not hold up.`
+    );
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Decision 5: intermediate task -- run parallel tests-review + code-review.
  */
 function addReviewRun(add, ctx, { currentIdx, totalTasks, currentTask }) {
@@ -153,7 +175,9 @@ function addReviewRun(add, ctx, { currentIdx, totalTasks, currentTask }) {
     `Task ${currentIdx + 1}/${totalTasks}: review "${taskTitle}" before advancing`,
     {
       agentType: 'skill',
-      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${taskTitle}"). Scope both reviews to the task diff range${diffRange ? ` (base=${diffRange.base}, head=${diffRange.head})` : ' (computed from .last-commit-sha)'}. Set REPORT_FOLDER=${reviewTasksDir} for both skills. Aggregate results and fail the gate if either review fails.`,
+      agentPrompt:
+        `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${taskTitle}"). Scope both reviews to the task diff range${diffRange ? ` (base=${diffRange.base}, head=${diffRange.head})` : ' (computed from .last-commit-sha)'}. Set REPORT_FOLDER=${reviewTasksDir} for both skills. Aggregate results and fail the gate if either review fails.` +
+        outcomeFlagsNote(ctx, currentIdx + 1),
       diffRange,
       reportFolder: reviewTasksDir,
     }

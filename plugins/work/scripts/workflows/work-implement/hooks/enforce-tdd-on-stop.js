@@ -54,6 +54,12 @@
 const fs = require('fs');
 const path = require('path');
 
+// GH-756 OUTCOME MODE: there is no phase evidence to enforce on stop — the
+// outcome verifier judges the task's commits at the boundary instead.
+if (process.env.WORK_TDD_MODE === 'outcome') {
+  process.exit(0);
+}
+
 // ─── Read stdin (SubagentStop hook data) ────────────────────────────────────
 // Prevent infinite loops: if stop_hook_active is set, another stop hook
 // is already running — exit immediately to avoid re-entrance.

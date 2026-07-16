@@ -13,29 +13,13 @@
  * (action 'task-verify-shadow-error') and swallowed.
  */
 
-const fs = require('fs');
 const path = require('path');
 
-const { parseTasks } = require(path.join(__dirname, '..', 'work', 'lib', 'task-parser'));
-const { mergeBase, resolveRef } = require('./collect/git-facts');
-const { buildObservations } = require('./observe');
-const { evaluate } = require('./verdict-engine');
+const { observeBoundary, resolveTaskBaseRef } = require('./boundary');
 const { VERDICTS } = require('../lib/outcome-verdicts');
 
 function shadowEnabled(env = process.env) {
   return env.WORK_TDD_MODE === 'shadow';
-}
-
-/** The task's base ref: per-task bookkeeping first, merge base as fallback. */
-function resolveTaskBaseRef(repoDir, tasksDir, env = process.env) {
-  try {
-    const sha = fs.readFileSync(path.join(tasksDir, '.last-commit-sha'), 'utf8').trim();
-    if (sha && resolveRef(repoDir, sha)) return sha;
-  } catch {
-    /* no per-task bookkeeping — fall through */
-  }
-  const base = env.BASE_BRANCH || 'main';
-  return mergeBase(repoDir, `origin/${base}`, 'HEAD') || mergeBase(repoDir, base, 'HEAD');
 }
 
 /** Incumbent vs shadow: who was stricter? */
@@ -44,17 +28,6 @@ function computeDivergence(incumbent, verdict) {
   if (incumbent === 'advance' && shadowBlocks) return 'shadow-stricter';
   if (incumbent === 'blocked' && !shadowBlocks) return 'shadow-looser';
   return 'agree';
-}
-
-/** Scope entries for task N from the canonical parser; null when unknown. */
-function taskScopeGlobs(tasksDir, taskNum) {
-  try {
-    const tasks = parseTasks(tasksDir);
-    const task = (tasks || []).find((t) => t.num === taskNum);
-    return task && Array.isArray(task.filesInScope) ? task.filesInScope : null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -68,29 +41,27 @@ function runShadowVerification(input, deps = {}) {
     deps.appendAudit ||
     require(path.join(__dirname, '..', 'work', 'lib', 'work-actions')).appendEnforcementAudit;
 
-  const baseRef = input.baseRef || resolveTaskBaseRef(repoDir, tasksDir);
-  if (!baseRef) {
+  const boundary = observeBoundary({
+    repoDir,
+    tasksDir,
+    taskNum,
+    taskType,
+    baseRef: input.baseRef,
+    baseWorktreeDir: input.baseWorktreeDir,
+  });
+  if (boundary.error) {
     appendAudit(safeName, {
       origin: 'workflow',
       task: taskNum,
       phase: null,
       action: 'task-verify-shadow-error',
       allow: true,
-      reason: 'no resolvable base ref for the task boundary',
+      reason: boundary.error,
       outputPath: null,
     });
     return null;
   }
-
-  const observations = buildObservations({
-    repoDir,
-    baseRef,
-    scopeGlobs: taskScopeGlobs(tasksDir, taskNum),
-    taskKind: taskType,
-    baseWorktreeDir:
-      input.baseWorktreeDir || path.join(tasksDir, `.task-verify-base-${path.basename(repoDir)}`),
-  });
-  const result = evaluate(observations, taskType);
+  const { observations, result } = boundary;
 
   appendAudit(safeName, {
     origin: 'workflow',
