@@ -94,7 +94,10 @@ run_tests() {
       fi
       local abs_test_files
       abs_test_files=$(echo "$test_files" | sed "s|^|$dir/|")
-      (cd "$dir" && echo "$abs_test_files" | tr '\n' '\0' | xargs -0 node --test --) || {
+      # (GH-776) Default to one test process — node --test's CPU-count default
+      # with process isolation takes every core on a box running several
+      # concurrent agent sessions. Override via WORK_TEST_CONCURRENCY=<n>.
+      (cd "$dir" && echo "$abs_test_files" | tr '\n' '\0' | xargs -0 node --test --test-concurrency="${WORK_TEST_CONCURRENCY:-1}" --) || {
         echo -e "${RED}Tests failed in $dir${NC}"
         return 1
       }
