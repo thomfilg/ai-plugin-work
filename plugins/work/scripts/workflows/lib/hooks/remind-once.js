@@ -166,23 +166,29 @@ function resetForSession(sessionId) {
   }
 }
 
+/** Whether the ledger file at `p` is older than `cutoff` (fail-open: false). */
+function isStaleLedger(p, cutoff) {
+  try {
+    return fs.statSync(p).mtimeMs < cutoff;
+  } catch {
+    return false;
+  }
+}
+
 /** Delete ledger files older than maxAgeMs (7-day default). Fail-open per-file. */
 function gcStaleLedgers(opts) {
   try {
     const maxAgeMs = (opts && Number(opts.maxAgeMs)) || DEFAULT_MAX_AGE_MS;
-    const dir = sessionDir();
-    let entries;
-    try {
-      entries = fs.readdirSync(dir);
-    } catch {
-      return;
-    }
     const cutoff = Date.now() - maxAgeMs;
-    for (const name of entries) {
-      if (!name.endsWith('.json')) continue;
-      const p = path.join(dir, name);
+    const dir = sessionDir();
+    const stale = fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => path.join(dir, name))
+      .filter((p) => isStaleLedger(p, cutoff));
+    for (const p of stale) {
       try {
-        if (fs.statSync(p).mtimeMs < cutoff) fs.rmSync(p, { force: true });
+        fs.rmSync(p, { force: true });
       } catch {
         /* fail-open per-file */
       }
