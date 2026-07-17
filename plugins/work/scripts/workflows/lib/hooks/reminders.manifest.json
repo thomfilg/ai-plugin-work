@@ -1,0 +1,8 @@
+[
+  {
+    "id": "agent-picker",
+    "trigger": "always",
+    "body": "reminders/agent-picker.reminder.md",
+    "cadence": "once-per-session"
+  }
+]
