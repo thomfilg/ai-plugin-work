@@ -45,15 +45,21 @@ const { getRuntime } = require('./index');
 const VALID_ON_ERROR = new Set(['open', 'closed']);
 const CLOSED_FALLBACK = 'hook handler failed without an error message';
 
-/** Drain a readable stream to utf8; a stream error resolves '' (never rejects). */
-function collectStream(stream) {
-  return new Promise((resolve) => {
-    const chunks = [];
-    stream.setEncoding('utf8');
-    stream.on('data', (chunk) => chunks.push(chunk));
-    stream.on('end', () => resolve(chunks.join('')));
-    stream.on('error', () => resolve(''));
-  });
+/**
+ * Drain a readable stream to utf8; a stream error yields '' (never rejects).
+ * Uses the async-iterator idiom deliberately: this factory is vendored to
+ * maestro, which does NOT carry hookEntrypoint.js, so run-hook must stay
+ * self-contained rather than reuse that module's event-handler collectStream.
+ */
+async function collectStream(stream) {
+  stream.setEncoding('utf8');
+  let data = '';
+  try {
+    for await (const chunk of stream) data += chunk;
+  } catch {
+    return '';
+  }
+  return data;
 }
 
 /**

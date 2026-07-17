@@ -18,16 +18,12 @@
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { installFatalHandlers } = require(
+  path.join(__dirname, '..', '..', 'lib', 'hooks', 'fatal-handlers')
+);
 
 let didBlock = false;
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
+installFatalHandlers(__filename, logHookError, () => didBlock);
 
 let config;
 try {
