@@ -17,6 +17,7 @@ const { computeTaskNum, runTransitionGates, cleanStaleTddEvidence } = require(
   path.join(__dirname, 'transition-gates')
 );
 const { computeGateInputHashes } = require(path.join(__dirname, '..', 'lib', 'gate-input-hashes'));
+const { stampVersionAnchor } = require(path.join(__dirname, '..', 'lib', 'version-skew'));
 
 /** Fresh work state for a first-ever transition. */
 function initialTransitionState(deps, safeTicket) {
@@ -31,6 +32,7 @@ function initialTransitionState(deps, safeTicket) {
     startTime: new Date().toISOString(),
     lastUpdate: new Date().toISOString(),
   };
+  stampVersionAnchor(ws);
   deps.ALL_STEPS.forEach((s) => {
     ws.stepStatus[s] = 'pending';
   });
@@ -219,4 +221,4 @@ function getAvailableTransitions(ticket, deps) {
   };
 }
 
-module.exports = { transitionStep, getAvailableTransitions };
+module.exports = { transitionStep, getAvailableTransitions, initialTransitionState };

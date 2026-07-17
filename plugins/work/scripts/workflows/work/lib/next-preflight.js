@@ -17,6 +17,7 @@ const fs = require('fs');
 const { execFileSync } = require('child_process');
 
 const { normalizeTicketBase } = require('./session-conflict');
+const { stampVersionAnchor } = require('./version-skew');
 
 function emptyProgressState(ticket) {
   return {
@@ -103,7 +104,7 @@ function backfillTicketIdentity(planState, meta) {
 }
 
 function buildInitialDeferState(env, meta, deferredSteps, timestamp) {
-  return {
+  const ws = {
     ticketId: meta.safeName,
     ticketBase: meta.safeBase,
     ticketSuffix: meta.suffix || null,
@@ -118,6 +119,8 @@ function buildInitialDeferState(env, meta, deferredSteps, timestamp) {
     lastPlanTimestamp: timestamp,
     deferredSteps,
   };
+  stampVersionAnchor(ws);
+  return ws;
 }
 
 /**
@@ -288,6 +291,7 @@ function debugTrace(env, preCheckState, safeName, recursionDepth) {
 
 module.exports = {
   blockedInstruction,
+  buildInitialDeferState,
   resolveTicket,
   syncSessionGuardFile,
   persistPlanMetadata,
