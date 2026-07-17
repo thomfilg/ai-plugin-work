@@ -9,6 +9,33 @@
  * are injected via `deps` for testability and to avoid circular imports.
  */
 
+const { stampVersionAnchor } = require('../lib/version-skew');
+
+/**
+ * Minimal fresh defer-state for the plan path when no work state exists yet
+ * (GH-154). Extracted from the former inline `minimalState` literal so the
+ * shape is directly assertable; carries the version anchor from birth (GH-768).
+ */
+function buildMinimalPlanState({ ALL_STEPS, safeName, timestamp, deferredSteps }) {
+  const ws = {
+    ticketId: safeName,
+    description: '',
+    currentStep: 1,
+    status: 'in_progress',
+    stepStatus: {},
+    checkProgress: {},
+    errors: [],
+    startTime: new Date().toISOString(),
+    lastPlanTimestamp: timestamp,
+    deferredSteps,
+  };
+  ALL_STEPS.forEach((s) => {
+    ws.stepStatus[s] = 'pending';
+  });
+  stampVersionAnchor(ws);
+  return ws;
+}
+
 function main(deps) {
   const {
     parseTicketInput,
@@ -117,20 +144,11 @@ function main(deps) {
         } else {
           const deferSteps = result.plan.filter((s) => s.action === 'DEFER').map((s) => s.step);
           if (deferSteps.length > 0) {
-            const minimalState = {
-              ticketId: safeName_plan,
-              description: '',
-              currentStep: 1,
-              status: 'in_progress',
-              stepStatus: {},
-              checkProgress: {},
-              errors: [],
-              startTime: new Date().toISOString(),
-              lastPlanTimestamp: result.timestamp,
+            const minimalState = buildMinimalPlanState({
+              ALL_STEPS,
+              safeName: safeName_plan,
+              timestamp: result.timestamp,
               deferredSteps: deferSteps,
-            };
-            ALL_STEPS.forEach((s) => {
-              minimalState.stepStatus[s] = 'pending';
             });
             saveWorkState(safeName_plan, minimalState);
             appendAction(safeName_plan, { step: STEPS.ticket, what: 'workflow started' });
@@ -265,4 +283,4 @@ function main(deps) {
   }
 }
 
-module.exports = { main };
+module.exports = { main, buildMinimalPlanState };

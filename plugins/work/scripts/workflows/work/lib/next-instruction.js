@@ -20,6 +20,7 @@ const { buildInstruction } = require('./instruction-builder');
 const { buildStateContext } = require('./state-context');
 const { enrich, runGate } = require('./step-enrichments');
 const { createDebugLog } = require('./debug-log');
+const { checkVersionSkew } = require('./version-skew');
 const preflight = require('./next-preflight');
 
 const MAX_RECURSION = 10;
@@ -301,11 +302,26 @@ function createGetNextInstruction(env) {
     if (shortCircuit) return shortCircuit;
     preflight.debugTrace(env, preCheckState, safeName, recursionDepth);
 
+    // GH-768: plugin version skew check — once per top-level invocation
+    // (auto-advance recursion re-enters with recursionDepth > 1). Warn-only:
+    // a non-null banner is surfaced via stateCtx.versionSkew, never a block.
+    const versionSkew =
+      recursionDepth === 1
+        ? checkVersionSkew({
+            ws: preCheckState,
+            safeName,
+            statePath: path.join(env.TASKS_BASE, safeName, '.work-state.json'),
+            appendAction: env.appendAction,
+            saveWorkState: env.saveWorkState,
+          })
+        : null;
+
     const stateCtx = buildStateContext(ticket, plan, safeName, {
       loadWorkState: env.loadWorkState,
       getCurrentStep: env.getCurrentStep,
       ALL_STEPS: env.ALL_STEPS,
     });
+    if (versionSkew) stateCtx.versionSkew = versionSkew;
     const recurse = () => getNextInstruction(ticketRaw, rework);
     if (result.nextAction === 'advance_task' && handleAdvanceTask(env, safeName)) {
       return recurse();
