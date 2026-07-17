@@ -63,6 +63,11 @@ if (isHookMode) {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function runHookMode() {
+  // TTY guard: with argv-based mode detection, a no-positional interactive
+  // invocation (`node session-guard.js` in a terminal) reaches hook mode; without
+  // this it would hang forever on the stdin loop waiting for input. Nothing piped
+  // → nothing to enforce, exit clean (fail-open).
+  if (process.stdin.isTTY) return process.exit(0);
   let input = '';
   for await (const chunk of process.stdin) {
     input += chunk;
