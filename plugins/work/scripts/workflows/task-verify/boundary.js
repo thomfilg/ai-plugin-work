@@ -14,13 +14,23 @@ const { mergeBase, resolveRef } = require('./collect/git-facts');
 const { buildObservations } = require('./observe');
 const { evaluate } = require('./verdict-engine');
 
-/** The task's base ref: per-task bookkeeping first, merge base as fallback. */
+/**
+ * The task's base ref: per-task bookkeeping first, merge base as fallback.
+ *
+ * A `.last-commit-sha` that EXISTS but does not resolve in repoDir is a
+ * repo-identity mismatch (the gate is observing a different repository than
+ * the one the ticket committed to) — return null so the caller reports a
+ * mechanism failure instead of silently measuring a foreign merge-base.
+ */
 function resolveTaskBaseRef(repoDir, tasksDir, env = process.env) {
+  let sha = null;
   try {
-    const sha = fs.readFileSync(path.join(tasksDir, '.last-commit-sha'), 'utf8').trim();
-    if (sha && resolveRef(repoDir, sha)) return sha;
+    sha = fs.readFileSync(path.join(tasksDir, '.last-commit-sha'), 'utf8').trim();
   } catch {
-    /* no per-task bookkeeping — fall through */
+    /* no per-task bookkeeping — merge-base fallback below */
+  }
+  if (sha) {
+    return resolveRef(repoDir, sha) ? sha : null;
   }
   const base = env.BASE_BRANCH || 'main';
   return mergeBase(repoDir, `origin/${base}`, 'HEAD') || mergeBase(repoDir, base, 'HEAD');

@@ -132,6 +132,28 @@ function interpretRun(spawned, parse) {
 }
 
 /**
+ * Drop only the `--test*` flag family (and their `=`/space-separated values)
+ * from a NODE_OPTIONS string, preserving unrelated flags such as
+ * `--max-old-space-size` or `--require` preloads. Returns '' when nothing
+ * survives (caller then unsets the variable).
+ */
+function scrubTestFlags(nodeOptions) {
+  if (!nodeOptions || typeof nodeOptions !== 'string') return '';
+  const tokens = nodeOptions.split(/\s+/).filter(Boolean);
+  const kept = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (/^--(?:experimental-)?test/.test(token)) {
+      // Space-separated flag value (e.g. `--test-reporter tap`) travels with it.
+      if (!token.includes('=') && tokens[i + 1] && !tokens[i + 1].startsWith('-')) i += 1;
+      continue;
+    }
+    kept.push(token);
+  }
+  return kept.join(' ');
+}
+
+/**
  * Run the derived test files with the detected runner.
  * @returns the run-observation shape (see module docblock).
  */
@@ -149,10 +171,14 @@ function runDerivedTests({ cwd, files, runner, timeoutMs = DEFAULT_TIMEOUT_MS })
   const { cmd, args, parse } = make(files);
   // Scrub test-runner context vars: when the verifier itself runs under
   // `node --test`, an inherited NODE_TEST_CONTEXT flips the child into the
-  // parent's reporter protocol and the TAP summary disappears.
+  // parent's reporter protocol and the TAP summary disappears. NODE_OPTIONS
+  // keeps its non-test flags (heap size, --require/--import preloads the
+  // suite may depend on) — only the --test* family hijacks the reporter.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
-  delete env.NODE_OPTIONS;
+  const scrubbed = scrubTestFlags(env.NODE_OPTIONS);
+  if (scrubbed) env.NODE_OPTIONS = scrubbed;
+  else delete env.NODE_OPTIONS;
   const spawned = spawnSync(cmd, args, {
     cwd,
     env,
@@ -186,6 +212,7 @@ function runDerivedTests({ cwd, files, runner, timeoutMs = DEFAULT_TIMEOUT_MS })
 
 module.exports = {
   detectRunner,
+  scrubTestFlags,
   parseNodeTestSummary,
   parseJsonReporter,
   runDerivedTests,

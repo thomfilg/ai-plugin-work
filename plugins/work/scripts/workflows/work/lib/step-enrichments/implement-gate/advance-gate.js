@@ -170,9 +170,14 @@ function advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks) {
  * blocked paths below return without a saveWorkState of their own.
  *
  * repoDir is intentionally not passed — same cwd contract as
- * runShadowObserver above; a wrong-cwd invocation degrades to an advance
- * WITH a runner-unknown flag plus a task-verify-error audit row, which the
- * check step's flag hard-fail then surfaces (never a silent wrong verdict).
+ * runShadowObserver above. Wrong-cwd degradation: a non-repo cwd fails ref
+ * resolution outright, and a DIFFERENT repo cannot resolve the ticket's
+ * `.last-commit-sha` (resolveTaskBaseRef returns null on that identity
+ * mismatch instead of falling back to the foreign merge-base) — both paths
+ * advance WITH a runner-unknown flag plus a task-verify-error audit row,
+ * which the check step's flag hard-fail then surfaces (never a silent wrong
+ * verdict). Residual: a first boundary with no bookkeeping yet has no
+ * identity anchor and relies on the cwd contract alone.
  */
 function runOutcomeModeGate(safeName, ctx, deps, gate) {
   const { ws, currentIdx, totalTasks, taskNum, taskType, recordRetry } = gate;

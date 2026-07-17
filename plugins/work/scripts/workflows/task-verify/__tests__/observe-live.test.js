@@ -17,6 +17,7 @@ const os = require('os');
 const path = require('path');
 
 const { buildObservations } = require('../observe');
+const { resolveTaskBaseRef, observeBoundary } = require('../boundary');
 const { evaluate } = require('../verdict-engine');
 const { reapBaseWorktree } = require('../collect/base-worktree');
 const { VERDICTS } = require('../../lib/outcome-verdicts');
@@ -153,5 +154,28 @@ describe('task-verify live collectors (GH-755)', () => {
     const verdict = evaluate(obs, 'tdd-code');
     assert.equal(verdict.verdict, VERDICTS.unverified);
     assert.ok(verdict.flags.includes('scope-resolution-failed'));
+  });
+
+  it('bookkeeping SHA that does not resolve in repoDir is a mechanism failure, not a foreign merge-base', () => {
+    // A tasksDir whose .last-commit-sha belongs to a DIFFERENT repository:
+    // resolveTaskBaseRef must return null (repo-identity mismatch) so
+    // observeBoundary reports an error instead of measuring this repo.
+    const tasksDir = path.join(ROOT, 'tasks-foreign');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tasksDir, '.last-commit-sha'),
+      'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n'
+    );
+
+    assert.equal(resolveTaskBaseRef(REPO, tasksDir), null);
+    const boundary = observeBoundary({ repoDir: REPO, tasksDir, taskNum: 1, taskType: 'tdd-code' });
+    assert.ok(boundary.error, 'expected a mechanism-failure error');
+  });
+
+  it('bookkeeping SHA that resolves in repoDir is used as the base ref', () => {
+    const tasksDir = path.join(ROOT, 'tasks-own');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), `${baseSha}\n`);
+    assert.equal(resolveTaskBaseRef(REPO, tasksDir), baseSha);
   });
 });

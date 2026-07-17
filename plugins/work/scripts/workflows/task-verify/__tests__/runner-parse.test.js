@@ -10,7 +10,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseJsonReporter, parseNodeTestSummary } = require('../collect/runner');
+const { parseJsonReporter, parseNodeTestSummary, scrubTestFlags } = require('../collect/runner');
 
 describe('task-verify runner parsers (GH-755)', () => {
   it('parses a clean jest/vitest JSON document', () => {
@@ -36,5 +36,20 @@ describe('task-verify runner parsers (GH-755)', () => {
     assert.deepEqual(parseNodeTestSummary('# tests 4\n# fail 1\n'), { testsRan: 4, failures: 1 });
     assert.deepEqual(parseNodeTestSummary('ℹ tests 2\nℹ fail 0\n'), { testsRan: 2, failures: 0 });
     assert.equal(parseNodeTestSummary('no summary'), null);
+  });
+
+  it('scrubTestFlags drops only the --test* family from NODE_OPTIONS', () => {
+    assert.equal(
+      scrubTestFlags('--max-old-space-size=4096 --test-reporter=tap --require ./setup.js'),
+      '--max-old-space-size=4096 --require ./setup.js'
+    );
+    assert.equal(
+      scrubTestFlags('--test-reporter tap --test-reporter-destination stdout --import tsx'),
+      '--import tsx'
+    );
+    assert.equal(scrubTestFlags('--experimental-test-coverage'), '');
+    assert.equal(scrubTestFlags('--test-only --enable-source-maps'), '--enable-source-maps');
+    assert.equal(scrubTestFlags(undefined), '');
+    assert.equal(scrubTestFlags(''), '');
   });
 });
