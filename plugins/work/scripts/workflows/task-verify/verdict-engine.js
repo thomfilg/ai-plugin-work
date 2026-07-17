@@ -180,7 +180,8 @@ function collectAttributionFlags(ctx) {
   if (foreignTasks.length === 0) return;
   ctx.flags.add(FLAG_KINDS.crossTaskAttribution);
   const found = foreignTasks.map((t) => Number.parseInt(t, 10)).join(', ');
-  const expected = Number.parseInt(attribution.taskId, 10);
+  const expected =
+    attribution.taskId !== null ? Number.parseInt(attribution.taskId, 10) : '(unknown)';
   ctx.reasons.push(
     `attribution: range contains commits attributed to task(s) ${found} (expected task ${expected})`
   );
