@@ -85,11 +85,15 @@ const {
   citationBlockMessage,
 } = require(path.join(__dirname, 'enforce-tdd-on-stop-helpers'));
 
+// Canonical agent-identity module (GH-767) — the ONE payload self-identity
+// accessor (`agent_type || agent_name || subagent_type`, normalized).
+const { payloadAgentName } = require(path.join(__dirname, '..', '..', 'lib', 'agent-identity'));
+
 // ─── Self-filter: only POSITIVELY-identified developer-* agents are gated ──
 // SubagentStop fires for every subagent (commit-writer, pr-generator, qa-*…).
-// Claude Code's documented SubagentStop payload identifies the agent via
-// `agent_type` ("present only when the hook fires inside a subagent call");
-// legacy `agent_name` / `subagent_type` are read as fallbacks. When no
+// Self-identity is read via the canonical module's `payloadAgentName()`
+// (payload `agent_type` first — the documented SubagentStop field — with the
+// legacy `agent_name` / `subagent_type` fallbacks, normalized). When no
 // payload field is present (older builds), fall back to the subagent
 // transcript's first user message: the developer dispatch prompt
 // (step-enrichments/implement.js) carries the structural 'self-paced TDD
@@ -97,9 +101,7 @@ const {
 // must never gate arbitrary subagents — the previous negative filter fell
 // through to the evidence check for EVERY payload without an agent name,
 // exit-2-blocking code-checker/Explore/commit-writer mid-task.
-const _agentName = String(
-  _hookData.agent_type || _hookData.agent_name || _hookData.subagent_type || ''
-).toLowerCase();
+const _agentName = payloadAgentName(_hookData);
 const _isDeveloperAgent = _agentName
   ? /(^|:)developer-/.test(_agentName)
   : transcriptIsDeveloperDispatch(_hookData.transcript_path);

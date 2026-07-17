@@ -32,6 +32,7 @@ const TASKS_BASE = config.TASKS_BASE;
 
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 const { taskSegment } = require('../../lib/allocate-output-folder');
+const { stampVersionAnchor } = require('../lib/version-skew');
 
 const SUBTASK_STEPS = ['implement', 'commit'];
 
@@ -107,6 +108,7 @@ function initState(ticketId, description = '') {
     startTime: new Date().toISOString(),
     lastUpdate: new Date().toISOString(),
   };
+  stampVersionAnchor(state);
 
   return saveState(ticketId, state);
 }

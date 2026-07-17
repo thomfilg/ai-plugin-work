@@ -7,6 +7,11 @@
 
 'use strict';
 
+const path = require('path');
+const { payloadAgentName } = require(
+  path.join(__dirname, '..', '..', '..', 'lib', 'agent-identity')
+);
+
 // Read all of stdin to a string.
 async function readStdin() {
   let input = '';
@@ -28,9 +33,10 @@ async function readHookDataStrict(label) {
   }
 }
 
-// Resolve the subagent name from the hook payload (lowercased for matching).
+// Resolve the subagent name from the hook payload (normalized for matching)
+// via the canonical agent-identity accessor (GH-767).
 function resolveAgentName(hookData) {
-  return (hookData.agent_name || hookData.subagent_type || '').toLowerCase();
+  return payloadAgentName(hookData);
 }
 
 // Resolve the agent's textual output across the payload field variants.

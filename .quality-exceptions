@@ -72,9 +72,7 @@ plugins/work/scripts/workflows/work-spec/lib/phases/reuse_audit.js
 plugins/work/scripts/workflows/work/engine/unstick-complete.js
 plugins/work/scripts/workflows/work/lib/gherkin-task-refs.js
 plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-screenshot-validator.js
-plugins/work/scripts/workflows/work/engine/cli.js
 plugins/work/scripts/workflows/work/lib/work-actions.js
-plugins/work/scripts/workflows/lib/hooks/enforce-screenshot-requirement.js
 plugins/work/scripts/workflows/work/steps/implement.js
 plugins/work/scripts/workflows/work-tasks/lib/phases/draft.js
 plugins/work/scripts/workflows/check/scripts/write-qa-report.js
@@ -95,7 +93,6 @@ plugins/work/scripts/workflows/work/engine/plan-generator.js
 plugins/work/scripts/workflows/check/agents/qa-api-tester/validate-api-report.js
 plugins/work/scripts/workflows/work/scripts/bootstrap-custom-script.js
 plugins/work/scripts/workflows/work/lib/mark-task-progress.js
-plugins/work/scripts/workflows/lib/hooks/agent-hook-dispatcher.js
 plugins/work/scripts/workflows/work-spec/lib/kind-checks/e2e.js
 plugins/work/scripts/workflows/lib/allocate-output-folder.js
 plugins/work/scripts/workflows/check/scripts/write-tests-report.js
@@ -156,7 +153,6 @@ plugins/work/scripts/workflows/work/agents/developer-quality-gate.js
 plugins/work/scripts/workflows/work-code-checker/lib/kind-checks/devops.js
 plugins/work/scripts/workflows/work-task-review/lib/kind-checks/shared.js
 plugins/work/scripts/workflows/work-task-review/lib/phases/report.js
-plugins/work/scripts/workflows/lib/hooks/policies/step-gate.js
 plugins/work/scripts/workflows/lib/scripts/get-ticket-id.js
 plugins/work/scripts/workflows/work-tasks/lib/phases/memorize.js
 plugins/work/scripts/workflows/work-pr-step/lib/phases/attachments.js

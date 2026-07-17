@@ -20,6 +20,7 @@ const path = require('path');
 const { runQualityCheck, describeStrategy } = require(
   path.join(__dirname, '..', '..', 'lib', 'quality-check')
 );
+const { payloadAgentName } = require(path.join(__dirname, '..', '..', 'lib', 'agent-identity'));
 
 /**
  * Check if there are actual code changes to validate.
@@ -56,15 +57,10 @@ async function main() {
     process.exit(2);
   }
 
-  // Check if this is a developer agent — payload agent_type first (the
-  // documented SubagentStop field on both runtimes; codex sets no legacy
-  // agent_name), then the legacy fields.
-  const agentName = (
-    hookData.agent_type ||
-    hookData.agent_name ||
-    hookData.subagent_type ||
-    ''
-  ).toLowerCase();
+  // Check if this is a developer agent — self-identity via the canonical
+  // module's payloadAgentName() (payload agent_type first, the documented
+  // SubagentStop field on both runtimes; legacy fields as fallbacks).
+  const agentName = payloadAgentName(hookData);
 
   // Skip if no code changes to validate
   if (!hasCodeChanges()) {

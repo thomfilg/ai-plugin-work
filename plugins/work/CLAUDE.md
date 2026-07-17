@@ -106,6 +106,25 @@ Load-bearing facts when porting:
   `.work-actions.json` (`tdd-exception`). Agents get TDD exemptions ONLY via
   the planner's `### Type` line, never by invoking `exception`.
 
+### Agent Identity (hook authors)
+
+All agent-identity questions in hooks go through the canonical module
+`scripts/workflows/lib/agent-identity.js` — never probe the payload, env, or
+transcript directly. Its contract JSDoc documents six distinct questions:
+"am I agent X?" (`isRunningInAgent`), "am I ANY dispatched agent?"
+(`isDispatchedAgentContext`, env-sensitive by design), "am I a subagent?"
+(`isSubagentContext`, env-blind by design — do not merge with the previous),
+"what does the payload say I am?" (`payloadAgentName`), "which agent is being
+dispatched?" (`dispatchTargetAgent` — a dispatch target is never
+self-identity), and "what does env claim?" (`envAgentName` — spoofable,
+lowest trust). Signal precedence is payload → transcript structural markers →
+env. New hooks import these accessors instead of reading
+`process.env.CLAUDE_CURRENT_AGENT`, `agent_type`/`agent_name`/`subagent_type`,
+or transcript markers inline — a grep-guard test enforces this. The module's
+JSDoc header sections — "The six identity questions", "The #665 rule",
+"Fail directions", and "Observability" — are the authoritative contract this
+paragraph points at.
+
 ### Security
 - All ticket-ID-to-path conversions validated against directory traversal.
 - `protect-state-files.js` guards `.work-state.json` etc. from direct edits.
