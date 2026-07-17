@@ -88,12 +88,18 @@ function resolveDiffWithAttribution({ repoDir, baseRef, headRef, scopeGlobs, tas
   if (attribution.supported && attribution.mode === 'trailer') {
     return { diff: diffFromFiles(attribution.attributedFiles, scope), attribution };
   }
-  // Rules 1 (mode 'none') and 3 (supported:false) — legacy diff kept. When the
-  // collector itself could not resolve (supported:false, e.g. an unresolvable
-  // base ref), the legacy read is fail-open so a task is never hard-blocked by
-  // a broken attribution read (spec R3/R9). The serial path (taskNum omitted,
-  // buildDiff) keeps its throw-on-failure semantics unchanged.
-  const legacy = attribution.supported ? changedFiles(repoDir, baseRef, headRef) : [];
+  // Rules 1 (mode 'none') and 3 (supported:false) — legacy diff kept. BOTH cases
+  // use the legacy base..HEAD read: on supported:false the refs are usually still
+  // valid (only the attribution collector failed), so we attempt the legacy diff
+  // and fall back to [] ONLY if that read ALSO throws — a task is never
+  // hard-blocked by a broken attribution read (spec R3/R9). The serial path
+  // (taskNum omitted, buildDiff) keeps its throw-on-failure semantics unchanged.
+  let legacy;
+  try {
+    legacy = changedFiles(repoDir, baseRef, headRef);
+  } catch {
+    legacy = [];
+  }
   return { diff: diffFromFiles(legacy, scope), attribution };
 }
 
