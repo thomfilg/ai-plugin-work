@@ -37,9 +37,9 @@
   },
   "expected": {
     "verdict": "CONTRADICTED",
-    "violatedInvariants": ["I1", "I3"],
+    "violatedInvariants": ["I1", "I2", "I4"],
     "exit": "retry",
-    "rationale": "Per-task verification over the task's own commits is structurally immune to sibling working-tree contamination: task 4 has an empty diff and no genuine fail-on-base, so it is re-dispatched cleanly."
+    "rationale": "Per-task verification over the task's own commits is structurally immune to sibling working-tree contamination: task 4 has an empty diff, a missing deliverable and zero derived tests on head (the recorded RED belonged to a sibling), so it is re-dispatched cleanly. Fail-on-base (I3) never contradicts by itself — the pass-on-base here is subsumed by I1/I4."
   },
   "provenance": {
     "issue": "https://github.com/thomfilg/ai-plugin-work/issues/720",

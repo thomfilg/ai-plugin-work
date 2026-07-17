@@ -17,14 +17,14 @@
     },
     "baseRun": {
       "attempted": true,
-      "supported": true,
+      "supported": false,
       "outcome": "error",
       "testsRan": 0,
-      "notes": "test file from the stale task pointer does not exist under the current plan"
+      "notes": "test file from the stale task pointer does not exist under the current plan — the observer cannot run anything meaningful"
     },
     "headRun": {
       "attempted": true,
-      "supported": true,
+      "supported": false,
       "outcome": "error",
       "testsRan": 0,
       "failures": 0,
@@ -36,7 +36,7 @@
   },
   "expected": {
     "verdict": "CONTRADICTED",
-    "violatedInvariants": ["I2"],
+    "violatedInvariants": ["I1", "I2"],
     "exit": "reopen-artifact",
     "rationale": "The task-as-recorded references a deliverable that cannot exist under the current plan (missing deliverable outside any resolvable scope); retrying the same dispatch can never succeed — plan state must be reconciled."
   },

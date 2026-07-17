@@ -53,6 +53,7 @@ const FLAG_KINDS = Object.freeze({
   tautology: 'tautology',
   runnerUnknown: 'runner-unknown',
   scopeResolutionFailed: 'scope-resolution-failed',
+  noTestFilesInDiff: 'no-test-files-in-diff',
 });
 
 /**

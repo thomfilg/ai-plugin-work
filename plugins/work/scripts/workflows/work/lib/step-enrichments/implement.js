@@ -104,6 +104,57 @@ function buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle) {
 }
 
 /**
+ * GH-756 OUTCOME MODE prompt: the agent develops freely — no phases, no
+ * evidence recording, no phase-scoped edit rules. Quality is verified at the
+ * task boundary by the outcome verifier (task-verify/) over the task's
+ * actual commits. Advisory feedback: when the previous boundary was
+ * CONTRADICTED, the verifier's guidance is injected as INFORMATION.
+ */
+function buildOutcomePrompt(ticket, taskNum, totalTasks, taskTitle, tasksDir) {
+  let retryReason = null;
+  try {
+    const ws = JSON.parse(fs.readFileSync(path.join(tasksDir, '.work-state.json'), 'utf8'));
+    retryReason = ws && ws._tddRetryReason ? String(ws._tddRetryReason) : null;
+  } catch {
+    /* no state — no advisory block */
+  }
+  const lines = [
+    `## Task ${taskNum}${totalTasks ? `/${totalTasks}` : ''} — ${taskTitle}`,
+    '',
+    `Read the "## Task ${taskNum}" section of ${path.join(tasksDir, 'tasks.md')}: the`,
+    'Gherkin scenarios describe the behavior to build; Files in scope bounds',
+    'where you may work.',
+    '',
+    '### How to work (outcome mode)',
+    '- Implement the task freely: write tests and source in whatever order',
+    '  serves you; run tests locally as often as you like.',
+    '- Commit your work when done (per-task commit, ticket-tagged).',
+    '- At the task boundary a verifier checks your COMMITS: non-empty in-scope',
+    '  diff, promised files present, your tests fail on base and pass on head',
+    '  with a real test count. Tests that also pass on the base tree are',
+    '  flagged as tautologies for review — write tests that specify the NEW',
+    '  behavior.',
+    '',
+    '### Rules',
+    `- Implement ONLY Task ${taskNum} deliverables (stay in Files in scope).`,
+    '- Do NOT edit .work-state.json — it is orchestrator-managed.',
+    '- Do NOT invoke /work-implement, /work, or any other slash command.',
+  ];
+  if (retryReason) {
+    lines.push(
+      '',
+      '### Previous boundary verdict (advisory)',
+      'Your last attempt did not verify. The contradiction was:',
+      '```',
+      retryReason.slice(0, 1500),
+      '```',
+      'Address it, commit, and the boundary check will re-run.'
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
  * Extract task coordinates from the buildTaskPrompt output. The
  * "## Current Task: Task N — title" header is always emitted by
  * buildTaskPrompt; the "Task N of M" context block is only present when
@@ -213,7 +264,10 @@ function enrichImplement(entry, ctx) {
     return;
   }
 
-  entry.agentPrompt = buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle);
+  entry.agentPrompt =
+    process.env.WORK_TDD_MODE === 'outcome'
+      ? buildOutcomePrompt(ticket, taskNum, totalTasks, taskTitle, tasksDir)
+      : buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle);
   entry.agentType = resolveAgentType(tasksDir, taskNum);
 }
 

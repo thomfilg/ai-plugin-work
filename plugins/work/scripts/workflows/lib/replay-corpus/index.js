@@ -88,6 +88,11 @@ function validateDiff(errors, diff) {
   requireStringArray(errors, diff, 'filesChanged', 'observations.diff');
   requireStringArray(errors, diff, 'scopeGlobs', 'observations.diff');
   requireStringArray(errors, diff, 'outOfScope', 'observations.diff');
+  pushIf(
+    errors,
+    diff.scopeUnresolved !== undefined && typeof diff.scopeUnresolved !== 'boolean',
+    'observations.diff.scopeUnresolved must be a boolean when present'
+  );
 }
 
 function validateDeliverables(errors, deliverables) {

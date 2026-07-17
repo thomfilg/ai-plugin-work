@@ -35,7 +35,7 @@
       "reporterKind": "structured",
       "notes": "ReferenceError: setupStagedHook is not defined; 0 tests collected"
     },
-    "coverage": { "supported": true, "changedLineCoveragePct": 0 }
+    "coverage": { "supported": false, "changedLineCoveragePct": null }
   },
   "expected": {
     "verdict": "CONTRADICTED",
