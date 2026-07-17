@@ -21,6 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { installFatalHandlers } = require(path.join(__dirname, 'fatal-handlers'));
 const { ACCESS_FAILED } = require(
   path.join(__dirname, '..', '..', 'check', 'lib', 'app-access-status')
 );
@@ -38,14 +39,7 @@ const QUESTION_TOOLS = new Set(['AskUserQuestion', 'request_user_input']);
 const GATED_DISPATCH_TOOLS = new Set(['Task', 'Skill', 'spawn_agent']);
 
 let didBlock = false;
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
+installFatalHandlers(__filename, logHookError, () => didBlock);
 
 let config;
 try {

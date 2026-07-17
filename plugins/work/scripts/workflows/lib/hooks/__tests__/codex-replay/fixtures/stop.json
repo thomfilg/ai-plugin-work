@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "Stop",
+  "turn_id": "turn-abc123",
+  "transcript_path": "/home/u/.codex/sessions/2026/07/17/rollout-abc.jsonl",
+  "cwd": "/home/u/project",
+  "stop_hook_active": false
+}

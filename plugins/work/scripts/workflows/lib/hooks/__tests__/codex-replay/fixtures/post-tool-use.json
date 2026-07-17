@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PostToolUse",
+  "turn_id": "turn-jkl012",
+  "transcript_path": "/home/u/.codex/sessions/2026/07/17/rollout-jkl.jsonl",
+  "cwd": "/home/u/project",
+  "tool_name": "Bash",
+  "tool_input": { "command": "ls -la" },
+  "tool_response": "total 0\n"
+}

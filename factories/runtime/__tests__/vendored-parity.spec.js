@@ -40,6 +40,7 @@ const EXPECTED_MASTER_FILES = {
     'envconfig-lite.js',
     'index.js',
     'payload.js',
+    'run-hook.js',
     'tickets.js',
     'tools.js',
     'transcript-claude.js',

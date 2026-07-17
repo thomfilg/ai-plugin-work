@@ -166,4 +166,9 @@ module.exports = {
   readStamp,
   stampPath,
   resolveMode,
+  // GH-774: the runtime-aware hook wrapper. Lazily required so index.js does
+  // not eagerly load run-hook (which requires index.js back) at module init.
+  get runHook() {
+    return require('./run-hook').runHook;
+  },
 };

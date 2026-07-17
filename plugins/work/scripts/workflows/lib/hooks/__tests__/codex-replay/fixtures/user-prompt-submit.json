@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "UserPromptSubmit",
+  "turn_id": "turn-def456",
+  "transcript_path": "/home/u/.codex/sessions/2026/07/17/rollout-def.jsonl",
+  "cwd": "/home/u/project",
+  "prompt": "/work GH-100"
+}
