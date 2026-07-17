@@ -165,6 +165,10 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/capture-usage.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/context-monitor.js"
           }
         ]
       },

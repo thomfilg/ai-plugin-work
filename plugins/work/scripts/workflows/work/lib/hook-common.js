@@ -1,11 +1,11 @@
 /**
  * hook-common.js — shared plumbing for /work PostToolUse hooks
- * (work-auto-advance.js, capture-usage.js).
+ * (work-auto-advance.js, capture-usage.js, context-monitor.js).
  *
  * Extracted so each hook keeps only its own behavior: stdin parsing, runtime
- * normalization, and the session/worktree-scoped `.work.pid` marker lookup
- * are identical across hooks and must stay identical — a divergence here is
- * how cross-wiring bugs start.
+ * normalization, the session/worktree-scoped `.work.pid` marker lookup, and the
+ * `.work-state.json` → active-step resolution are identical across hooks and
+ * must stay identical — a divergence here is how cross-wiring bugs start.
  */
 
 const fs = require('fs');
@@ -63,4 +63,44 @@ function findRecentWorkMarker() {
   return { marker, tasksBase: TASKS_BASE };
 }
 
-module.exports = { installFailOpen, readHookData, normalizePostToolEvent, findRecentWorkMarker };
+/**
+ * Resolve a ticket's active step name from its `.work-state.json`.
+ *
+ * `currentStep` is 1-indexed into ALL_STEPS (mirrors print-current-step.js).
+ * The ticket id is sanitized via `lib/config` `safeTicketId` (traversal-safe),
+ * falling back to the raw id if that lookup fails. A missing/corrupt state file
+ * — or any other failure — yields `'unknown'` rather than dropping the caller's
+ * record, so usage attribution and context warnings never break a workflow.
+ *
+ * @param {string} tasksBase Absolute TASKS_BASE root.
+ * @param {string} ticket Raw ticket id.
+ * @returns {string} The active step name, or `'unknown'`.
+ */
+function readStateStep(tasksBase, ticket) {
+  let safe = ticket;
+  try {
+    safe = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticket);
+  } catch {
+    /* fall back to the raw id */
+  }
+  try {
+    const statePath = path.join(tasksBase, safe, '.work-state.json');
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    const { ALL_STEPS } = require(path.join(__dirname, '..', 'step-registry'));
+    const num = Number(state && state.currentStep);
+    if (Number.isFinite(num) && num >= 1 && num <= ALL_STEPS.length) {
+      return ALL_STEPS[num - 1];
+    }
+  } catch {
+    /* missing/corrupt state file */
+  }
+  return 'unknown';
+}
+
+module.exports = {
+  installFailOpen,
+  readHookData,
+  normalizePostToolEvent,
+  findRecentWorkMarker,
+  readStateStep,
+};

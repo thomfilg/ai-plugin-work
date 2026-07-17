@@ -21,38 +21,10 @@
  * capture must never break or cross-wire a workflow.
  */
 
-const fs = require('fs');
 const path = require('path');
 const hookCommon = require(path.join(__dirname, '..', 'lib', 'hook-common'));
 
 hookCommon.installFailOpen();
-
-/**
- * Resolve the ticket's active step name from `.work-state.json`.
- * `currentStep` is 1-indexed into ALL_STEPS (see print-current-step.js).
- * Missing/invalid state attributes the row to 'unknown' rather than dropping
- * the usage figures.
- */
-function readStateStep(tasksBase, ticket) {
-  let safe = ticket;
-  try {
-    safe = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticket);
-  } catch {
-    /* fall back to the raw id */
-  }
-  try {
-    const statePath = path.join(tasksBase, safe, '.work-state.json');
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    const { ALL_STEPS } = require(path.join(__dirname, '..', 'step-registry'));
-    const num = Number(state && state.currentStep);
-    if (Number.isFinite(num) && num >= 1 && num <= ALL_STEPS.length) {
-      return ALL_STEPS[num - 1];
-    }
-  } catch {
-    /* missing/corrupt state file */
-  }
-  return 'unknown';
-}
 
 /** Finite number or 0. */
 function fin(n) {
@@ -122,7 +94,7 @@ function main() {
 
   const { appendUsage } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
   appendUsage(found.marker.ticket, {
-    step: readStateStep(found.tasksBase, found.marker.ticket),
+    step: hookCommon.readStateStep(found.tasksBase, found.marker.ticket),
     agentType: resolveAgentType(evt),
     totalTokens: usage.totalTokens,
     toolUses: usage.toolUses,
