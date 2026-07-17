@@ -105,13 +105,14 @@ function loadLedger(sessionId) {
   const file = ledgerPath(sessionId);
   let raw;
   try {
-    if (!fs.existsSync(file)) return { ledger: emptyLedger(sessionId) };
-    const st = fs.statSync(file);
-    if (!st.isFile() || st.size <= 0 || st.size > MAX_FILE_BYTES) {
+    // Read directly (no existsSync/stat-then-read TOCTOU): a missing ledger is
+    // the common first-prompt case, handled as ENOENT below.
+    raw = fs.readFileSync(file, 'utf8');
+    if (raw.length <= 0 || Buffer.byteLength(raw) > MAX_FILE_BYTES) {
       return { error: true };
     }
-    raw = fs.readFileSync(file, 'utf8');
   } catch (err) {
+    if (err && err.code === 'ENOENT') return { ledger: emptyLedger(sessionId) };
     log(err);
     return { error: true };
   }

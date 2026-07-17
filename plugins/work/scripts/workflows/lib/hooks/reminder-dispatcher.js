@@ -122,9 +122,10 @@ function validateManifest(mPath) {
 
 function readBody(bodyPath) {
   try {
-    const st = fs.statSync(bodyPath);
-    if (!st.isFile() || st.size <= 0 || st.size > MAX_BODY_BYTES) return null;
-    return fs.readFileSync(bodyPath, 'utf8').trim();
+    // Read directly (no stat-then-read TOCTOU), then size-cap the content.
+    const raw = fs.readFileSync(bodyPath, 'utf8');
+    if (raw.length <= 0 || Buffer.byteLength(raw) > MAX_BODY_BYTES) return null;
+    return raw.trim();
   } catch (err) {
     log(err);
     return null;
