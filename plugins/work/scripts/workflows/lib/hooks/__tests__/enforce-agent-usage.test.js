@@ -41,3 +41,28 @@ describe('enforce-agent-usage — Semantic Commits rule', () => {
     assert.ok(COMMIT_SCRIPT.endsWith(path.join('work', 'scripts', 'commit-and-push.js')));
   });
 });
+
+// GH-767 Task 3: the migrated primary hooks obtain identity from the
+// canonical agent-identity module — require-path assertions only (no
+// behavior assertions; the suites above are the behavior anchor).
+describe('enforce-agent-usage — GH-767 agent-identity migration (require paths)', () => {
+  const fs = require('fs');
+  const LIB = path.join(__dirname, '..', '..');
+  const MIGRATED = [
+    'hooks/agent-hook-dispatcher.js',
+    'hooks/enforce-agent-usage.js',
+    'hooks/enforce-step-workflow.js',
+    'hooks/enforce-screenshot-requirement.js',
+    'hooks/policies/agent-gate-rule.js',
+    'hooks/policies/step-gate.js',
+    'hooks/policies/workflow-loop-rules.js',
+  ];
+
+  it('every migrated hook requires agent-identity, never agent-detection', () => {
+    for (const rel of MIGRATED) {
+      const src = fs.readFileSync(path.join(LIB, rel), 'utf8');
+      assert.ok(src.includes('agent-identity'), `${rel} must require agent-identity`);
+      assert.ok(!src.includes("agent-detection'"), `${rel} must not require agent-detection`);
+    }
+  });
+});

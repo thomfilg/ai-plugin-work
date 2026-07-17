@@ -88,44 +88,30 @@ function resolveWorktreeDir(workState, safeTicket) {
  * @param {string|undefined} transcriptPath
  * @returns {boolean}
  */
-function _messageText(entry) {
-  const content = entry.message && entry.message.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.map((i) => (i && i.text) || '').join(' ');
-}
-
 /** Text of the transcript's FIRST user message, or null when unreadable. */
 function _firstUserMessageText(transcriptPath) {
   if (!transcriptPath || !fs.existsSync(transcriptPath)) return null;
 
-  // Codex rollout transcripts (SubagentStop agent_transcript_path on codex):
-  // the claude line scan below can't read them — take the FIRST authored user
-  // message via the vendored dual-format reader (event_msg/user_message
-  // records only; injected context is never mistaken for the dispatch
-  // prompt). Payload `agent_type` remains the primary identification — this
-  // fallback only runs on payloads without it (see enforce-tdd-on-stop.js).
-  const { sniffFormat, readUserMessages } = require(
+  // GH-767 import swap: BOTH transcript formats are read via the vendored
+  // dual-format reader (module boundary — never raw-read the transcript
+  // here). On codex rollouts only event_msg/user_message records count
+  // (injected context is never mistaken for the dispatch prompt); on claude
+  // project JSONL only `user` records' string/text-block content counts.
+  // Payload identity remains the primary identification — this fallback only
+  // runs on payloads without it (see enforce-tdd-on-stop.js).
+  const { readUserMessages } = require(
     path.join(__dirname, '..', '..', 'lib', 'runtime', 'transcript')
   );
-  if (sniffFormat(transcriptPath) === 'codex') {
-    const messages = readUserMessages(transcriptPath, { count: Number.MAX_SAFE_INTEGER });
-    return messages.length > 0 ? messages[0] : null;
-  }
-
-  for (const line of fs.readFileSync(transcriptPath, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (entry && entry.type === 'user') return _messageText(entry);
-  }
-  return null;
+  const messages = readUserMessages(transcriptPath, { count: Number.MAX_SAFE_INTEGER });
+  return messages.length > 0 ? messages[0] : null;
 }
 
+// NOTE (GH-767): the 'self-paced TDD agent' + task-next.js dispatch-prompt
+// marker is developer-gating POLICY local to this hook — it is NOT an
+// identity-detection primitive and deliberately does not live in
+// lib/agent-identity.js. Identity questions (payload/env/transcript agent
+// identity) go through that module; this predicate only recognizes the
+// implement step's own dispatch prompt.
 function transcriptIsDeveloperDispatch(transcriptPath) {
   try {
     const text = _firstUserMessageText(transcriptPath);

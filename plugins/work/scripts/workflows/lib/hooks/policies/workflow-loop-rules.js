@@ -16,6 +16,7 @@
  * — stays in the hook entry's loops, so both callers guard before invoking these.
  */
 
+const { dispatchTargetAgent } = require('../../agent-identity');
 const { matchToolToStep, isExempt } = require('./command-matching');
 const { evaluateTransitionGate, formatTransitionBlockMessage } = require('./transition-gate');
 const { evaluateStepGate, formatStepBlockMessage } = require('./step-gate');
@@ -107,7 +108,7 @@ function checkTransitionPre(deps, wf, currentStep, transition, ctx) {
 // name kept as a fallback for in-flight tickets that predate the rename)
 function computeCheckStateActive(deps, wf, matchedStep, currentStep, ctx) {
   if (wf.name !== 'work' || matchedStep === currentStep) return false;
-  const agentType = ctx.toolInput?.subagent_type || '';
+  const agentType = dispatchTargetAgent(ctx.toolInput);
   if (!deps.checkAgents.has(agentType)) return false;
   const checkState =
     deps.loadStateFile(ctx.ticketId, '.check-state.json') ||
