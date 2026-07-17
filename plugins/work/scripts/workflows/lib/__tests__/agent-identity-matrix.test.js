@@ -192,6 +192,32 @@ describe('Payload agent_type is the highest-precedence self-identity signal', ()
   });
 });
 
+describe('classifyIdentity verdict matches isRunningInAgent exactly (GH-767 review)', () => {
+  // The observability classifier must never report a verdict its target
+  // function wouldn't. These pin the two payload-leg divergences flagged in
+  // review: top-level agent_name (IGNORED by the decision walk) and
+  // tool_input.subagent_type (HONORED by the decision walk).
+  it('top-level agent_name alone does NOT identify (parity with isRunningInAgent=false)', () => {
+    const hookData = { agent_name: 'quality-checker' };
+    assert.equal(isRunningInAgent(null, ['quality-checker'], hookData), false);
+    assert.equal(classifyIdentity(null, ['quality-checker'], hookData).decision, false);
+  });
+
+  it('tool_input.subagent_type match identifies via the payload signal (parity with isRunningInAgent=true)', () => {
+    const hookData = { tool_input: { subagent_type: 'quality-checker' } };
+    assert.equal(isRunningInAgent(null, ['quality-checker'], hookData), true);
+    const result = classifyIdentity(null, ['quality-checker'], hookData);
+    assert.equal(result.decision, true);
+    assert.equal(result.signal, 'payload');
+  });
+
+  it('agent_type match identifies via the payload signal (parity with isRunningInAgent=true)', () => {
+    const hookData = { agent_type: 'quality-checker' };
+    assert.equal(isRunningInAgent(null, ['quality-checker'], hookData), true);
+    assert.equal(classifyIdentity(null, ['quality-checker'], hookData).signal, 'payload');
+  });
+});
+
 describe('Dispatch target is never conflated with self-identity', () => {
   it('dispatchTargetAgent returns the normalized subagent_type of the tool input', () => {
     assert.equal(

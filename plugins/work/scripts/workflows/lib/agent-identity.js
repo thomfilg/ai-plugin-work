@@ -170,11 +170,39 @@ function activeAgentDetectionPayload(hookData) {
  * (payload → env → codex rollout → structural markers → task scan →
  * frontmatter) but reports WHICH signal decided.
  */
-function classifySignal(transcriptPath, agentAliases, hookData) {
-  const fromPayload = payloadAgentName(hookData);
-  if (fromPayload && matchesAlias(fromPayload, agentAliases)) {
-    return { decision: true, signal: SIGNALS.PAYLOAD, detail: `agent=${fromPayload}` };
+/**
+ * Payload leg of the classify walk — mirrors agentFromHookData
+ * (isRunningInAgent's first step) EXACTLY: hookData.agent_type, then
+ * hookData.tool_input.subagent_type. NOT payloadAgentName: that self-identity
+ * accessor also reads top-level agent_name (which the decision walk ignores)
+ * and excludes tool_input.subagent_type (which the decision walk honors), so
+ * reusing it would let this observability classifier report a verdict that
+ * diverges from isRunningInAgent. Returns a signal object on a match, else
+ * null to fall through.
+ */
+function classifyPayloadSignal(hookData, agentAliases) {
+  const agentType = hookData?.agent_type;
+  if (matchesAlias(agentType, agentAliases)) {
+    return {
+      decision: true,
+      signal: SIGNALS.PAYLOAD,
+      detail: `agent_type=${normalizeAgentName(agentType)}`,
+    };
   }
+  const dispatchTarget = hookData?.tool_input?.subagent_type;
+  if (matchesAlias(dispatchTarget, agentAliases)) {
+    return {
+      decision: true,
+      signal: SIGNALS.PAYLOAD,
+      detail: `tool_input.subagent_type=${normalizeAgentName(dispatchTarget)}`,
+    };
+  }
+  return null;
+}
+
+function classifySignal(transcriptPath, agentAliases, hookData) {
+  const fromPayload = classifyPayloadSignal(hookData, agentAliases);
+  if (fromPayload) return fromPayload;
 
   const fromEnv = envAgentName();
   if (fromEnv && matchesAlias(fromEnv, agentAliases)) {
