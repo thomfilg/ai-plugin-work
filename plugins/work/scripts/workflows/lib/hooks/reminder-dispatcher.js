@@ -64,26 +64,36 @@ function resolveBodyPath(mPath, body) {
   return resolved;
 }
 
+/** Shape check for the string identity fields. Returns an error string or null. */
+function entryShapeError(raw) {
+  if (!raw || typeof raw !== 'object') return 'missing or invalid id';
+  if (typeof raw.id !== 'string' || !raw.id) return 'missing or invalid id';
+  if (typeof raw.trigger !== 'string' || !raw.trigger) return 'missing trigger';
+  return null;
+}
+
+/** Compile a trigger to a regex (null for "always"). Returns { regex } or { error }. */
+function compileTrigger(trigger) {
+  if (trigger === 'always') return { regex: null };
+  try {
+    return { regex: new RegExp(trigger) };
+  } catch {
+    return { error: `bad trigger regex "${trigger}"` };
+  }
+}
+
 /** Validate one entry against the manifest path. Returns { entry } or { error }. */
 function validateEntry(raw, mPath) {
-  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !raw.id) {
-    return { error: 'missing or invalid id' };
-  }
-  if (typeof raw.trigger !== 'string' || !raw.trigger) return { error: 'missing trigger' };
+  const shapeErr = entryShapeError(raw);
+  if (shapeErr) return { error: shapeErr };
   const cadence = raw.cadence === undefined ? 'once-per-session' : raw.cadence;
   if (!VALID_CADENCES.has(cadence)) return { error: `unknown cadence "${raw.cadence}"` };
-  let regex = null;
-  if (raw.trigger !== 'always') {
-    try {
-      regex = new RegExp(raw.trigger);
-    } catch {
-      return { error: `bad trigger regex "${raw.trigger}"` };
-    }
-  }
+  const compiled = compileTrigger(raw.trigger);
+  if (compiled.error) return { error: compiled.error };
   const bodyPath = typeof raw.body === 'string' ? resolveBodyPath(mPath, raw.body) : null;
   if (!bodyPath) return { error: 'body path missing or escapes allowed dir' };
   if (!fs.existsSync(bodyPath)) return { error: `body file not found: ${raw.body}` };
-  return { entry: { id: raw.id, trigger: raw.trigger, regex, cadence, bodyPath } };
+  return { entry: { id: raw.id, trigger: raw.trigger, regex: compiled.regex, cadence, bodyPath } };
 }
 
 /**
