@@ -276,6 +276,9 @@ function maybeAttachVersionSkew(env, { recursionDepth, preCheckState, safeName, 
     ws: preCheckState,
     safeName,
     statePath: path.join(env.TASKS_BASE, safeName, '.work-state.json'),
+    // The persisted state has no `step` string field — resolve the current
+    // step name from stepStatus via the shared accessor for the audit row.
+    currentStep: env.getCurrentStep(preCheckState),
     appendAction: env.appendAction,
     saveWorkState: env.saveWorkState,
   });

@@ -107,11 +107,14 @@ function buildSkewBanner(executingVersion, recordedVersion, statePath) {
  * @param {string} executingVersion
  */
 function recordSkewOnce(deps, executingVersion) {
-  const { ws, safeName, statePath, appendAction, saveWorkState } = deps;
+  const { ws, safeName, statePath, currentStep, appendAction, saveWorkState } = deps;
   if (ws.versionSkewWarnedFor === executingVersion) return;
   try {
     appendAction(safeName, {
-      step: ws.step,
+      // The persisted work-state has no `step` string field (only the
+      // `currentStep` index + `stepStatus` map), so the caller resolves the
+      // step name via getCurrentStep() and injects it as `currentStep`.
+      step: currentStep,
       what: 'plugin version skew detected',
       meta: {
         executingVersion,
@@ -143,6 +146,7 @@ function recordSkewOnce(deps, executingVersion) {
  *   ws: object,
  *   safeName: string,
  *   statePath: string,
+ *   currentStep?: string,
  *   appendAction: (safeName: string, row: object) => void,
  *   saveWorkState: (safeName: string, ws: object) => void,
  *   installedVersion?: string|null,

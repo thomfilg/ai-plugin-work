@@ -5,8 +5,16 @@
  * Contract under test (tasks.md Task 1, R2/R4/R6/R7/R8/R10/R11/R12/R13/R15):
  * - evaluateVersionSkew(anchor, executing) -> { outcome: 'warn'|'adopt'|'silent' }
  * - stampVersionAnchor(ws, opts?) — lazy, idempotent, additive optional fields
- * - checkVersionSkew({ ws, safeName, statePath, appendAction, saveWorkState,
- *   installedVersion? }) — banner string on warn, null otherwise, never throws.
+ * - checkVersionSkew({ ws, safeName, statePath, currentStep, appendAction,
+ *   saveWorkState, installedVersion? }) — banner string on warn, null
+ *   otherwise, never throws.
+ *
+ * Fixtures mirror the REAL persisted `.work-state.json` shape (see
+ * work-state/core.js initState / engine/transition-step.js
+ * initialTransitionState): `currentStep` is an integer index and `stepStatus`
+ * is a map — there is NO `step` string field on state. The step NAME for the
+ * audit row is injected by the caller as the `currentStep` dep (resolved via
+ * getCurrentStep()).
  *
  * node:test + node:assert/strict; every seam dependency-injected — no real FS,
  * no real workflow run.
@@ -35,14 +43,29 @@ const { evaluateVersionSkew, stampVersionAnchor, checkVersionSkew } = mod;
 
 const STATE_PATH = '/tmp/tasks/GH-768/.work-state.json';
 
+/**
+ * Minimal REAL persisted work-state shape (initState/initialTransitionState):
+ * integer `currentStep` index + `stepStatus` map, no `step` string field.
+ */
+function makeState(extraFields = {}) {
+  return {
+    ticketId: 'GH-768',
+    currentStep: 4,
+    status: 'in_progress',
+    stepStatus: { ticket: 'completed', spec: 'completed', implement: 'in_progress' },
+    ...extraFields,
+  };
+}
+
 /** Build a checkVersionSkew deps object with recording fakes. */
 function makeDeps(overrides = {}) {
   const audits = [];
   const saves = [];
   const deps = {
-    ws: { step: 'implement' },
+    ws: makeState(),
     safeName: 'GH-768',
     statePath: STATE_PATH,
+    currentStep: 'implement',
     appendAction: (safeName, row) => {
       audits.push({ safeName, row });
     },
@@ -85,7 +108,7 @@ describe('evaluateVersionSkew', () => {
 
 describe('stampVersionAnchor', () => {
   it('stamps pluginVersionAnchor and an ISO pluginVersionAnchorAt on a bare state object', () => {
-    const ws = { step: 'ticket' };
+    const ws = makeState({ currentStep: 1 });
     stampVersionAnchor(ws, { installedVersion: '3.78.0' });
     assert.equal(ws.pluginVersionAnchor, '3.78.0');
     assert.equal(typeof ws.pluginVersionAnchorAt, 'string');
@@ -94,7 +117,8 @@ describe('stampVersionAnchor', () => {
       'pluginVersionAnchorAt must be an ISO timestamp'
     );
     // Purely additive: other fields untouched.
-    assert.equal(ws.step, 'ticket');
+    assert.equal(ws.currentStep, 1);
+    assert.equal(ws.stepStatus.implement, 'in_progress');
   });
 
   it('is a no-op when an anchor is already present (timestamp untouched)', () => {
@@ -108,7 +132,7 @@ describe('stampVersionAnchor', () => {
   });
 
   it('is a no-op when the executing version is unreadable', () => {
-    const ws = { step: 'ticket' };
+    const ws = makeState({ currentStep: 1 });
     stampVersionAnchor(ws, { installedVersion: null });
     assert.ok(!('pluginVersionAnchor' in ws));
     assert.ok(!('pluginVersionAnchorAt' in ws));
@@ -127,7 +151,7 @@ describe('stampVersionAnchor', () => {
 describe('checkVersionSkew', () => {
   it('on skew returns a banner naming both versions and the state path, and appends one audit row', () => {
     const { deps, audits, saves } = makeDeps({
-      ws: { step: 'implement', pluginVersionAnchor: '3.70.0' },
+      ws: makeState({ pluginVersionAnchor: '3.70.0' }),
     });
     const banner = checkVersionSkew(deps);
     assert.equal(typeof banner, 'string');
@@ -137,6 +161,9 @@ describe('checkVersionSkew', () => {
 
     assert.equal(audits.length, 1, 'exactly one audit row');
     assert.equal(audits[0].row.what, 'plugin version skew detected');
+    // Step name comes from the injected currentStep dep — the state itself
+    // has no `step` string field (would serialize as an absent key).
+    assert.equal(audits[0].row.step, 'implement', 'audit row carries the resolved step name');
     assert.deepEqual(audits[0].row.meta, {
       executingVersion: '3.78.0',
       recordedVersion: '3.70.0',
@@ -151,7 +178,7 @@ describe('checkVersionSkew', () => {
 
   it('on match returns null with zero audit rows and zero state writes', () => {
     const { deps, audits, saves } = makeDeps({
-      ws: { step: 'implement', pluginVersionAnchor: '3.78.0' },
+      ws: makeState({ pluginVersionAnchor: '3.78.0' }),
     });
     assert.equal(checkVersionSkew(deps), null);
     assert.equal(audits.length, 0);
@@ -159,7 +186,7 @@ describe('checkVersionSkew', () => {
   });
 
   it('on missing anchor adopts: stamps + saves once, returns null, zero skew audit rows', () => {
-    const { deps, audits, saves } = makeDeps({ ws: { step: 'implement' } });
+    const { deps, audits, saves } = makeDeps({ ws: makeState() });
     assert.equal(checkVersionSkew(deps), null);
     assert.equal(deps.ws.pluginVersionAnchor, '3.78.0');
     assert.equal(typeof deps.ws.pluginVersionAnchorAt, 'string');
@@ -169,11 +196,10 @@ describe('checkVersionSkew', () => {
 
   it('Persistent skew warns on every start but audits once per executing version', () => {
     const { deps, audits } = makeDeps({
-      ws: {
-        step: 'implement',
+      ws: makeState({
         pluginVersionAnchor: '3.70.0',
         versionSkewWarnedFor: '3.78.0',
-      },
+      }),
     });
     const banner = checkVersionSkew(deps);
     assert.equal(typeof banner, 'string', 'banner returned again while skew persists');
@@ -184,7 +210,7 @@ describe('checkVersionSkew', () => {
 
   it('Unreadable executing version fails open with no warning', () => {
     const { deps, audits, saves } = makeDeps({
-      ws: { step: 'implement', pluginVersionAnchor: '3.70.0' },
+      ws: makeState({ pluginVersionAnchor: '3.70.0' }),
       installedVersion: null,
     });
     let banner;
@@ -198,7 +224,7 @@ describe('checkVersionSkew', () => {
 
   it('Corrupt or throwing audit sink never disrupts the workflow', () => {
     const { deps } = makeDeps({
-      ws: { step: 'implement', pluginVersionAnchor: '3.70.0' },
+      ws: makeState({ pluginVersionAnchor: '3.70.0' }),
       appendAction: () => {
         throw new Error('corrupt .work-actions.json');
       },
