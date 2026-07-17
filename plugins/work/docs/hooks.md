@@ -304,3 +304,101 @@ codex exec resume <SESSION_ID> --json --dangerously-bypass-hook-trust \
   invoking directory, not globally) — run it from the agent's worktree or pass the id.
 - `exec resume` REJECTS `-s`/`-C` (narrower flag surface than `exec`) — set the sandbox via
   `-c sandbox_mode=…`; `--json`/`-o`/`--skip-git-repo-check`/both bypass flags are accepted.
+
+## Reminder dispatcher & manifest
+
+`UserPromptSubmit` reminder hooks historically fired on **every** prompt, each in
+its own process, re-injecting identical static guidance every turn — N reminders
+meant N processes and N context re-injections. GH-773 replaces that pattern with
+a single consolidated dispatcher plus a session-scoped ledger primitive.
+
+- **`remind-once.js`** — the generic session-scoped ledger. Keyed by **session id
+  (file) + reminder id (entry)**, never by cwd (the GH-583 anti-pattern). Two
+  sessions in the same folder stay distinct; the same session across two prompts
+  dedupes. The session id comes from the hook payload
+  (`normalizeHookPayload(payload).sessionId` — `session_id` first, then
+  `CLAUDE_CODE_SESSION_ID`, which Claude Code rotates on `/clear` and per new
+  conversation, re-arming all once-per-session reminders). Ledger store:
+  `work-workflow/.reminders/<sessionId>.json` under the user cache dir (override
+  with `REMIND_ONCE_SESSION_DIR`). It stores reminder ids + counters +
+  timestamps ONLY — no prompt text, no bodies.
+- **`reminder-dispatcher.js`** — ONE `UserPromptSubmit` hook (one process per
+  prompt regardless of manifest size). It reads a manifest, validates entries,
+  filters by trigger + cadence, and emits ONE combined context block via
+  `getRuntime(payload).emit.context('UserPromptSubmit', block)`. Fail-open: any
+  error → emit nothing, exit 0, never block the prompt.
+
+### Manifest format
+
+`reminders.manifest.json` is a JSON array of entries. The path resolves from the
+`REMINDER_MANIFEST` env var, else the shipped default
+`plugins/work/scripts/workflows/lib/hooks/reminders.manifest.json`.
+
+| Field     | Type                              | Required | Notes |
+|-----------|-----------------------------------|----------|-------|
+| `id`      | string                            | yes      | Unique reminder id; the ledger key. |
+| `trigger` | `"always"` or a regex string      | yes      | Regex is tested against the prompt text; `"always"` fires unconditionally. A bad regex drops only that entry. |
+| `body`    | path (relative to the manifest)   | yes      | File whose contents are injected. Must stay within the manifest's directory tree (path-traversal rejected). Missing file drops only that entry. |
+| `cadence` | `"once-per-session"` \| `"every-prompt"` | no  | **Defaults to `once-per-session`.** Unknown values drop only that entry. |
+
+**Cadence contract:** `once-per-session` (the default for static guidance) fires
+exactly once per session and re-arms after `/clear` or a new session.
+`every-prompt` is reserved for genuinely dynamic checks (branch name, live
+machine state) that must re-evaluate each turn.
+
+Example (the shipped default):
+
+```json
+[
+  {
+    "id": "agent-picker",
+    "trigger": "always",
+    "body": "reminders/agent-picker.reminder.md",
+    "cadence": "once-per-session"
+  }
+]
+```
+
+Validate a manifest in CI: `node reminder-dispatcher.js validate <manifest>`
+exits 0 when clean, exits 1 with per-entry diagnostics.
+
+### Migrating a standalone `prompt-reminder.sh`-style hook
+
+A personal reminder hook that shells out every prompt to echo the same static
+text — e.g. a "which of the 4 agents do I use" crib sheet — becomes a single
+manifest entry:
+
+1. Move the static text into a body file, e.g.
+   `reminders/agent-picker.reminder.md`.
+2. Add one manifest entry pointing at it:
+
+   ```json
+   {
+     "id": "agent-picker",
+     "trigger": "always",
+     "body": "reminders/agent-picker.reminder.md",
+     "cadence": "once-per-session"
+   }
+   ```
+
+3. Delete the standalone `UserPromptSubmit` hook. The dispatcher now injects the
+   guidance once per session instead of on every prompt, and consolidates it with
+   any other manifest entries into a single process + single context block.
+
+Use `every-prompt` instead of `once-per-session` only when the body genuinely
+changes turn-to-turn (dynamic state); otherwise keep the default so the cost
+amortizes to once per session.
+
+### Migration audit (in-repo)
+
+An audit of every plugin's `UserPromptSubmit` entries found **zero purely-static
+in-repo reminders** to migrate: work is a matcher-gated `/work` router, synapsys
+is a dynamic memory injector (its own ledger), maestro reads live orchestration
+state, and heimdall has no `UserPromptSubmit` entry. The dispatcher therefore
+ships as a documented extension point + demonstrative manifest entry rather than
+replacing an existing static reminder.
+
+**Personal hooks under the user config dir are documentation targets only.** This
+ticket edits no user settings; the migration steps above describe how a user
+ports their own personal reminder hooks onto the manifest — the plugin never
+writes to the user's `settings.json`.
