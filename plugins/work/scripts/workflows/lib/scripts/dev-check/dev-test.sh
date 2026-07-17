@@ -94,7 +94,19 @@ run_tests() {
       fi
       local abs_test_files
       abs_test_files=$(echo "$test_files" | sed "s|^|$dir/|")
-      (cd "$dir" && echo "$abs_test_files" | tr '\n' '\0' | xargs -0 node --test --) || {
+      # (GH-776) Default to one test process — node --test's CPU-count default
+      # with process isolation takes every core on a box running several
+      # concurrent agent sessions. Override via WORK_TEST_CONCURRENCY=<n>.
+      # CI is pinned to 1 regardless of the override, matching run-tests.sh:
+      # concurrent hook subprocesses contend over TASKS_BASE state I/O and lose
+      # write/read coherence under parallelism (GH-452).
+      local concurrency
+      if [ "${CI:-}" = "true" ]; then
+        concurrency=1
+      else
+        concurrency="${WORK_TEST_CONCURRENCY:-1}"
+      fi
+      (cd "$dir" && echo "$abs_test_files" | tr '\n' '\0' | xargs -0 node --test --test-concurrency="$concurrency" --) || {
         echo -e "${RED}Tests failed in $dir${NC}"
         return 1
       }
