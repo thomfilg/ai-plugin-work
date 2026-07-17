@@ -210,3 +210,59 @@ describe('outcome-gate (GH-756)', () => {
     assert.equal(h.retries.length, 0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GH-769: attribution surfaces in the outcome-gate audit meta.
+// ---------------------------------------------------------------------------
+
+function readVerifyRow() {
+  const rows = JSON.parse(fs.readFileSync(path.join(TASKS_DIR, '.work-actions.json'), 'utf8'));
+  return rows.filter((r) => r.action === 'task-verify').at(-1);
+}
+
+describe('outcome-gate attribution audit meta (GH-769)', () => {
+  it('audit meta carries the attribution block when observations include one', () => {
+    const h = makeHarness();
+    const attribution = {
+      supported: true,
+      mode: 'trailer',
+      taskId: 4,
+      foreignTasks: ['1'],
+      unattributedCount: 0,
+      attributedFiles: ['src/calc.js'],
+    };
+    const boundary = {
+      observations: { derivedTests: { files: [], runner: 'none' }, attribution },
+      result: {
+        verdict: VERDICTS.unverified,
+        violatedInvariants: [],
+        flags: ['cross-task-attribution'],
+        exit: null,
+        reasons: ['attribution: range contains commits attributed to task(s) 1 (expected task 4)'],
+      },
+    };
+    const outcome = runOutcomeGate(h.input, { observe: () => boundary });
+    assert.equal(outcome.advance, true);
+    assert.deepEqual(outcome.flags, ['cross-task-attribution']);
+    const meta = readVerifyRow().meta;
+    assert.deepEqual(meta.attribution, attribution);
+    // Flag still flows through recordOutcomeFlags unchanged.
+    assert.deepEqual(h.ws.outcomeFlags[0].flags, ['cross-task-attribution']);
+  });
+
+  it('audit meta omits the attribution key when observations carry none', () => {
+    const h = makeHarness();
+    const boundary = {
+      observations: { derivedTests: { files: [], runner: 'none' } },
+      result: {
+        verdict: VERDICTS.verified,
+        violatedInvariants: [],
+        flags: [],
+        exit: null,
+        reasons: [],
+      },
+    };
+    runOutcomeGate(h.input, { observe: () => boundary });
+    assert.equal('attribution' in readVerifyRow().meta, false);
+  });
+});
