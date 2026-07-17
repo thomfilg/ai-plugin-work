@@ -44,6 +44,8 @@ const INVARIANTS = Object.freeze({
 /**
  * Flag kinds attached to UNVERIFIED advances (and to soft findings on
  * otherwise-advancing verdicts). Consumed by task_review and the check step.
+ * `cross-task-attribution` (GH-769) marks evidence whose scope overlaps a
+ * sibling task's owned surfaces.
  */
 const FLAG_KINDS = Object.freeze({
   noStructuredReporter: 'no-structured-reporter',
@@ -54,6 +56,7 @@ const FLAG_KINDS = Object.freeze({
   runnerUnknown: 'runner-unknown',
   scopeResolutionFailed: 'scope-resolution-failed',
   noTestFilesInDiff: 'no-test-files-in-diff',
+  crossTaskAttribution: 'cross-task-attribution',
 });
 
 /**

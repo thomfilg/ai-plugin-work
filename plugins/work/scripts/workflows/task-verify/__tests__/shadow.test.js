@@ -155,4 +155,92 @@ describe('task-verify shadow mode (GH-755)', () => {
     assert.equal(audit.rows.length, 1);
     assert.match(audit.rows[0].action, /task-verify-shadow-error/);
   });
+
+  it('serial observations audit a mode:none attribution block naming no foreign task', () => {
+    const audit = collectingAudit();
+    maybeRunShadow(
+      {
+        safeName: 'TEST-SHADOW-1',
+        tasksDir: TASKS_DIR,
+        taskNum: 1,
+        taskType: 'docs',
+        incumbent: 'advance',
+        repoDir: REPO,
+      },
+      { env: { WORK_TDD_MODE: 'shadow' }, appendAudit: audit.appendAudit }
+    );
+    // The serial repo carries no Work-Task trailers, but taskNum threading
+    // still produces a mode:'none' attribution block; it is present yet names
+    // no foreign task. The audit surfaces it verbatim (both-ids triageable).
+    assert.equal('attribution' in audit.rows[0].meta, true);
+    assert.equal(audit.rows[0].meta.attribution.mode, 'none');
+    assert.deepEqual(audit.rows[0].meta.attribution.foreignTasks, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GH-769: attribution surfaces in shadow audit meta for a wave repo.
+// ---------------------------------------------------------------------------
+
+describe('task-verify shadow mode attribution audit meta (GH-769)', () => {
+  let wROOT;
+  let wREPO;
+  let wTASKS;
+
+  function wgit(args) {
+    return execFileSync('git', ['-C', wREPO, ...args], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  }
+
+  before(() => {
+    wROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-attr-'));
+    wREPO = path.join(wROOT, 'repo');
+    wTASKS = path.join(wROOT, 'tasks', 'TEST-WAVE');
+    fs.mkdirSync(wREPO, { recursive: true });
+    fs.mkdirSync(wTASKS, { recursive: true });
+    wgit(['init', '-q']);
+    wgit(['config', 'user.email', 't@example.com']);
+    wgit(['config', 'user.name', 'T']);
+    fs.writeFileSync(path.join(wREPO, 'base.md'), 'base\n');
+    wgit(['add', '-A']);
+    wgit(['commit', '-qm', 'base']);
+    const wBase = wgit(['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(wTASKS, '.last-commit-sha'), wBase);
+    fs.writeFileSync(
+      path.join(wTASKS, 'tasks.md'),
+      ['## Task 2 — module B', '### Type', 'docs', '### Files in scope', '- b.md', ''].join('\n')
+    );
+    // Interleaved Work-Task:1 / Work-Task:2.
+    fs.writeFileSync(path.join(wREPO, 'a.md'), 'a\n');
+    wgit(['add', '-A']);
+    wgit(['commit', '-qm', 't1', '--trailer', 'Work-Task: 1']);
+    fs.writeFileSync(path.join(wREPO, 'b.md'), 'b\n');
+    wgit(['add', '-A']);
+    wgit(['commit', '-qm', 't2', '--trailer', 'Work-Task: 2']);
+  });
+
+  after(() => {
+    fs.rmSync(wROOT, { recursive: true, force: true });
+  });
+
+  it('audit meta carries the attribution block naming both task ids', () => {
+    const audit = collectingAudit();
+    maybeRunShadow(
+      {
+        safeName: 'TEST-WAVE',
+        tasksDir: wTASKS,
+        taskNum: 2,
+        taskType: 'docs',
+        incumbent: 'advance',
+        repoDir: wREPO,
+      },
+      { env: { WORK_TDD_MODE: 'shadow' }, appendAudit: audit.appendAudit }
+    );
+    const meta = audit.rows[0].meta;
+    assert.equal(meta.attribution.taskId, 2);
+    assert.deepEqual(meta.attribution.foreignTasks, ['1']);
+    assert.ok(meta.flags.includes('cross-task-attribution'));
+  });
 });

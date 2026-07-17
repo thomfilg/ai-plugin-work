@@ -1,0 +1,57 @@
+{
+  "name": "gh-720-cross-attributed-commits-resolve-cleanly",
+  "incident": "GH-720",
+  "incidentClass": 7,
+  "taskKind": "tdd-code",
+  "description": "Parallel implement wave shared one worktree and one branch: task 4 committed its own fix and test with a Work-Task:4 trailer, but a sibling task 1 committed into the same base..HEAD range with a Work-Task:1 trailer. The attribution collector partitions the range by trailer, so task 4's diff resolves cleanly to ITS OWN files only — a genuine, in-scope, base-fail/head-pass outcome. Because the range still contains a foreign-attributed sibling commit, the boundary degrades to UNVERIFIED with a cross-task-attribution mechanism-failure flag (never a hard block), naming task 1 as the leaked sibling.",
+  "observations": {
+    "diff": {
+      "empty": false,
+      "filesChanged": [
+        "factories/registryValidator/registryValidator.js",
+        "factories/registryValidator/__tests__/registryValidator.test.js"
+      ],
+      "scopeGlobs": ["factories/registryValidator/**"],
+      "outOfScope": []
+    },
+    "deliverables": {
+      "promised": ["factories/registryValidator/registryValidator.js"],
+      "missing": []
+    },
+    "baseRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "fail",
+      "testsRan": 3,
+      "failures": 3,
+      "notes": "task 4's attributed test fails on base — the validator did not exist before this task"
+    },
+    "headRun": {
+      "attempted": true,
+      "supported": true,
+      "outcome": "pass",
+      "testsRan": 3,
+      "failures": 0,
+      "exitCode": 0,
+      "reporterKind": "structured",
+      "notes": "task 4's attributed tests pass on head with a real structured count"
+    },
+    "coverage": { "supported": false, "changedLineCoveragePct": null },
+    "attribution": {
+      "supported": true,
+      "mode": "trailer",
+      "taskId": 4,
+      "foreignTasks": ["1"],
+      "unattributedCount": 0
+    }
+  },
+  "expected": {
+    "verdict": "UNVERIFIED",
+    "flags": ["cross-task-attribution"],
+    "rationale": "Task 4's diff resolves cleanly from its own Work-Task:4 commits (non-empty, in-scope, base-fail/head-pass), so there is no invariant violation. But the base..HEAD range contains a foreign commit attributed to task 1: attribution is a mechanism-failure flag, not a block, so the boundary degrades to UNVERIFIED and names the leaked sibling (task 1) for the operator."
+  },
+  "provenance": {
+    "issue": "https://github.com/thomfilg/ai-plugin-work/issues/720",
+    "notes": "Companion to gh-720-parallel-wave-contamination: that fixture shows the contaminated (empty) diff CONTRADICTED; this one shows the same wave AFTER attributed resolution — clean own diff plus the cross-task-attribution flag. Attribution flags never mask violations, so the CONTRADICTED sibling fixture is unaffected."
+  }
+}

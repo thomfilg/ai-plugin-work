@@ -167,6 +167,27 @@ function collectRunnerFlags(ctx) {
 }
 
 /**
+ * Cross-task attribution flag (GH-769): a range containing commits attributed
+ * to OTHER tasks is a mechanism failure — flag for task_review, never a
+ * contradiction, never a typed exit (mechanism failures degrade to flags,
+ * per the design rules above). Task ids in the reason are re-serialized
+ * integers, never raw commit text (GH-769 trailer hardening).
+ */
+function collectAttributionFlags(ctx) {
+  const attribution = ctx.attribution;
+  if (!attribution || attribution.supported !== true) return;
+  const foreignTasks = attribution.foreignTasks || [];
+  if (foreignTasks.length === 0) return;
+  ctx.flags.add(FLAG_KINDS.crossTaskAttribution);
+  const found = foreignTasks.map((t) => Number.parseInt(t, 10)).join(', ');
+  const expected =
+    attribution.taskId !== null ? Number.parseInt(attribution.taskId, 10) : '(unknown)';
+  ctx.reasons.push(
+    `attribution: range contains commits attributed to task(s) ${found} (expected task ${expected})`
+  );
+}
+
+/**
  * Evaluate one task boundary.
  *
  * @param {object} observations - replay-corpus observation shape
@@ -185,6 +206,7 @@ function makeContext(observations, taskKind, options) {
     baseRun: obs.baseRun || {},
     headRun: obs.headRun || {},
     coverage: obs.coverage || {},
+    attribution: obs.attribution || null,
     profile,
     applicable: new Set(profile.invariants),
     options,
@@ -229,6 +251,7 @@ function evaluate(observations, taskKind, options = {}) {
   evaluatePassOnHead(ctx);
   evaluateCoverage(ctx);
   collectRunnerFlags(ctx);
+  collectAttributionFlags(ctx);
   return buildResult(ctx);
 }
 

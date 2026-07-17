@@ -24,6 +24,7 @@ const { fileMatchesScope, TEST_FILE_EXT_RE } = require(
 const { changedFiles, fileExistsAtRef, resolveRef } = require('./collect/git-facts');
 const { ensureBaseWorktree, overlayFiles } = require('./collect/base-worktree');
 const { detectRunner, runDerivedTests } = require('./collect/runner');
+const { resolveAttribution } = require('./collect/attribution');
 const { profileFor } = require('./kind-profiles');
 
 const NEW_MARKER_RE = /\s*\((?:NEW|new)\)\s*$/;
@@ -44,9 +45,8 @@ function deriveTestFiles(files) {
   return files.filter((f) => TEST_FILE_EXT_RE.test(f));
 }
 
-function buildDiff({ repoDir, baseRef, headRef, scopeGlobs }) {
-  const files = changedFiles(repoDir, baseRef, headRef);
-  const scope = normalizeScope(scopeGlobs);
+/** Assemble the diff observation from an already-resolved file list. */
+function diffFromFiles(files, scope) {
   const scopeUnresolved = scope.length === 0;
   return {
     empty: files.length === 0,
@@ -55,6 +55,52 @@ function buildDiff({ repoDir, baseRef, headRef, scopeGlobs }) {
     outOfScope: scopeUnresolved ? [] : files.filter((f) => !fileMatchesScope(f, scope)),
     ...(scopeUnresolved ? { scopeUnresolved: true } : {}),
   };
+}
+
+function buildDiff({ repoDir, baseRef, headRef, scopeGlobs }) {
+  const files = changedFiles(repoDir, baseRef, headRef);
+  return diffFromFiles(files, normalizeScope(scopeGlobs));
+}
+
+/**
+ * Resolve the diff for a task, applying attribution when `taskNum` is given.
+ *
+ * Three rules (spec R8/R9), fail-open throughout:
+ *   1. No `Work-Task` trailer anywhere in range (mode 'none') → the legacy
+ *      `base..HEAD` diff, unchanged.
+ *   2. Foreign-attributed commits present (mode 'trailer') → `filesChanged`
+ *      is the union of THIS task's attributed commits ONLY; scope/out-of-scope
+ *      recomputed over that set.
+ *   3. Collector `supported: false` → legacy diff (never a hard block).
+ *
+ * Serial callers (no `taskNum`) get the legacy diff and NO `attribution` key,
+ * byte-for-byte identical to pre-GH-769 behavior.
+ *
+ * @returns {{ diff: object, attribution: object|null }}
+ */
+function resolveDiffWithAttribution({ repoDir, baseRef, headRef, scopeGlobs, taskNum }) {
+  const scope = normalizeScope(scopeGlobs);
+  if (taskNum === undefined || taskNum === null) {
+    return { diff: buildDiff({ repoDir, baseRef, headRef, scopeGlobs }), attribution: null };
+  }
+  const attribution = resolveAttribution({ repoDir, baseRef, headRef, taskNum });
+  // Rule 2 — attributed range with foreign commits: THIS task's files only.
+  if (attribution.supported && attribution.mode === 'trailer') {
+    return { diff: diffFromFiles(attribution.attributedFiles, scope), attribution };
+  }
+  // Rules 1 (mode 'none') and 3 (supported:false) — legacy diff kept. BOTH cases
+  // use the legacy base..HEAD read: on supported:false the refs are usually still
+  // valid (only the attribution collector failed), so we attempt the legacy diff
+  // and fall back to [] ONLY if that read ALSO throws — a task is never
+  // hard-blocked by a broken attribution read (spec R3/R9). The serial path
+  // (taskNum omitted, buildDiff) keeps its throw-on-failure semantics unchanged.
+  let legacy;
+  try {
+    legacy = changedFiles(repoDir, baseRef, headRef);
+  } catch {
+    legacy = [];
+  }
+  return { diff: diffFromFiles(legacy, scope), attribution };
 }
 
 function buildDeliverables({ repoDir, headRef, scope }) {
@@ -128,18 +174,28 @@ function buildBaseRun({
  * @param {string[]} input.scopeGlobs - the task's Files-in-scope entries
  *   (from the canonical task parser); empty/null → scopeUnresolved.
  * @param {string} input.taskKind - planner kind.
+ * @param {number} [input.taskNum] - the task number (GH-769); when provided,
+ *   the diff is resolved from THIS task's attributed commits and an additive
+ *   `attribution` observation is emitted. Omitted → legacy `base..HEAD` diff,
+ *   no `attribution` key (serial backward compatibility).
  * @param {string} input.baseWorktreeDir - where the per-ticket base worktree lives.
  * @param {number} [input.timeoutMs]
  * @returns observations in the replay-corpus shape.
  */
 function buildObservations(input) {
-  const { repoDir, baseRef, scopeGlobs, taskKind, baseWorktreeDir, timeoutMs } = input;
+  const { repoDir, baseRef, scopeGlobs, taskKind, taskNum, baseWorktreeDir, timeoutMs } = input;
   // Resolve head to a SHA once: symbolic refs like 'HEAD' would re-resolve
   // against the BASE worktree's own HEAD during the overlay checkout.
   const headRef = resolveRef(repoDir, input.headRef || 'HEAD') || input.headRef || 'HEAD';
   const profile = profileFor(taskKind);
 
-  const diff = buildDiff({ repoDir, baseRef, headRef, scopeGlobs });
+  const { diff, attribution } = resolveDiffWithAttribution({
+    repoDir,
+    baseRef,
+    headRef,
+    scopeGlobs,
+    taskNum,
+  });
   const deliverables = buildDeliverables({ repoDir, headRef, scope: diff.scopeGlobs });
   const testFiles = deriveTestFiles(diff.filesChanged);
   const runner = detectRunner(repoDir);
@@ -163,6 +219,8 @@ function buildObservations(input) {
     headRun,
     coverage: { supported: false, changedLineCoveragePct: null },
     derivedTests: { files: testFiles, runner: runner || 'none' },
+    // Additive (GH-769): only present when a taskNum drove attribution.
+    ...(attribution ? { attribution } : {}),
   };
 }
 

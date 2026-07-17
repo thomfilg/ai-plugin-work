@@ -22,6 +22,9 @@ const { findReadyTasks } = require(path.join(__dirname, '..', 'task-graph'));
 const { T, renderDelegateForRuntime, getRuntime } = require(
   path.join(__dirname, '..', '..', '..', 'lib', 'instruction-vocab')
 );
+const { WORK_TASK_TRAILER } = require(
+  path.join(__dirname, '..', '..', '..', 'task-verify', 'collect', 'attribution')
+);
 
 const TASK_NEXT_SCRIPT = path.resolve(
   __dirname,
@@ -173,6 +176,32 @@ function parseTaskHeader(agentPrompt) {
 }
 
 /**
+ * GH-769 wave attribution: every commit in a parallel wave shares one worktree
+ * and one branch, so the boundary observer partitions the range by a
+ * `Work-Task: <N>` commit trailer. Each wave delegate is instructed to stamp
+ * its own task number; a commit without the trailer cannot be attributed and
+ * degrades that boundary to UNVERIFIED. The trailer key is imported from
+ * attribution.js so instruction text and the parser can never drift. Serial
+ * (single-task) dispatch never appends this block.
+ *
+ * @param {number|string} taskNum the delegate's own task number
+ * @returns {string} the instruction block appended to the delegate prompt
+ */
+function waveAttributionInstruction(taskNum) {
+  return [
+    '',
+    '### Commit attribution (parallel wave)',
+    'Other tasks are committing into this same worktree concurrently. EVERY',
+    'commit you create MUST carry the trailer identifying this task:',
+    '```bash',
+    `git commit --trailer "${WORK_TASK_TRAILER}: ${taskNum}" -m "..."`,
+    '```',
+    `A commit without this \`${WORK_TASK_TRAILER}: ${taskNum}\` trailer cannot be attributed to`,
+    'your task and your boundary will degrade to UNVERIFIED.',
+  ].join('\n');
+}
+
+/**
  * Parallel dispatch path: one delegate per ready-to-run task. Returns the
  * override instruction, or null when the plan has no parallel batch to run.
  */
@@ -187,16 +216,23 @@ function buildParallelOverride(ticket, tasksDir, currentTaskNum, totalTasks) {
   const allTasks = parseFullTasks(tasksDir) || [];
 
   const rt = getRuntime();
+  const outcomeMode = process.env.WORK_TDD_MODE === 'outcome';
   const delegates = parallelTasks.map((num) => {
     const task = allTasks.find((t) => t.num === num);
     const title = task?.title || 'Implementation';
     const agentType = resolveAgentType(tasksDir, num);
+    const basePrompt = outcomeMode
+      ? buildOutcomePrompt(ticket, num, totalTasks, title, tasksDir)
+      : buildSelfPacedPrompt(ticket, num, totalTasks, title);
+    // GH-769: every wave delegate stamps its own Work-Task trailer so the
+    // boundary observer resolves its diff from its own commits.
+    const prompt = basePrompt + waveAttributionInstruction(num);
     return renderDelegateForRuntime(
       {
         type: 'task',
         agentType,
         description: `Task ${num}/${totalTasks} — ${title}`,
-        prompt: buildSelfPacedPrompt(ticket, num, totalTasks, title),
+        prompt,
         note: T('delegate.task.note.short', {}, rt.name),
       },
       rt

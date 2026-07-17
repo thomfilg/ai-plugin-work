@@ -61,6 +61,11 @@ function observeBoundary({ repoDir, tasksDir, taskNum, taskType, baseRef, baseWo
     baseRef: resolvedBase,
     scopeGlobs: taskScopeGlobs(tasksDir, taskNum),
     taskKind: taskType,
+    // GH-769: thread the task number so the observer resolves the diff from
+    // THIS task's attributed commits (a `Work-Task` trailer partitions a
+    // parallel wave's shared range). Serial repos (no trailers) fall through
+    // to the legacy diff inside buildObservations.
+    taskNum,
     baseWorktreeDir:
       baseWorktreeDir || path.join(tasksDir, `.task-verify-base-${path.basename(repoDir)}`),
   });

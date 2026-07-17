@@ -81,6 +81,10 @@ function runShadowVerification(input, deps = {}) {
       reasons: result.reasons.slice(0, 5),
       divergence: computeDivergence(incumbent, result.verdict),
       derivedTests: observations.derivedTests,
+      // GH-769: surface the attribution block (both task ids) only when the
+      // observer produced one, so a cross-task-attribution flag is triageable
+      // from .work-actions.json. Serial observations stay byte-identical.
+      ...(observations.attribution ? { attribution: observations.attribution } : {}),
     },
   });
   return result;
