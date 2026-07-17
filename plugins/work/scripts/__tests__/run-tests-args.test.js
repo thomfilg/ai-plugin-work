@@ -32,9 +32,14 @@ function runListOnly({ args = [], env = {}, cwd }) {
       ...env,
     },
   });
-  const lines = out.trim().split('\n');
-  const concurrencyLine = lines.pop();
-  return { files: lines, concurrencyLine };
+  // Locate the `concurrency=<n>` line explicitly rather than assuming it is
+  // the last line: on the empty-file path the script prints "No test files
+  // found" and exits BEFORE the list-only block, so a blind pop would hand
+  // back that message as the concurrency value. Assert loudly instead.
+  const lines = out.trim().split('\n').filter(Boolean);
+  const idx = lines.findIndex((l) => l.startsWith('concurrency='));
+  assert.notEqual(idx, -1, `list-only output missing a concurrency= line:\n${out}`);
+  return { files: lines.slice(0, idx), concurrencyLine: lines[idx] };
 }
 
 /** A tiny repo dir with two discoverable test files under plugins/. */
