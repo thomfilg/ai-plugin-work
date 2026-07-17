@@ -28,7 +28,9 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
-const { isRunningInAgent } = require(path.join(__dirname, '..', 'agent-detection'));
+const { isRunningInAgent, activeAgentDetectionPayload } = require(
+  path.join(__dirname, '..', 'agent-identity')
+);
 const { REGISTRY } = require(path.join(__dirname, 'agent-hook-registry'));
 const { resolvePluginRootHonouringEnv } = require('../../work/lib/resolve-plugin-root');
 
@@ -144,14 +146,12 @@ async function main() {
   }
 
   // Find which registered agent (if any) is currently active.
-  // Pass a hookData copy with tool_input.subagent_type stripped as a
-  // belt-and-suspenders defense against any non-Task tool that happens
-  // to carry that field — only the Task tool's tool_input legitimately
-  // names a target agent, and we've already short-circuited that above.
-  const detectionHookData =
-    hookData.tool_input && hookData.tool_input.subagent_type
-      ? { ...hookData, tool_input: { ...hookData.tool_input, subagent_type: undefined } }
-      : hookData;
+  // activeAgentDetectionPayload() strips the dispatch-target field
+  // (tool_input.subagent_type) as a belt-and-suspenders defense against any
+  // non-Task tool that happens to carry it — only the Task tool's tool_input
+  // legitimately names a target agent, and we've already short-circuited
+  // that above. A dispatch target is NEVER self-identity.
+  const detectionHookData = activeAgentDetectionPayload(hookData);
   const transcriptPath = hookData.transcript_path || '';
   let activeAgent = null;
   for (const agentName of Object.keys(REGISTRY)) {

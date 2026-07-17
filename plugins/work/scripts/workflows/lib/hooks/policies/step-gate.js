@@ -12,6 +12,8 @@
  *   - getCurrentStep(state, steps): find the in_progress step from a state object
  */
 
+const { dispatchTargetAgent } = require('../../agent-identity');
+
 /**
  * Find the in_progress step from a workflow state object.
  * Returns the first one if multiple are in_progress (legacy data tolerance).
@@ -48,7 +50,7 @@ function evaluateStepGate({
   // /check agent bypass: when running an agent owned by /check during /work,
   // allow it if /check is currently active.
   if (workflowName === 'work') {
-    const agentType = toolInput?.subagent_type || '';
+    const agentType = dispatchTargetAgent(toolInput);
     if (agentType && checkAgents.has(agentType) && checkStateActive) {
       return { blocked: false };
     }

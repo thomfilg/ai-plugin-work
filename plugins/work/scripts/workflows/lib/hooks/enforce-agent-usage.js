@@ -20,7 +20,12 @@
  */
 
 const path = require('path');
-const { isRunningInAgent } = require('../agent-detection');
+const {
+  isRunningInAgent,
+  envAgentName,
+  dispatchTargetAgent,
+  payloadAgentName,
+} = require('../agent-identity');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
 const { runHook } = require('../hookEntrypoint');
 // Vendored dual-runtime adapter: runtime detection for the per-runtime block
@@ -156,17 +161,15 @@ function skillSelfCall(skillName, blocked, transcriptPath) {
 
 /** Task-tool self-call: dispatched subagent equals the currently-running agent. */
 function taskSelfCall(subagentType, blocked) {
-  const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
+  const currentAgent = envAgentName();
   return (
-    subagentType === blocked &&
-    Boolean(currentAgent) &&
-    currentAgent.toLowerCase() === blocked.toLowerCase()
+    subagentType === blocked && Boolean(currentAgent) && currentAgent === blocked.toLowerCase()
   );
 }
 
 function blockSelfCall(toolName, toolInput, transcriptPath) {
   const skillName = toolInput?.skill || '';
-  const subagentType = toolInput?.subagent_type || '';
+  const subagentType = dispatchTargetAgent(toolInput);
   for (const blocked of SELF_CALL_BLOCKED_AGENTS) {
     if (toolName === 'Skill' && skillSelfCall(skillName, blocked, transcriptPath)) {
       process.stderr.write(
@@ -186,8 +189,7 @@ function blockSelfCall(toolName, toolInput, transcriptPath) {
 
 function agentHintsMatch(hookData, transcriptPath, agentAliases) {
   const hints = [
-    hookData.agent_name,
-    hookData.agent_type,
+    payloadAgentName(hookData),
     process.env.CLAUDE_AGENT_TYPE,
     transcriptPath ? require('path').basename(transcriptPath) : '',
   ]

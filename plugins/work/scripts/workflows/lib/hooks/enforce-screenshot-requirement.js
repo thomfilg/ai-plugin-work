@@ -15,6 +15,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { dispatchTargetAgent } = require(path.join(__dirname, '..', 'agent-identity'));
 
 const MARKER_DIR = '/tmp';
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
@@ -190,8 +191,9 @@ function blockIfNoScreenshots(hookData) {
   const toolName = hookData.tool_name || '';
   const prompt = (hookData.tool_input?.prompt || '').toLowerCase();
   const skill = (hookData.tool_input?.skill || '').toLowerCase();
-  const subagentType = hookData.tool_input?.subagent_type || '';
-  const normalizedSubagentType = subagentType.replace(/^work-workflow:/, '');
+  // dispatchTargetAgent() normalizes (strips plugin prefixes like
+  // "work-workflow:" and lowercases) — a dispatch target, never self-identity.
+  const normalizedSubagentType = dispatchTargetAgent(hookData.tool_input);
 
   const isQaAgent =
     toolName === 'Task' &&
