@@ -296,6 +296,13 @@ function enforceFileGate(filePath, gate) {
 }
 
 async function main() {
+  // GH-756 OUTCOME MODE: phase-scoped edit rules do not exist — agents
+  // develop freely and the outcome verifier judges the commits at the task
+  // boundary (this hook class was the root cause of the GH-722/GH-720 wedges).
+  if (process.env.WORK_TDD_MODE === 'outcome') {
+    process.exit(0);
+  }
+
   let input = '';
   for await (const chunk of process.stdin) {
     input += chunk;

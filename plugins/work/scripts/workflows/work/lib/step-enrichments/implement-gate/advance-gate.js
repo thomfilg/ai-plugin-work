@@ -161,6 +161,42 @@ function advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks) {
 }
 
 /**
+ * GH-756 OUTCOME MODE: the outcome verifier decides the boundary. CONTRADICTED
+ * rides the existing typed exits (retry guidance / planner hold); flags land
+ * on the work state for task_review and the check step's hard-fail.
+ *
+ * Invariant: `gate.recordRetry` (the persistRetryFailure closure from
+ * dispatchAdvanceGate) MUST persist the work state before returning — the
+ * blocked paths below return without a saveWorkState of their own.
+ *
+ * repoDir is intentionally not passed — same cwd contract as
+ * runShadowObserver above; a wrong-cwd invocation degrades to an advance
+ * WITH a runner-unknown flag plus a task-verify-error audit row, which the
+ * check step's flag hard-fail then surfaces (never a silent wrong verdict).
+ */
+function runOutcomeModeGate(safeName, ctx, deps, gate) {
+  const { ws, currentIdx, totalTasks, taskNum, taskType, recordRetry } = gate;
+  const { saveWorkState } = deps;
+  const { runOutcomeGate } = require(
+    path.join(__dirname, '..', '..', '..', '..', 'task-verify', 'outcome-gate')
+  );
+  const outcome = runOutcomeGate({
+    safeName,
+    ws,
+    tasksDir: ctx && ctx.tasksDir,
+    taskNum,
+    taskType,
+    saveWorkState,
+    recordRetry,
+  });
+  if (outcome.blocked === 'reopen-artifact') return buildPlannerHoldInstruction(ws, safeName);
+  if (outcome.blocked) return null; // retry — guidance surfaces in the next dispatch
+  clearRetryState(ws);
+  saveWorkState(safeName, ws);
+  return advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks);
+}
+
+/**
  * Load work state, reconcile tasksMeta with tasks.md, and bounds-check the
  * task pointer. Returns null when the gate has nothing to do (no tasksMeta,
  * or all tasks already done), else `{ ws, currentIdx, totalTasks, taskNum }`.
@@ -219,6 +255,19 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   const taskType = resolveTaskType(ctx.tasksDir, taskNum);
   if (taskType === 'checkpoint') {
     return advanceCheckpointTask(safeName, ctx, deps, currentIdx, totalTasks);
+  }
+
+  // GH-756 OUTCOME MODE: advance is decided by the outcome verifier verdict
+  // instead of the RED/GREEN evidence flow.
+  if (process.env.WORK_TDD_MODE === 'outcome') {
+    return runOutcomeModeGate(safeName, ctx, deps, {
+      ws,
+      currentIdx,
+      totalTasks,
+      taskNum,
+      taskType,
+      recordRetry,
+    });
   }
 
   const gateTasksBase = ctx.tasksDir ? path.dirname(ctx.tasksDir) : null;
