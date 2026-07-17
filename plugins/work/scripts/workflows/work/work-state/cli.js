@@ -27,6 +27,7 @@ const {
 } = require('./tasks');
 const { readTaskInitDescriptors } = require('./task-init');
 const { initTasksMeta } = require('./task-readiness');
+const { parseRecoverArgs, recoverState } = require('./recover');
 
 // console.log(JSON.stringify(result, null, 2)) — the common success print.
 function printResult(result) {
@@ -143,6 +144,15 @@ const HANDLERS = {
     exitIfError(result);
     printResult(result);
   },
+
+  // GH-753: sanctioned wedge recovery (consistency-only; operator-approved).
+  recover(args, ticketId) {
+    const parsed = parseRecoverArgs(args.slice(2));
+    exitIfError(parsed);
+    const result = recoverState(ticketId, parsed.options);
+    exitIfError(result);
+    printResult(result);
+  },
 };
 
 // CLI handler
@@ -154,7 +164,7 @@ async function main() {
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
     console.error(
-      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get, task-review-fix-rounds, task-review-fix-rounds-increment, task-review-fix-rounds-reset'
+      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get, task-review-fix-rounds, task-review-fix-rounds-increment, task-review-fix-rounds-reset, recover'
     );
     process.exit(1);
   }
