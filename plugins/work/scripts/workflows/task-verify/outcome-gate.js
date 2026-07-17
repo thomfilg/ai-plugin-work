@@ -99,6 +99,10 @@ function runOutcomeGate(input, deps = {}) {
       exit: result.exit,
       reasons: result.reasons.slice(0, 5),
       derivedTests: observations.derivedTests,
+      // GH-769: additive attribution block (both task ids), present only when
+      // the observer produced one — mirrors shadow.js. The cross-task flag
+      // itself flows through recordOutcomeFlags unchanged.
+      ...(observations.attribution ? { attribution: observations.attribution } : {}),
     },
   });
 
