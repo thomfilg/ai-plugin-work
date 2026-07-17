@@ -214,7 +214,39 @@ function validateIdentity(errors, fixture) {
   requireString(errors, fixture, 'description', 'fixture');
 }
 
-/** Validate the observations block (diff/deliverables/runs/coverage). */
+/** Legal `mode` values for the optional attribution block. */
+const ATTRIBUTION_MODES = Object.freeze(['trailer', 'none']);
+
+/**
+ * Validate the OPTIONAL observations.attribution block (GH-769). Absence is
+ * valid; when present it must be a well-formed object.
+ */
+function validateAttribution(errors, attribution) {
+  if (attribution === undefined) return;
+  if (!attribution || typeof attribution !== 'object' || Array.isArray(attribution)) {
+    errors.push('observations.attribution must be an object when present');
+    return;
+  }
+  pushIf(
+    errors,
+    typeof attribution.supported !== 'boolean',
+    'observations.attribution.supported must be a boolean'
+  );
+  requireEnum(errors, attribution.mode, ATTRIBUTION_MODES, 'observations.attribution.mode');
+  pushIf(
+    errors,
+    !(attribution.taskId === null || Number.isInteger(attribution.taskId)),
+    'observations.attribution.taskId must be an integer or null'
+  );
+  requireStringArray(errors, attribution, 'foreignTasks', 'observations.attribution');
+  pushIf(
+    errors,
+    !Number.isInteger(attribution.unattributedCount) || attribution.unattributedCount < 0,
+    'observations.attribution.unattributedCount must be an integer >= 0'
+  );
+}
+
+/** Validate the observations block (diff/deliverables/runs/coverage/attribution). */
 function validateObservations(errors, obs) {
   if (!obs || typeof obs !== 'object') {
     errors.push('observations must be an object');
@@ -225,6 +257,7 @@ function validateObservations(errors, obs) {
   validateRun(errors, obs.baseRun, 'observations.baseRun');
   validateHeadRun(errors, obs.headRun);
   validateCoverage(errors, obs.coverage);
+  validateAttribution(errors, obs.attribution);
 }
 
 /**
@@ -306,6 +339,7 @@ module.exports = {
   FIXTURES_DIR,
   RUN_OUTCOMES,
   REPORTER_KINDS,
+  ATTRIBUTION_MODES,
   validateFixture,
   loadCorpus,
 };

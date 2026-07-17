@@ -133,3 +133,91 @@ describe('verdict-engine (GH-755) — flags and thresholds', () => {
     assert.notEqual(r.verdict, VERDICTS.contradicted);
   });
 });
+
+describe('verdict-engine (GH-769) — cross-task attribution flags', () => {
+  it('Cross-attributed range emits a mechanism-failure flag, not a block', () => {
+    const r = evaluate(
+      {
+        ...baseObservations(),
+        attribution: {
+          supported: true,
+          mode: 'trailer',
+          taskId: 4,
+          foreignTasks: ['1'],
+          unattributedCount: 0,
+        },
+      },
+      'tdd-code'
+    );
+    assert.equal(r.verdict, VERDICTS.unverified);
+    assert.deepEqual(r.flags, ['cross-task-attribution']);
+    assert.deepEqual(r.violatedInvariants, [], 'attribution is never an invariant violation');
+    assert.equal(r.exit, null, 'attribution never produces a typed exit');
+    const reason = r.reasons.find((x) => x.includes('attribution'));
+    assert.ok(reason, 'a reason names the attribution problem');
+    assert.match(reason, /4/, 'reason names the expected task id');
+    assert.match(reason, /1/, 'reason names the foreign task id');
+  });
+
+  it('empty foreignTasks emits no attribution flag', () => {
+    const r = evaluate(
+      {
+        ...baseObservations(),
+        attribution: {
+          supported: true,
+          mode: 'trailer',
+          taskId: 4,
+          foreignTasks: [],
+          unattributedCount: 0,
+        },
+      },
+      'tdd-code'
+    );
+    assert.equal(r.verdict, VERDICTS.verified);
+    assert.deepEqual(r.flags, []);
+  });
+
+  it('unsupported attribution collector emits no attribution flag', () => {
+    const r = evaluate(
+      {
+        ...baseObservations(),
+        attribution: {
+          supported: false,
+          mode: 'none',
+          taskId: null,
+          foreignTasks: [],
+          unattributedCount: 0,
+        },
+      },
+      'tdd-code'
+    );
+    assert.equal(r.verdict, VERDICTS.verified);
+    assert.deepEqual(r.flags, []);
+  });
+
+  it('absent attribution block behaves identically to today', () => {
+    const r = evaluate(baseObservations(), 'tdd-code');
+    assert.equal(r.verdict, VERDICTS.verified);
+    assert.deepEqual(r.flags, []);
+    assert.equal(r.exit, null);
+  });
+
+  it('attribution flags never mask violations — CONTRADICTED stays CONTRADICTED', () => {
+    const r = evaluate(
+      {
+        ...baseObservations({ headRun: { outcome: 'fail', failures: 1 } }),
+        attribution: {
+          supported: true,
+          mode: 'trailer',
+          taskId: 4,
+          foreignTasks: ['1'],
+          unattributedCount: 0,
+        },
+      },
+      'tdd-code'
+    );
+    assert.equal(r.verdict, VERDICTS.contradicted);
+    assert.deepEqual(r.violatedInvariants, ['I4']);
+    assert.notEqual(r.exit, null);
+  });
+});

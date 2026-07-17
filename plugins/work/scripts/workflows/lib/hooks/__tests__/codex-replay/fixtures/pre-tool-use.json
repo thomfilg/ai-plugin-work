@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "turn_id": "turn-ghi789",
+  "transcript_path": "/home/u/.codex/sessions/2026/07/17/rollout-ghi.jsonl",
+  "cwd": "/home/u/project",
+  "tool_name": "Bash",
+  "tool_input": { "command": "ls -la" }
+}

@@ -40,9 +40,17 @@ if (process.env.SESSION_GUARD_ENABLED === '0') {
   process.exit(0);
 }
 
+// Hook mode vs CLI mode discriminator (GH-774): the orchestrator always
+// invokes the CLI with a positional subcommand (init/reveal/…); the host
+// runtime fires the hook with NO argv and pipes a payload on stdin. Keying
+// off argv — not CLAUDE_HOOK_TYPE — fixes codex, which sets no CLAUDE_* env
+// (a codex Stop fell through to the CLI branch and exited 1: the observed
+// "Stop hook failed: exited with code 1").
+const CLI_POSITIONALS = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+
 // Fail-open in hook mode: never block due to our own bugs
 // CLI mode surfaces errors with non-zero exit codes for debuggability
-const isHookMode = Boolean(process.env.CLAUDE_HOOK_TYPE);
+const isHookMode = CLI_POSITIONALS.length === 0;
 if (isHookMode) {
   for (const fatalEvent of ['uncaughtException', 'unhandledRejection']) {
     process.on(fatalEvent, (err) => {
@@ -54,7 +62,12 @@ if (isHookMode) {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-async function runHookMode(hookType) {
+async function runHookMode() {
+  // TTY guard: with argv-based mode detection, a no-positional interactive
+  // invocation (`node session-guard.js` in a terminal) reaches hook mode; without
+  // this it would hang forever on the stdin loop waiting for input. Nothing piped
+  // → nothing to enforce, exit clean (fail-open).
+  if (process.stdin.isTTY) return process.exit(0);
   let input = '';
   for await (const chunk of process.stdin) {
     input += chunk;
@@ -66,6 +79,10 @@ async function runHookMode(hookType) {
   } catch {
     /* empty/invalid — use default */
   }
+
+  // Resolve the event payload-first: CLAUDE_HOOK_TYPE (claude) then
+  // hook_event_name (codex sets no CLAUDE_* env — ground truth §2.7.2).
+  const hookType = process.env.CLAUDE_HOOK_TYPE || hookData.hook_event_name;
 
   // Prevent infinite loops in Stop hooks
   if (hookType === 'Stop' && hookData.stop_hook_active) {
@@ -120,11 +137,9 @@ function runCli(args) {
 }
 
 async function main() {
-  const hookType = process.env.CLAUDE_HOOK_TYPE;
-
-  // Hook mode: read stdin and dispatch by hook type
-  if (hookType) {
-    await runHookMode(hookType);
+  // Hook mode: no CLI subcommand in argv — read stdin and dispatch by event.
+  if (isHookMode) {
+    await runHookMode();
     return;
   }
 

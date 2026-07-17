@@ -92,6 +92,39 @@ describe('session-guard — dual runtime session identity', () => {
     assert.equal(session.ownerSessionId, 'owner-B');
   });
 
+  it('GH-774: codex Stop WITHOUT CLAUDE_HOOK_TYPE still blocks (event from payload)', () => {
+    // The pre-fix bug: hook-mode keyed off CLAUDE_HOOK_TYPE alone, so a codex
+    // Stop (which sets no CLAUDE_* env) fell through to the CLI usage branch
+    // and exited 1 ("Stop hook failed: exited with code 1"). The event must
+    // now resolve from hook_event_name and the block (exit 2) is preserved.
+    run(['init', 'AAA-1', '/work'], { env: { AGENT_SESSION_ID: 'owner-B' } });
+    const r = run([], {
+      input: JSON.stringify({
+        hook_event_name: 'Stop',
+        turn_id: 't-1',
+        transcript_path: '/tmp/h/sessions/2026/07/07/rollout-x.jsonl',
+        stop_hook_active: false,
+      }),
+      env: { AGENT_SESSION_ID: 'owner-B', AGENT_RUNTIME: 'codex' },
+    });
+    assert.equal(r.code, 2, 'codex Stop must block, not crash to exit 1');
+    assert.equal(r.stderr, CLAUDE_BLOCK_BYTES);
+  });
+
+  it('GH-774: codex Stop payload with no active session fail-opens (exit 0, silent)', () => {
+    const r = run([], {
+      input: JSON.stringify({
+        hook_event_name: 'Stop',
+        turn_id: 't-2',
+        stop_hook_active: false,
+      }),
+      env: { AGENT_SESSION_ID: 'nobody', AGENT_RUNTIME: 'codex' },
+    });
+    assert.equal(r.code, 0);
+    assert.equal(r.stderr, '');
+    assert.equal(r.stdout, '');
+  });
+
   it('codex Stop with matching AGENT_SESSION_ID still holds the lock', () => {
     run(['init', 'AAA-1', '/work'], { env: { AGENT_SESSION_ID: 'owner-B' } });
     const r = stop(
