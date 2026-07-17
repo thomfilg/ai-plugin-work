@@ -265,6 +265,23 @@ function generatePlanSafe(env, resolved, ticketRaw, rework) {
   }
 }
 
+/**
+ * GH-768: plugin version skew check — once per top-level invocation
+ * (auto-advance recursion re-enters with recursionDepth > 1). Warn-only:
+ * a non-null banner is surfaced via stateCtx.versionSkew, never a block.
+ */
+function maybeAttachVersionSkew(env, { recursionDepth, preCheckState, safeName, stateCtx }) {
+  if (recursionDepth !== 1) return;
+  const versionSkew = checkVersionSkew({
+    ws: preCheckState,
+    safeName,
+    statePath: path.join(env.TASKS_BASE, safeName, '.work-state.json'),
+    appendAction: env.appendAction,
+    saveWorkState: env.saveWorkState,
+  });
+  if (versionSkew) stateCtx.versionSkew = versionSkew;
+}
+
 function createGetNextInstruction(env) {
   let recursionDepth = 0;
 
@@ -302,26 +319,12 @@ function createGetNextInstruction(env) {
     if (shortCircuit) return shortCircuit;
     preflight.debugTrace(env, preCheckState, safeName, recursionDepth);
 
-    // GH-768: plugin version skew check — once per top-level invocation
-    // (auto-advance recursion re-enters with recursionDepth > 1). Warn-only:
-    // a non-null banner is surfaced via stateCtx.versionSkew, never a block.
-    const versionSkew =
-      recursionDepth === 1
-        ? checkVersionSkew({
-            ws: preCheckState,
-            safeName,
-            statePath: path.join(env.TASKS_BASE, safeName, '.work-state.json'),
-            appendAction: env.appendAction,
-            saveWorkState: env.saveWorkState,
-          })
-        : null;
-
     const stateCtx = buildStateContext(ticket, plan, safeName, {
       loadWorkState: env.loadWorkState,
       getCurrentStep: env.getCurrentStep,
       ALL_STEPS: env.ALL_STEPS,
     });
-    if (versionSkew) stateCtx.versionSkew = versionSkew;
+    maybeAttachVersionSkew(env, { recursionDepth, preCheckState, safeName, stateCtx });
     const recurse = () => getNextInstruction(ticketRaw, rework);
     if (result.nextAction === 'advance_task' && handleAdvanceTask(env, safeName)) {
       return recurse();
