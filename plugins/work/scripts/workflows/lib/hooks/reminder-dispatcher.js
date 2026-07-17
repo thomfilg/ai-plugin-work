@@ -173,8 +173,18 @@ function parsePayload(raw) {
 function runHook() {
   const payload = parsePayload(readStdin());
   if (!payload) return process.exit(0);
+  // Best-effort GC of ledgers from long-dead sessions (cheap mtime dir scan);
+  // without this the per-session ledger files would accumulate forever.
+  try {
+    remindOnce.gcStaleLedgers();
+  } catch {
+    /* best-effort cleanup — never blocks the prompt */
+  }
   const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-  const { entries } = validateManifest(manifestPath());
+  const { entries, errors } = validateManifest(manifestPath());
+  // Surface broken manifest entries to the hook error log (not just the CLI
+  // validate path) so a bad regex / renamed body / typo'd cadence is diagnosable.
+  for (const e of errors) log(new Error(`manifest entry "${e.id}": ${e.error}`));
   if (entries.length === 0) return process.exit(0);
   const sessionId = remindOnce.resolveSessionId(payload);
   const { blocks, toRecord } = collectFired(entries, prompt, sessionId);
