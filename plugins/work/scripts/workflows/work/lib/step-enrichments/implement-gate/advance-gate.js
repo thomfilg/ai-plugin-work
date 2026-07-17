@@ -24,6 +24,31 @@ const {
   resolvePlannerHold,
 } = require(path.join(__dirname, 'planner-hold'));
 
+/**
+ * GH-755 shadow mode: when WORK_TDD_MODE=shadow, log the outcome verifier's
+ * verdict for this boundary alongside the incumbent gate outcome. Zero
+ * authority, never throws, lazily loaded so the hot path pays nothing when
+ * the flag is off.
+ *
+ * repoDir is intentionally NOT passed: the /work orchestrator's contract is
+ * cwd == the ticket worktree (the same assumption every gate git call makes),
+ * and the repo path is NOT derivable from ctx.tasksDir — tasks dirs live
+ * under TASKS_BASE, worktrees under WORKTREES_BASE. A wrong-cwd invocation
+ * degrades to an audited task-verify-shadow-error row, never a wrong verdict
+ * with authority (shadow has none).
+ */
+function runShadowObserver(safeName, ctx, taskNum, taskType, incumbent) {
+  if (process.env.WORK_TDD_MODE !== 'shadow') return;
+  try {
+    const { maybeRunShadow } = require(
+      path.join(__dirname, '..', '..', '..', '..', 'task-verify', 'shadow')
+    );
+    maybeRunShadow({ safeName, tasksDir: ctx && ctx.tasksDir, taskNum, taskType, incumbent });
+  } catch {
+    /* shadow must never affect the gate */
+  }
+}
+
 /** Derive TASKS_BASE + a subprocess env from ctx.tasksDir. */
 function deriveGateExecEnv(ctx) {
   const gateTASKS_BASE = ctx.tasksDir ? path.dirname(ctx.tasksDir) : process.env.TASKS_BASE;
@@ -136,6 +161,47 @@ function advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks) {
 }
 
 /**
+ * GH-756 OUTCOME MODE: the outcome verifier decides the boundary. CONTRADICTED
+ * rides the existing typed exits (retry guidance / planner hold); flags land
+ * on the work state for task_review and the check step's hard-fail.
+ *
+ * Invariant: `gate.recordRetry` (the persistRetryFailure closure from
+ * dispatchAdvanceGate) MUST persist the work state before returning — the
+ * blocked paths below return without a saveWorkState of their own.
+ *
+ * repoDir is intentionally not passed — same cwd contract as
+ * runShadowObserver above. Wrong-cwd degradation: a non-repo cwd fails ref
+ * resolution outright, and a DIFFERENT repo cannot resolve the ticket's
+ * `.last-commit-sha` (resolveTaskBaseRef returns null on that identity
+ * mismatch instead of falling back to the foreign merge-base) — both paths
+ * advance WITH a runner-unknown flag plus a task-verify-error audit row,
+ * which the check step's flag hard-fail then surfaces (never a silent wrong
+ * verdict). Residual: a first boundary with no bookkeeping yet has no
+ * identity anchor and relies on the cwd contract alone.
+ */
+function runOutcomeModeGate(safeName, ctx, deps, gate) {
+  const { ws, currentIdx, totalTasks, taskNum, taskType, recordRetry } = gate;
+  const { saveWorkState } = deps;
+  const { runOutcomeGate } = require(
+    path.join(__dirname, '..', '..', '..', '..', 'task-verify', 'outcome-gate')
+  );
+  const outcome = runOutcomeGate({
+    safeName,
+    ws,
+    tasksDir: ctx && ctx.tasksDir,
+    taskNum,
+    taskType,
+    saveWorkState,
+    recordRetry,
+  });
+  if (outcome.blocked === 'reopen-artifact') return buildPlannerHoldInstruction(ws, safeName);
+  if (outcome.blocked) return null; // retry — guidance surfaces in the next dispatch
+  clearRetryState(ws);
+  saveWorkState(safeName, ws);
+  return advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks);
+}
+
+/**
  * Load work state, reconcile tasksMeta with tasks.md, and bounds-check the
  * task pointer. Returns null when the gate has nothing to do (no tasksMeta,
  * or all tasks already done), else `{ ws, currentIdx, totalTasks, taskNum }`.
@@ -196,6 +262,19 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     return advanceCheckpointTask(safeName, ctx, deps, currentIdx, totalTasks);
   }
 
+  // GH-756 OUTCOME MODE: advance is decided by the outcome verifier verdict
+  // instead of the RED/GREEN evidence flow.
+  if (process.env.WORK_TDD_MODE === 'outcome') {
+    return runOutcomeModeGate(safeName, ctx, deps, {
+      ws,
+      currentIdx,
+      totalTasks,
+      taskNum,
+      taskType,
+      recordRetry,
+    });
+  }
+
   const gateTasksBase = ctx.tasksDir ? path.dirname(ctx.tasksDir) : null;
   const tddEnforcement = require(
     path.join(__dirname, '..', '..', '..', '..', 'work', 'lib', 'tdd-enforcement')
@@ -217,12 +296,15 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
 
   const flow = runNonCheckpointFlow(state);
   if (flow.handled) {
+    runShadowObserver(safeName, ctx, taskNum, taskType, 'blocked');
     // W3 — a planner-defect retry recorded on THIS pass must not fall back to
     // null (work-next.js would re-dispatch a developer agent at a defect it
     // cannot fix). Emit the operator-hold immediately — no retry burn.
     if (ws._tddRetryPlannerDefect) return buildPlannerHoldInstruction(ws, safeName);
     return null;
   }
+
+  runShadowObserver(safeName, ctx, taskNum, taskType, 'advance');
 
   // Evidence valid — clear retry state.
   clearRetryState(ws);

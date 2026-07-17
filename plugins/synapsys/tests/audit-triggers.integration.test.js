@@ -348,7 +348,18 @@ function buildTooBroadStore() {
 test('too-broad-trigger rule flags a trivially short trigger (AC-G4)', () => {
   const { cwd, home } = buildTooBroadStore();
   const { lintStore } = require(CLI);
-  const result = lintStore({ cwd, scope: 'all' });
+  // Pin HOME to the fixture home (same pattern as the tier-comparison test):
+  // an in-process lintStore with scope 'all' otherwise walks the machine's
+  // REAL shared store, whose live memories pair against the too-broad-ci
+  // fixture and fail this test on developer machines.
+  const realHome = process.env.HOME;
+  let result;
+  try {
+    process.env.HOME = home;
+    result = lintStore({ cwd, scope: 'all' });
+  } finally {
+    process.env.HOME = realHome;
+  }
 
   // The broad-trigger memory must NOT appear in `pairs` (R7: distinct rule, not pairwise).
   const broadInPairs = result.pairs.find((p) => p.a === 'too-broad-ci' || p.b === 'too-broad-ci');

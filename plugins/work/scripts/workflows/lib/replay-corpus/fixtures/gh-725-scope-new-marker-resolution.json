@@ -15,6 +15,7 @@
         "plugins/heimdall/scripts/__tests__/heimdall-readstdin-reject.integration.test.js (NEW)"
       ],
       "outOfScope": [],
+      "scopeUnresolved": true,
       "notes": "scope entry carries a non-path annotation the observer failed to normalize"
     },
     "deliverables": {

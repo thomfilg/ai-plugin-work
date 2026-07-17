@@ -53,6 +53,7 @@ try {
 const { runStep, STEPS } = require(path.join(__dirname, 'lib', 'step-registry'));
 const { acquireLock, releaseLock } = require(path.join(__dirname, 'lib', 'report-utils'));
 const { assessTerminalState, recordCompletion } = require(path.join(__dirname, 'lib', 'staleness'));
+const { outcomeFlagGate } = require(path.join(__dirname, 'lib', 'outcome-flags'));
 
 const checkHooksDir = path.join(__dirname, 'hooks');
 
@@ -202,6 +203,8 @@ function handleTerminalState(safeName, state, tasksDir, probes) {
 function advanceOrComplete(safeName, state, stepIdx, probes) {
   const nextIdx = stepIdx + 1;
   if (nextIdx >= STEPS.length) {
+    const flagBlock = outcomeFlagGate(TASKS_BASE, safeName, state, saveState);
+    if (flagBlock) return flagBlock;
     state.status = 'complete';
     recordCompletion(state, probes);
     saveState(safeName, state);
@@ -393,4 +396,5 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { getNextInstruction };
+// advanceOrComplete exported for the GH-756 outcome-flag hard-fail test.
+module.exports = { getNextInstruction, advanceOrComplete };

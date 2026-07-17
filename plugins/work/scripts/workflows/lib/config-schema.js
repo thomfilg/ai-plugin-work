@@ -57,6 +57,12 @@ const SCHEMA = Object.freeze({
   // ── Feature flags ────────────────────────────────────────────────────────
   ENABLE_SYMLINK: flag01("Enable symlink behavior ('0' off, '1' on)."),
   WORK_TEST_STRATEGY_VALIDATOR: flag01("Gate the tasks-draft Test Strategy validator ('0'/'1')."),
+  WORK_TDD_MODE: enumOf(
+    ['process', 'shadow', 'outcome', ''],
+    'Implement-phase verification mode (GH-750): process = legacy RED/GREEN choreography ' +
+      '(default), shadow = legacy gates + outcome verifier logging with no authority, ' +
+      'outcome = task advance decided by the outcome verifier verdict.'
+  ),
 
   // ── Follow-up behavior ───────────────────────────────────────────────────
   FOLLOW_UP_PR_POLL_REVIEWS: bool('Poll PR reviews during follow-up.'),

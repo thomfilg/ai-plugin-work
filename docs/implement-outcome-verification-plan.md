@@ -1,9 +1,34 @@
 # Implement Phase — Outcome Verification Plan
 
-**Status:** Draft for review — not yet ticketed
-**Date:** 2026-07-16
-**Scope:** `plugins/work-workflow` implement phase (per-task TDD loop, gates, evidence)
+**Status:** Phases 0–3 DELIVERED (signed off 2026-07-16) — measurement + flip + decommission pending
+**Date:** 2026-07-16 (drafted and delivered same day)
+**Scope:** `plugins/work` implement phase (per-task TDD loop, gates, evidence)
 **Goal:** Reduce implement-phase incidents to near zero while keeping (and strengthening) quality enforcement.
+
+---
+
+## 0. Delivery status (2026-07-16)
+
+Ticketed as epic **GH-750** with per-phase issues GH-751…GH-756. Delivered in six PRs:
+
+| Phase | Issue | PR | Contents |
+|-------|-------|----|----------|
+| 0 — corpus + SLI | GH-751 | **#757 (merged)** | 22-fixture replay corpus (`lib/replay-corpus/`), SLI extractor (`lib/scripts/sli/`), baseline over 92 real tickets (`docs/outcome-verification-baseline.md`: wedge 2.0%, 461 retries, 1,773h in implement) |
+| 1.1 — stand-down | GH-752 | **#758 (merged)** | session-guard caps identical stop-blocks at 3 (fingerprint re-arms on progress), immediate stand-down on rate-limit/abandoned, announce-once, audited |
+| 1.2 — recovery | GH-753 | **#759 (merged)** | `work-state.js recover` — abandon-cycle / resync-meta / reopen-task; consistency-only, operator-approved, audited, tripwire |
+| 1.3 — liveness | GH-754 | #760 | BLOCK-verdict table as data + liveness test (every block names an existing exit edge; source-drift check; red on edge-less verdict) |
+| 2 — verifier | GH-755 | #761 | `task-verify/`: pure three-verdict engine + kind profiles as data; live collectors (derive-tests-from-diff, base-worktree retroactive fail-on-base, structured-reporter adapters); corpus gate 100%; shadow mode |
+| 3 — flip wiring | GH-756 | #762 | `WORK_TDD_MODE=outcome`: advance on verdicts, typed exits ride existing edges, free-dev dispatch prompt with advisory feedback, phase edit-locks stand aside, check hard-fails unresolved flags, flags in task_review prompt. **Default remains `process`.** |
+
+**Still open (the plan's own gating, in order):**
+
+1. Shadow-run ≥ 3 real tickets (`WORK_TDD_MODE=shadow`) and review divergence rows (`task-verify-shadow` in `.work-actions.json`) — Phase 2 acceptance tail.
+2. Run 3–5 real tickets in outcome mode; compare SLIs vs the Phase 0 baseline; on pass, flip the default to `outcome` — Phase 3 exit criteria (tracked on GH-750).
+3. Phase 4 decommission (~3–4k LOC: tdd-phase-state + CLI, task-next shrink, phase-edit hooks, Test Strategy synthesis, docs/memories sweep incl. retiring no-fake-tdd-evidence) — after one stable release on outcome default. Not yet ticketed.
+4. Phase 5 hardening (identity module, cache-skew check, wave attribution) — parallelizable, not started.
+5. Known v1 gaps: coverage collector reports `unsupported` (I5 inert live until a coverage command exists); vitest/jest adapters parser-tested, node --test exercised live; §10 open questions still open.
+
+Implementation notes vs the original text: fixtures for GH-248/GH-539 encode the defect class §2 cites rather than those issues' literal content (their real subjects differ — see fixture provenance notes); module paths landed under `plugins/work/scripts/workflows/` (`lib/replay-corpus/`, `lib/scripts/sli/`, `task-verify/`) rather than the sketched locations.
 
 ---
 
