@@ -165,46 +165,59 @@ function hasScreenshots(ticketId) {
   }
 }
 
-function blockIfNoScreenshots(hookData) {
-  const ticketId = getTicketId();
-  if (!ticketId) return;
-  // Skip screenshot enforcement when no web apps are configured (GH-181).
-  // Resolve WEB_APPS through lib/config (dotenv-aware): a raw process.env
-  // read misses values that live only in the repo/cwd .env file (PR #628
-  // finding — same fix as check validate-summary/verify-playwright). The
-  // old "circular dependency" concern was stale: this hook already requires
-  // ../config in getScreenshotDir. Fail-open on config load errors so a
-  // misconfigured environment never bricks the hook.
-  let hasConfiguredWebApps = false;
+/**
+ * Skip screenshot enforcement when no web apps are configured (GH-181).
+ * Resolve WEB_APPS through lib/config (dotenv-aware): a raw process.env
+ * read misses values that live only in the repo/cwd .env file (PR #628
+ * finding — same fix as check validate-summary/verify-playwright). The
+ * old "circular dependency" concern was stale: this hook already requires
+ * ../config in getScreenshotDir. Fail-open on config load errors so a
+ * misconfigured environment never bricks the hook.
+ */
+function hasConfiguredWebApps() {
   try {
-    hasConfiguredWebApps = require('../config').webAppNames().length > 0;
+    return require('../config').webAppNames().length > 0;
   } catch {
     process.stderr.write(
       'warn: screenshot-requirement: could not resolve WEB_APPS config, treating as empty\n'
     );
+    return false;
   }
-  if (!hasConfiguredWebApps) return;
-  if (fs.existsSync(skipMarkerPath(ticketId))) return;
-  if (!hasTsxChanges()) return;
-  if (hasScreenshots(ticketId)) return;
+}
 
-  const toolName = hookData.tool_name || '';
+/** True when the situation calls for enforcement at all (TSX changed, no screenshots, no skip). */
+function screenshotsMissing(ticketId) {
+  if (!hasConfiguredWebApps()) return false;
+  if (fs.existsSync(skipMarkerPath(ticketId))) return false;
+  if (!hasTsxChanges()) return false;
+  if (hasScreenshots(ticketId)) return false;
+  return true;
+}
+
+const QA_TARGET_AGENTS = new Set(['qa-feature-tester', 'pr-generator', 'pr-post-generator']);
+
+/** Task dispatch targeting a QA-completing agent (or a QA-flavored prompt). */
+function isQaAgentDispatch(hookData) {
+  if (hookData.tool_name !== 'Task') return false;
   const prompt = (hookData.tool_input?.prompt || '').toLowerCase();
-  const skill = (hookData.tool_input?.skill || '').toLowerCase();
   // dispatchTargetAgent() normalizes (strips plugin prefixes like
   // "work-workflow:" and lowercases) — a dispatch target, never self-identity.
   const normalizedSubagentType = dispatchTargetAgent(hookData.tool_input);
+  return QA_TARGET_AGENTS.has(normalizedSubagentType) || /screenshot|qa.*report/i.test(prompt);
+}
 
-  const isQaAgent =
-    toolName === 'Task' &&
-    (normalizedSubagentType === 'qa-feature-tester' ||
-      normalizedSubagentType === 'pr-generator' ||
-      normalizedSubagentType === 'pr-post-generator' ||
-      /screenshot|qa.*report/i.test(prompt));
+/** Skill invocation that completes QA or opens a PR. */
+function isCompletingSkillCall(hookData) {
+  if (hookData.tool_name !== 'Skill') return false;
+  const skill = (hookData.tool_input?.skill || '').toLowerCase();
+  return /work-pr|check-qa|check-browser/i.test(skill);
+}
 
-  const isCompletingSkill = toolName === 'Skill' && /work-pr|check-qa|check-browser/i.test(skill);
-
-  if (!isQaAgent && !isCompletingSkill) return;
+function blockIfNoScreenshots(hookData) {
+  const ticketId = getTicketId();
+  if (!ticketId) return;
+  if (!screenshotsMissing(ticketId)) return;
+  if (!isQaAgentDispatch(hookData) && !isCompletingSkillCall(hookData)) return;
 
   const screenshotDir = getScreenshotDir(ticketId);
   process.stderr.write(

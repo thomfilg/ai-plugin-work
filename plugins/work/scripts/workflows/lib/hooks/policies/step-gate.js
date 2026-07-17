@@ -24,6 +24,12 @@ function getCurrentStep(state, steps) {
   return active[0] || null;
 }
 
+/** Human-readable description of the tool call, for block messages. */
+function describeToolCall(toolInput) {
+  const cmdDesc = toolInput?.command || toolInput?.skill || toolInput?.subagent_type || '(unknown)';
+  return String(cmdDesc);
+}
+
 /**
  * @param {object} args
  * @param {string} args.workflowName
@@ -56,8 +62,7 @@ function evaluateStepGate({
     }
   }
 
-  const cmdDesc = toolInput?.command || toolInput?.skill || toolInput?.subagent_type || '(unknown)';
-  return { blocked: true, matchedStep, currentStep, cmdDesc: String(cmdDesc) };
+  return { blocked: true, matchedStep, currentStep, cmdDesc: describeToolCall(toolInput) };
 }
 
 /**
