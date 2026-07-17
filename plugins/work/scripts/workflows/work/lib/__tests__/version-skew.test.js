@@ -131,6 +131,16 @@ describe('stampVersionAnchor', () => {
     assert.equal(ws.pluginVersionAnchorAt, '2026-01-01T00:00:00.000Z');
   });
 
+  it('repairs a corrupt (non-semver) anchor instead of preserving it', () => {
+    const ws = makeState({
+      pluginVersionAnchor: 'garbage-not-a-version',
+      pluginVersionAnchorAt: '2026-01-01T00:00:00.000Z',
+    });
+    stampVersionAnchor(ws, { installedVersion: '3.78.0' });
+    assert.equal(ws.pluginVersionAnchor, '3.78.0');
+    assert.notEqual(ws.pluginVersionAnchorAt, '2026-01-01T00:00:00.000Z');
+  });
+
   it('is a no-op when the executing version is unreadable', () => {
     const ws = makeState({ currentStep: 1 });
     stampVersionAnchor(ws, { installedVersion: null });
@@ -192,6 +202,16 @@ describe('checkVersionSkew', () => {
     assert.equal(typeof deps.ws.pluginVersionAnchorAt, 'string');
     assert.equal(saves.length, 1, 'saveWorkState called exactly once');
     assert.equal(audits.length, 0, 'no skew audit row on adopt');
+  });
+
+  it('on corrupt anchor adopts: repairs the anchor, saves once, returns null, zero skew audit rows', () => {
+    const { deps, audits, saves } = makeDeps({
+      ws: makeState({ pluginVersionAnchor: 'garbage-not-a-version' }),
+    });
+    assert.equal(checkVersionSkew(deps), null);
+    assert.equal(deps.ws.pluginVersionAnchor, '3.78.0', 'corrupt anchor repaired');
+    assert.equal(audits.length, 0);
+    assert.equal(saves.length, 1);
   });
 
   it('Persistent skew warns on every start but audits once per executing version', () => {

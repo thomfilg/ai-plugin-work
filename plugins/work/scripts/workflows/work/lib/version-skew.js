@@ -60,9 +60,12 @@ function resolveInstalledVersion(source) {
 
 /**
  * Lazily stamp the version anchor on a work-state object. Idempotent and
- * purely additive: a no-op when an anchor is already present (the original
+ * purely additive: a no-op when a VALID anchor is already present (a valid
  * anchor and its timestamp are never overwritten) or when the executing
- * version is unreadable/invalid. Never throws.
+ * version is unreadable/invalid. A corrupt (non-semver) anchor is repaired —
+ * otherwise the `adopt` outcome would re-save an unchanged state on every
+ * workflow start and the garbage anchor would persist for the ticket's
+ * lifetime. Never throws.
  *
  * @param {object} ws mutable work-state object
  * @param {{ installedVersion?: string|null }} [opts] injectable version source
@@ -71,7 +74,7 @@ function resolveInstalledVersion(source) {
 function stampVersionAnchor(ws, opts = {}) {
   try {
     if (!ws || typeof ws !== 'object') return;
-    if (ws.pluginVersionAnchor != null) return;
+    if (isValidVersion(ws.pluginVersionAnchor)) return;
     const version = resolveInstalledVersion(opts);
     if (!isValidVersion(version)) return;
     ws.pluginVersionAnchor = version;
