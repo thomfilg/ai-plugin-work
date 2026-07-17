@@ -282,9 +282,37 @@ function formatPlan(plan) {
   return lines.join('\n');
 }
 
+/**
+ * firePreToolCall — dispatch the OnPreToolCall extension event after the
+ * existing PreToolUse hook body, gated on an active /work marker. Errors are
+ * swallowed so a misbehaving extension can never crash the hook.
+ *
+ * @param {{toolName: string, toolInput: any, tasksDir: string, repoRoot: string}} args
+ * @param {{ findActiveMarker?: Function, initExtensions?: Function }} [deps]
+ * @returns {void}
+ */
+function firePreToolCall(args, deps) {
+  const { toolName, toolInput, tasksDir, repoRoot } = args || {};
+  const { resolveHookExtensions } = require(
+    path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'extensions', 'hook-dispatch')
+  );
+  const api = resolveHookExtensions({ tasksDir, repoRoot }, deps);
+  if (!api) return;
+  try {
+    api.dispatch('OnPreToolCall', { toolName, toolInput });
+  } catch {
+    /* fail-open — extension dispatch errors must never crash the hook */
+  }
+}
+
+module.exports = { firePreToolCall };
+
 // Canonical entry protocol (stdin read, payload parse, fail-open error
 // handling: unexpected errors — including a rejected async main() — are
 // logged via logHookError and exit 0). The handler's own
 // console.log-then-exit(0) failure paths in fetchPlan are untouched —
 // runHook never intercepts stdout or an explicit process.exit.
-runHook(main, { file: __filename });
+// WORK_HOOK_NO_MAIN lets tests require this module without running the hook.
+if (!process.env.WORK_HOOK_NO_MAIN) {
+  runHook(main, { file: __filename });
+}

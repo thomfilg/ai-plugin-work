@@ -93,4 +93,87 @@ function main() {
   process.exit(0);
 }
 
-main();
+/**
+ * firePostToolCall — dispatch the OnPostToolCall extension event before the
+ * existing auto-advance logic, gated on an active /work marker. Errors are
+ * swallowed so a misbehaving extension can never crash the hook.
+ *
+ * @param {{toolName: string, toolInput: any, toolResult: any, tasksDir: string, repoRoot: string}} args
+ * @param {{ findActiveMarker?: Function, initExtensions?: Function }} [deps]
+ * @returns {void}
+ */
+function resolveExtensions(args, deps) {
+  const { resolveHookExtensions } = require(
+    path.join(__dirname, '..', 'lib', 'extensions', 'hook-dispatch')
+  );
+  return resolveHookExtensions(args, deps);
+}
+
+function firePostToolCall(args, deps) {
+  const { toolName, toolInput, toolResult, tasksDir, repoRoot } = args || {};
+  const api = resolveExtensions({ tasksDir, repoRoot }, deps);
+  if (!api) return;
+  try {
+    api.dispatch('OnPostToolCall', { toolName, toolInput, toolResult });
+  } catch {
+    /* fail-open — extension dispatch errors must never crash the hook */
+  }
+}
+
+/**
+ * dispatchMatchedHandlers — for each registered `OnAgentResponseMatched`
+ * handler whose compiled `match` regex hits `responseText`, dispatch with the
+ * matched substring. Per-handler dispatch errors are swallowed.
+ *
+ * @param {{listHandlers?: Function, dispatch: Function}} api
+ * @param {string} responseText
+ * @returns {void}
+ */
+function dispatchMatchedHandlers(api, responseText) {
+  const handlers =
+    typeof api.listHandlers === 'function' ? api.listHandlers('OnAgentResponseMatched') : [];
+  for (const record of handlers) {
+    const compiled = record?.match?.compiled;
+    if (!compiled) continue;
+    const m = compiled.exec(responseText || '');
+    if (!m) continue;
+    try {
+      api.dispatch('OnAgentResponseMatched', {
+        responseText,
+        match: { pattern: record.match.pattern, substring: m[0] },
+      });
+    } catch {
+      /* fail-open — extension dispatch errors must never crash the hook */
+    }
+  }
+}
+
+/**
+ * fireAgentResponseMatched — dispatch `OnAgentResponseMatched` to handlers whose
+ * compiled `match` regex hits the response text. Gated on an active /work
+ * marker. Errors are swallowed so a misbehaving extension can never crash the
+ * hook.
+ *
+ * Dispatch payload (G9): `{ responseText, match: { pattern, substring } }`.
+ *
+ * @param {{responseText: string, tasksDir: string, repoRoot: string}} args
+ * @param {{ findActiveMarker?: Function, initExtensions?: Function }} [deps]
+ * @returns {void}
+ */
+function fireAgentResponseMatched(args, deps) {
+  const { responseText, tasksDir, repoRoot } = args || {};
+  const api = resolveExtensions({ tasksDir, repoRoot }, deps);
+  if (!api) return;
+  try {
+    dispatchMatchedHandlers(api, responseText);
+  } catch {
+    /* fail-open */
+  }
+}
+
+module.exports = { firePostToolCall, fireAgentResponseMatched };
+
+// WORK_HOOK_NO_MAIN lets tests require this module without running the hook.
+if (!process.env.WORK_HOOK_NO_MAIN) {
+  main();
+}
