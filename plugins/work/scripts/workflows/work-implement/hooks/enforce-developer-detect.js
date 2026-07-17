@@ -15,6 +15,9 @@ const path = require('path');
 const { sniffFormat, readToolEvents } = require(
   path.join(__dirname, '..', '..', 'lib', 'runtime', 'transcript')
 );
+const { payloadAgentName, matchesAlias } = require(
+  path.join(__dirname, '..', '..', 'lib', 'agent-identity')
+);
 
 // Developer agents that satisfy the requirement
 const DEVELOPER_AGENTS = [
@@ -27,16 +30,17 @@ const DEVELOPER_AGENTS = [
 
 /**
  * Payload-first developer identification (design C12): when the hook fires
- * inside a subagent, the payload's `agent_type` names it on both runtimes —
- * codex sets no CLAUDE_* env vars and its rollout transcript is unreadable
- * by the claude scan below.
+ * inside a subagent, the payload's self-identity field names it on both
+ * runtimes — codex sets no CLAUDE_* env vars and its rollout transcript is
+ * unreadable by the claude scan below.
+ *
+ * Identity is read via the canonical `lib/agent-identity.js` accessors
+ * (GH-767); the DEVELOPER_AGENTS list itself stays local — WHICH agents are
+ * developers is this hook's policy, not an identity primitive.
  */
 function payloadIsDeveloperAgent(hookData) {
-  const agentType = String(hookData?.agent_type || '')
-    .replace(/^[\w-]+:/, '')
-    .toLowerCase();
-  if (!agentType) return false;
-  return DEVELOPER_AGENTS.some((agent) => agent.toLowerCase() === agentType);
+  const agentType = payloadAgentName(hookData);
+  return Boolean(agentType) && matchesAlias(agentType, DEVELOPER_AGENTS);
 }
 
 /** Matches an inline persona adoption: a shell read of agents/developer-*.md. */

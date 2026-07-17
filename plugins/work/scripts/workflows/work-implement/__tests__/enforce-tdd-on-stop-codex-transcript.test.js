@@ -86,3 +86,33 @@ describe('transcriptIsDeveloperDispatch — codex rollout leg', () => {
     assert.equal(transcriptIsDeveloperDispatch(file), true);
   });
 });
+
+// GH-767 Task 5 — require-path assertions ONLY (no behavior assertions):
+// the five migrated consumers must obtain identity through the canonical
+// lib/agent-identity.js module instead of inline payload triple-reads.
+describe('GH-767 consumer migration — agent-identity require paths', () => {
+  const WORKFLOWS_ROOT = path.resolve(__dirname, '..', '..');
+  const MIGRATED_FILES = [
+    'work-implement/hooks/enforce-developer-detect.js',
+    'work-implement/hooks/enforce-tdd-on-stop.js',
+    'work-implement/hooks/enforce-tdd-on-stop-helpers.js',
+    'work/agents/developer-quality-gate.js',
+    'work-pr/agents/lib/hook-io.js',
+  ];
+
+  for (const rel of MIGRATED_FILES) {
+    it(`${rel} reads identity via the module boundary`, () => {
+      const source = fs.readFileSync(path.join(WORKFLOWS_ROOT, rel), 'utf8');
+      // The helpers file has no payload read — its swap is the dual-format
+      // transcript reader; every other file requires agent-identity directly.
+      const boundaryRe = rel.endsWith('enforce-tdd-on-stop-helpers.js')
+        ? /require\([^)]*runtime[^)]*transcript[^)]*\)/
+        : /require\([^)]*agent-identity[^)]*\)/;
+      assert.match(source, boundaryRe);
+      // The divergent inline triple-read is deleted (no raw payload-field
+      // fallback chains outside the module).
+      assert.doesNotMatch(source, /\.agent_type\s*\|\|/);
+      assert.doesNotMatch(source, /\.agent_name\s*\|\|/);
+    });
+  }
+});

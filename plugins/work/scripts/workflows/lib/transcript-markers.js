@@ -12,6 +12,10 @@
  *
  * agent-detection.js requires and re-exports these, so consumers keep their
  * existing import path.
+ *
+ * Required by: lib/agent-identity.js (the canonical GH-767 entry point —
+ * new consumers import that module, not this internal leg) and
+ * lib/agent-detection.js (the claude scanning leg).
  */
 
 const fs = require('fs');

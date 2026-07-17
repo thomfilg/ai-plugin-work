@@ -1,6 +1,12 @@
 /**
  * Shared agent detection utilities for Claude Code hooks.
  *
+ * INTERNAL LEG — new consumers import `lib/agent-identity.js` (GH-767), the
+ * canonical entry point that re-exports this module's predicates alongside
+ * the payload/env accessors and documents the full identity contract. This
+ * file stays byte-compatible in logic; the entry point requires this leg,
+ * so this leg must never require the entry point (cycle-free by design).
+ *
  * Provides reliable detection of whether code is executing inside
  * a specific subagent context, using multiple detection strategies.
  */
@@ -318,6 +324,8 @@ module.exports = {
   isRunningInAgent,
   isSubagentFromTranscript,
   isSubagentFromInitialPrompt,
+  isAgentFromFrontmatter,
   isDispatchedAgentContext, // GH-695 — lives in ./transcript-markers, re-exported
   normalizeAgentName,
+  matchesAlias,
 };

@@ -28,20 +28,17 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
-const { isRunningInAgent } = require(path.join(__dirname, '..', 'agent-detection'));
+const { isRunningInAgent, activeAgentDetectionPayload } = require(
+  path.join(__dirname, '..', 'agent-identity')
+);
 const { REGISTRY } = require(path.join(__dirname, 'agent-hook-registry'));
-const { resolvePluginRootHonouringEnv } = require('../../work/lib/resolve-plugin-root');
+const { installFailOpenHandlers, resolveHookPluginRoot } = require(
+  path.join(__dirname, 'hook-bootstrap')
+);
 
 const VALID_HOOK_TYPES = new Set(['PreToolUse', 'PostToolUse', 'Stop']);
 
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+installFailOpenHandlers(__filename);
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -76,9 +73,7 @@ function resolvePluginRoot() {
   // we must trust the user's env setting when probing lands on an unrelated
   // install (which is exactly what happens in test fixtures and in the
   // marketplace-nesting case tracked by GH-526).
-  return (
-    resolvePluginRootHonouringEnv(__dirname, 4) || path.resolve(__dirname, '..', '..', '..', '..')
-  );
+  return resolveHookPluginRoot(__dirname, 4);
 }
 
 function runEntry(entry, stdinBuffer, pluginRoot) {
@@ -115,6 +110,48 @@ function runEntry(entry, stdinBuffer, pluginRoot) {
   return { code: result.status == null ? 0 : result.status };
 }
 
+function parseHookPayload(stdinBuffer) {
+  try {
+    return JSON.parse(stdinBuffer.toString('utf8') || '{}');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find which registered agent (if any) is currently active.
+ * activeAgentDetectionPayload() strips the dispatch-target field
+ * (tool_input.subagent_type) as a belt-and-suspenders defense against any
+ * non-Task tool that happens to carry it — only the Task tool's tool_input
+ * legitimately names a target agent, and main() short-circuits that before
+ * calling here. A dispatch target is NEVER self-identity.
+ */
+function findActiveAgent(hookData) {
+  const detectionHookData = activeAgentDetectionPayload(hookData);
+  const transcriptPath = hookData.transcript_path || '';
+  for (const agentName of Object.keys(REGISTRY)) {
+    if (isRunningInAgent(transcriptPath, [agentName], detectionHookData)) {
+      return agentName;
+    }
+  }
+  return null;
+}
+
+/**
+ * Run each matching entry in order; return the first blocking exit code
+ * (non-zero from a non-optional entry), or 0 when everything allows.
+ */
+function dispatchEntries(entries, hookData, hookType, stdinBuffer, pluginRoot) {
+  for (const entry of entries) {
+    if (!matcherAllows(entry, hookData, hookType)) continue;
+    const { code } = runEntry(entry, stdinBuffer, pluginRoot);
+    if (code !== 0 && !entry.optional) {
+      return code;
+    }
+  }
+  return 0;
+}
+
 async function main() {
   const hookType = process.env.CLAUDE_HOOK_TYPE;
   if (!VALID_HOOK_TYPES.has(hookType)) {
@@ -123,14 +160,8 @@ async function main() {
   }
 
   const stdinBuffer = await readStdin();
-  let hookData = {};
-  try {
-    hookData = JSON.parse(stdinBuffer.toString('utf8') || '{}');
-  } catch {
-    process.exit(0);
-  }
-
-  const pluginRoot = resolvePluginRoot();
+  const hookData = parseHookPayload(stdinBuffer);
+  if (!hookData) process.exit(0);
 
   // Guard: when the current tool is Task/Agent, the call is the PARENT
   // *about to invoke* a subagent — the subagent isn't running yet.
@@ -143,37 +174,13 @@ async function main() {
     process.exit(0);
   }
 
-  // Find which registered agent (if any) is currently active.
-  // Pass a hookData copy with tool_input.subagent_type stripped as a
-  // belt-and-suspenders defense against any non-Task tool that happens
-  // to carry that field — only the Task tool's tool_input legitimately
-  // names a target agent, and we've already short-circuited that above.
-  const detectionHookData =
-    hookData.tool_input && hookData.tool_input.subagent_type
-      ? { ...hookData, tool_input: { ...hookData.tool_input, subagent_type: undefined } }
-      : hookData;
-  const transcriptPath = hookData.transcript_path || '';
-  let activeAgent = null;
-  for (const agentName of Object.keys(REGISTRY)) {
-    if (isRunningInAgent(transcriptPath, [agentName], detectionHookData)) {
-      activeAgent = agentName;
-      break;
-    }
-  }
+  const activeAgent = findActiveAgent(hookData);
   if (!activeAgent) process.exit(0);
 
   const entries = REGISTRY[activeAgent][hookType];
   if (!entries || entries.length === 0) process.exit(0);
 
-  for (const entry of entries) {
-    if (!matcherAllows(entry, hookData, hookType)) continue;
-    const { code } = runEntry(entry, stdinBuffer, pluginRoot);
-    if (code !== 0 && !entry.optional) {
-      process.exit(code);
-    }
-  }
-
-  process.exit(0);
+  process.exit(dispatchEntries(entries, hookData, hookType, stdinBuffer, resolvePluginRoot()));
 }
 
 main();

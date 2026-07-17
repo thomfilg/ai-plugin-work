@@ -20,6 +20,7 @@ const path = require('path');
 
 const { getNodeInvocations } = require('./command-matching');
 const { isTrustedScriptPath, expandPluginRoot } = require('./agent-authorization');
+const { envAgentName, dispatchTargetAgent, payloadAgentName } = require('../../agent-identity');
 const { logHookError } = require('../../hook-error-log');
 const { tokenPath, ensureTokenDir } = require('../../scripts/write-report');
 
@@ -96,10 +97,10 @@ function checkStepGate(deps, scriptBase, gatedEntry, ticketId) {
 // Agent + step verified — pick the agent identity to stamp into the token.
 function detectAgent(deps, allowedAgents, hookData) {
   const norm = deps.normalizeAgentName;
-  const envAgent = process.env.CLAUDE_CURRENT_AGENT;
-  if (envAgent && allowedAgents.some((a) => norm(a) === norm(envAgent))) return envAgent;
-  const hd = hookData?.tool_input?.subagent_type;
-  if (hd && allowedAgents.some((a) => norm(a) === norm(hd))) return hd;
+  const envAgent = envAgentName();
+  if (envAgent && allowedAgents.some((a) => norm(a) === envAgent)) return envAgent;
+  const hd = dispatchTargetAgent(hookData?.tool_input);
+  if (hd && allowedAgents.some((a) => norm(a) === hd)) return hd;
   return allowedAgents[0];
 }
 
@@ -194,9 +195,9 @@ function logRule5Match(tokenLog, scriptBase, scriptPath, ticketId, cmd, hookData
     scriptPath,
     ticketId: ticketId || null,
     cmd: cmd.slice(0, 300),
-    envAgent: process.env.CLAUDE_CURRENT_AGENT || null,
-    subagentType: hookData?.tool_input?.subagent_type || null,
-    hookAgentType: hookData?.agent_type || null,
+    envAgent: envAgentName() || null,
+    subagentType: dispatchTargetAgent(hookData?.tool_input) || null,
+    hookAgentType: payloadAgentName(hookData) || null,
   });
 }
 

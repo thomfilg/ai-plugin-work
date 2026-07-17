@@ -46,9 +46,9 @@ process.on('unhandledRejection', (err) => {
   process.exit(didBlock ? 2 : 0);
 });
 
-// Agent detection for report file protection + GH-695 dispatched-agent gate
+// Agent identity for report file protection + GH-695 dispatched-agent gate
 const { isRunningInAgent, isDispatchedAgentContext, normalizeAgentName } = require(
-  path.join(__dirname, '..', 'agent-detection')
+  path.join(__dirname, '..', 'agent-identity')
 );
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 

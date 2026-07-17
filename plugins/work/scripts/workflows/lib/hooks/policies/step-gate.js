@@ -12,6 +12,8 @@
  *   - getCurrentStep(state, steps): find the in_progress step from a state object
  */
 
+const { dispatchTargetAgent } = require('../../agent-identity');
+
 /**
  * Find the in_progress step from a workflow state object.
  * Returns the first one if multiple are in_progress (legacy data tolerance).
@@ -20,6 +22,12 @@ function getCurrentStep(state, steps) {
   if (!state?.stepStatus) return null;
   const active = steps.filter((s) => state.stepStatus[s] === 'in_progress');
   return active[0] || null;
+}
+
+/** Human-readable description of the tool call, for block messages. */
+function describeToolCall(toolInput) {
+  const cmdDesc = toolInput?.command || toolInput?.skill || toolInput?.subagent_type || '(unknown)';
+  return String(cmdDesc);
 }
 
 /**
@@ -48,14 +56,13 @@ function evaluateStepGate({
   // /check agent bypass: when running an agent owned by /check during /work,
   // allow it if /check is currently active.
   if (workflowName === 'work') {
-    const agentType = toolInput?.subagent_type || '';
+    const agentType = dispatchTargetAgent(toolInput);
     if (agentType && checkAgents.has(agentType) && checkStateActive) {
       return { blocked: false };
     }
   }
 
-  const cmdDesc = toolInput?.command || toolInput?.skill || toolInput?.subagent_type || '(unknown)';
-  return { blocked: true, matchedStep, currentStep, cmdDesc: String(cmdDesc) };
+  return { blocked: true, matchedStep, currentStep, cmdDesc: describeToolCall(toolInput) };
 }
 
 /**
