@@ -374,3 +374,835 @@ test.describe('readReuseAudit grammar (#629)', () => {
     }
   });
 });
+
+// --- GH-607 Task 2: in-place extension + config-file relaxations -------------
+
+test.describe('GH-607 Task 2 — pure helpers (2.1)', () => {
+  test('isConfigPath: config extension true; JS/TS extensions and nullish false', () => {
+    assert.equal(typeof phase.isConfigPath, 'function', 'isConfigPath must be exported');
+    assert.equal(phase.isConfigPath('hooks.json'), true, '.json is a config path');
+    assert.equal(phase.isConfigPath('config/settings.yaml'), true, '.yaml is a config path');
+    for (const js of ['a.js', 'b.ts', 'c.jsx', 'd.tsx', 'e.mjs', 'f.cjs']) {
+      assert.equal(phase.isConfigPath(js), false, `${js} must NOT be a config path`);
+    }
+    // GH-607 review fix (Greptile P1): extensionless declared paths are never
+    // importable JS/TS, so they count as config and take the scoped per-file
+    // branch — otherwise Dockerfile/Makefile/CODEOWNERS entries would fall
+    // through to the combined-diff importable check and leak from unrelated files.
+    for (const cfg of ['Dockerfile', 'Makefile', 'CODEOWNERS', 'path/to/Procfile', '.gitignore']) {
+      assert.equal(phase.isConfigPath(cfg), true, `${cfg} (extensionless) must be a config path`);
+    }
+    assert.equal(phase.isConfigPath(null), false, 'null is not a config path');
+    assert.equal(phase.isConfigPath(undefined), false, 'undefined is not a config path');
+    assert.equal(phase.isConfigPath(''), false, 'empty string is not a config path');
+  });
+
+  test('symbolPresentInBlobsScoped: matches only in the blob whose rel === relPath', () => {
+    assert.equal(
+      typeof phase.symbolPresentInBlobsScoped,
+      'function',
+      'symbolPresentInBlobsScoped must be exported'
+    );
+    const blobs = [
+      { rel: 'a.js', content: 'const MATCHED_LABELS = [];\n' },
+      { rel: 'b.js', content: 'nothing here\n' },
+    ];
+    assert.equal(
+      phase.symbolPresentInBlobsScoped('MATCHED_LABELS', blobs, 'a.js'),
+      true,
+      'symbol present in the scoped file returns true'
+    );
+    const otherOnly = [
+      { rel: 'a.js', content: 'nothing here\n' },
+      { rel: 'b.js', content: 'const MATCHED_LABELS = [];\n' },
+    ];
+    assert.equal(
+      phase.symbolPresentInBlobsScoped('MATCHED_LABELS', otherOnly, 'a.js'),
+      false,
+      'symbol present ONLY in another modified file must NOT satisfy the scoped check'
+    );
+    assert.equal(
+      phase.symbolPresentInBlobsScoped('MATCHED_LABELS', otherOnly, 'missing.js'),
+      false,
+      'no blob matching relPath returns false'
+    );
+  });
+});
+
+test.describe('GH-607 Task 2 — configEntryPresent + guarded branches (2.2)', () => {
+  test('configEntryPresent: true only when entry.path in changedSet AND its block on addedLines', () => {
+    assert.equal(
+      typeof phase.configEntryPresent,
+      'function',
+      'configEntryPresent must be exported'
+    );
+    const entry = { symbol: 'my-hook', path: 'hooks.json' };
+    const addedLines = '  "my-hook": { "command": "node x.js" }\n';
+    const changedSet = new Set(['hooks.json']);
+    assert.equal(
+      phase.configEntryPresent(entry, addedLines, changedSet),
+      true,
+      'present when path in changedSet and block on added lines'
+    );
+    assert.equal(
+      phase.configEntryPresent(entry, addedLines, new Set(['other.json'])),
+      false,
+      'absent when entry.path not in changedSet'
+    );
+    assert.equal(
+      phase.configEntryPresent(entry, 'unrelated added content\n', changedSet),
+      false,
+      'absent when in changedSet but block not on added lines'
+    );
+  });
+
+  test('validate: in-place extension of a modified .js symbol (context line) ⇒ 0 missing', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+      '',
+    ].join('\n');
+    // The declaration line is a CONTEXT line (already-present), but the file
+    // WAS modified in this change (added a new element). symbolPresentInAdded
+    // returns false for the symbol, yet the declaring file is in changedSet
+    // with non-empty content → P0.1 relaxation must fire.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['lib/labels.js'],
+      fileContents: {
+        'lib/labels.js': "const MATCHED_LABELS = ['a', 'b', 'newlyAdded'];\n",
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        true,
+        'in-place extension of a modified .js symbol must pass the audit'
+      );
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record for in-place extension'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (reuse_audit_enforcement.js isConfigEntryReused fallback): when the
+  // added-lines diff is UNAVAILABLE, a config MUST-reuse entry must NOT be satisfied
+  // by bare file-wide presence. The declared symbol pre-exists in its own config
+  // file, so an unrelated edit to that file (it IS in the change set) plus the
+  // symbol living anywhere in the full blob would otherwise falsely pass — stale
+  // config satisfying the audit. buildCtx is a NON-git tmpdir, so `readAddedLines`
+  // returns null (added portion unknowable); the conservative fallback must fail it.
+  //
+  // The positive path (config block on the declared file's OWN added lines ⇒ pass)
+  // is covered under REAL git by
+  //   'needle on the declared file’s own added lines DOES satisfy the config entry'.
+  test('config entry with the diff UNAVAILABLE does NOT count as reused (Greptile P1 stale-file guard)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    // hooks.json is in the change set (an unrelated edit touched it — `"touched"`)
+    // and `my-hook` PRE-EXISTS in the file; but the change never added the my-hook
+    // block. With the diff unavailable, this must fail-closed rather than pass on
+    // full-file presence.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['hooks.json'],
+      fileContents: {
+        'hooks.json': '{\n  "my-hook": { "command": "node x.js" },\n  "touched": true\n}\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'config entry must NOT pass on bare file-wide presence when the added-lines diff is unavailable'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(
+        rec,
+        'failure record must be pushed when the config entry cannot be verified from the diff'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+test.describe('GH-607 Task 2 — refined message + regression + negative control (2.3)', () => {
+  test('config MUST-reuse entry ABSENT from the change fails', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    // hooks.json is NOT in the changed set; an unrelated file changed instead.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['src/other.js'],
+      fileContents: {
+        'src/other.js': 'const x = 1;\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'config entry absent from change must fail');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for absent config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('NEGATIVE CONTROL: symbol present only in an unmodified file still fails (anti-gaming)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+      '',
+    ].join('\n');
+    // The symbol lives in lib/labels.js, but that file is NOT in the changed
+    // set (an unrelated file was modified). The P0.1 relaxation must NOT fire
+    // because the declaring file was not modified — anti-gaming guarantee.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['src/unrelated.js'],
+      fileContents: {
+        'src/unrelated.js': 'const y = 2;\n',
+        'lib/labels.js': "const MATCHED_LABELS = ['a', 'b'];\n",
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'symbol only in an unmodified file must STILL fail (anti-gaming)'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for unmodified-only symbol');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('refined observed: "unmodified file" wording when declaring path NOT in changedSet', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+      '',
+    ].join('\n');
+    // Declaring file lib/labels.js is NOT modified; a different file changed.
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['src/unrelated.js'],
+      fileContents: {
+        'src/unrelated.js': 'const y = 2;\n',
+        'lib/labels.js': "const MATCHED_LABELS = ['a', 'b'];\n",
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false);
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record exists');
+      assert.match(
+        rec.observed,
+        /unmodified file/i,
+        'observed must distinguish the unmodified-file miss class'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('refined observed: "no changed file references" wording when no changed file references the symbol', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `ContentPageToolbar` MUST be reused from `apps/web/src/components/ContentPageToolbar.tsx`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['apps/web/src/pages/Other.tsx'],
+      fileContents: {
+        'apps/web/src/pages/Other.tsx': 'import { SomethingElse } from "./x";\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false);
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record exists');
+      assert.match(
+        rec.observed,
+        /no changed file references/i,
+        'observed must distinguish the no-changed-file-reference miss class'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// --- GH-607 review fix: config-entry match must be scoped to entry.path -------
+//
+// Regression for the cross-file leak reported on
+// reuse_audit_enforcement.js:162 — `addedLines` was the COMBINED `git diff -U0`
+// for every changed file, so a config MUST-reuse entry could be satisfied by a
+// needle that appears only on the added lines of an UNRELATED changed file. The
+// `changedSet.has(entry.path)` gate confirmed the declared path was touched, but
+// the block/path content match was not scoped to that file. These tests build a
+// real git repo so `readAddedLines` runs and its per-file scoping is exercised.
+
+test.describe('GH-607 review fix — config match scoped to declared file', () => {
+  const childProcess = require('node:child_process');
+
+  function git(cwd, args) {
+    const r = childProcess.spawnSync('git', args, { cwd, encoding: 'utf8' });
+    if (r.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${r.stderr || r.stdout}`);
+    }
+    return r.stdout;
+  }
+
+  // Build a git repo whose base branch (`main`) has an initial commit, then a
+  // working tree that has ADDED `hooks.json` (without the needle) and an
+  // unrelated changed file (with the needle) relative to that base.
+  function buildGitCtx({ spec, hooksJsonAdded, otherFileAdded }) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gh607-scoped-'));
+    git(root, ['init', '-q', '-b', 'main']);
+    git(root, ['config', 'user.email', 'test@example.com']);
+    git(root, ['config', 'user.name', 'Test']);
+    // Base commit: files exist but WITHOUT the added content under test.
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'hooks.json'), '{\n}\n', 'utf8');
+    fs.writeFileSync(path.join(root, 'src', 'other.js'), 'const base = 0;\n', 'utf8');
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'base']);
+    // Working-tree changes (HEAD is still the base commit; readAddedLines
+    // diffs `main...HEAD`, and getDiffBaseCandidates resolves base = current
+    // branch's tracked base → 'main'. We instead advance HEAD with a second
+    // commit so `main...HEAD` shows the new lines).
+    fs.writeFileSync(path.join(root, 'hooks.json'), hooksJsonAdded, 'utf8');
+    fs.writeFileSync(path.join(root, 'src', 'other.js'), otherFileAdded, 'utf8');
+    // Diff base is 'main'; put the new work on a different branch so main...HEAD
+    // is a real ahead-diff.
+    git(root, ['checkout', '-q', '-b', 'feature']);
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'work']);
+
+    const tasksDir = path.join(root, 'tasks', 'GH-607');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, 'spec.md'), spec, 'utf8');
+    fs.writeFileSync(
+      path.join(tasksDir, 'pr-context.json'),
+      JSON.stringify({ files: ['hooks.json', 'src/other.js'] }, null, 2),
+      'utf8'
+    );
+    return {
+      ctx: { tasksDir, worktreeRoot: root, failures: [] },
+      cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  }
+
+  test('needle only in an UNRELATED changed file does NOT satisfy the config entry', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    // hooks.json is added-to but WITHOUT the `my-hook` symbol; the `hooks.json`
+    // path text appears only on added lines of the unrelated src/other.js. The
+    // config entry is judged SOLELY by its own file's added lines and ONLY by the
+    // symbol token (path text is not evidence), so the symbol — absent from
+    // hooks.json's own added lines — fails it. (We avoid the `my-hook` symbol in
+    // the other file so the primary symbol-in-added check can't confound the test.)
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "unrelated": { "command": "node z.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\n// see config in hooks.json for wiring\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'config entry must NOT pass when the needle is only in another changed file'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('needle on the declared file’s own added lines DOES satisfy the config entry', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "my-hook": { "command": "node x.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        true,
+        'config entry must pass when its block is on the declared file’s own added lines'
+      );
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record when the config block is genuinely present in the declared file'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  // GH-607 review fix: the spec author writes `./hooks.json` (equivalent
+  // repo-relative spelling) but git's --name-only / pr-context list carries the
+  // canonical `hooks.json`. Pre-fix the raw `changedSet.has(entry.path)` gate
+  // rejected the reuse; post-fix both sides normalize and it is recognized.
+  test('`./hooks.json` spec spelling matches canonical `hooks.json` change (config gate)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `./hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "my-hook": { "command": "node x.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        true,
+        '`./hooks.json` spec spelling must be recognized as the reused `hooks.json` change'
+      );
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record when the equivalent-spelling config block is genuinely present'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Anti-gaming negative control preserved under the new normalization: the
+  // `./hooks.json` spelling still fails when the needle lives only in an
+  // unrelated changed file (nothing on hooks.json's own added lines).
+  test('`./hooks.json` spelling still fails when needle only in an unrelated file (anti-gaming)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `./hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "unrelated": { "command": "node z.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\n// see config in hooks.json for wiring\n',
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'normalization must not let an unrelated-file needle satisfy the `./hooks.json` entry'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must still be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (configEntryPresent evidence strength): a change that merely
+  // MENTIONS the declared config filename on the config file's OWN added lines —
+  // without the required symbol — must NOT satisfy the entry. Pre-fix `entry.path`
+  // was a match needle, so the path text `hooks.json` counted as reuse evidence.
+  test('config filename text on the declared file’s own added lines does NOT satisfy (no path-as-evidence)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    // hooks.json's own added lines contain the PATH text `hooks.json` but NOT the
+    // `my-hook` symbol; src/other.js also does not reference the symbol.
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "note": "see hooks.json for wiring"\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      // Guard: hooks.json's own added lines DO contain the path text, so it is the
+      // removal of path-as-evidence — not an absent needle — that fails the entry.
+      const own = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'hooks.json']);
+      assert.match(
+        own,
+        /hooks\.json/,
+        'guard: hooks.json own added lines must contain the path text'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'the config filename text must not count as reuse evidence');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed when only the path text is present');
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (configEntryPresent evidence strength): a SUPERSTRING of the symbol
+  // on the declared file's own added lines must NOT satisfy the entry — the match is
+  // word-bounded, so `my-hookish` cannot stand in for the `my-hook` token.
+  test('a superstring of the symbol does NOT satisfy the config entry (word-bounded, no substring)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildGitCtx({
+      spec,
+      hooksJsonAdded: '{\n  "my-hookish": { "command": "node x.js" }\n}\n',
+      otherFileAdded: 'const base = 0;\nconst extra = 1;\n',
+    });
+    try {
+      // Guard: the symbol text appears as a SUBSTRING on hooks.json's own added
+      // lines, so it is the word boundary — not an absent needle — that fails it.
+      const own = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'hooks.json']);
+      assert.match(
+        own,
+        /my-hookish/,
+        'guard: hooks.json own added lines must contain the superstring'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'a substring (my-hookish) must not satisfy the my-hook token');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed when only a superstring is present');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+test.describe('GH-607 — normalizeRepoPath canonicalization', () => {
+  test('strips ./ prefix, leading slash, redundant separators, trailing slash', () => {
+    assert.equal(phase.normalizeRepoPath('./hooks.json'), 'hooks.json');
+    assert.equal(phase.normalizeRepoPath('/hooks.json'), 'hooks.json');
+    assert.equal(phase.normalizeRepoPath('src//other.js'), 'src/other.js');
+    assert.equal(phase.normalizeRepoPath('.//src/nested.js'), 'src/nested.js');
+    assert.equal(phase.normalizeRepoPath('src/dir/'), 'src/dir');
+    assert.equal(phase.normalizeRepoPath('src\\win\\path.js'), 'src/win/path.js');
+  });
+
+  test('already-canonical paths are unchanged and nullish input is passed through', () => {
+    assert.equal(phase.normalizeRepoPath('hooks.json'), 'hooks.json');
+    assert.equal(phase.normalizeRepoPath('src/other.js'), 'src/other.js');
+    assert.equal(phase.normalizeRepoPath(''), '');
+    assert.equal(phase.normalizeRepoPath(null), null);
+    assert.equal(phase.normalizeRepoPath(undefined), undefined);
+  });
+
+  test('does NOT resolve `..` outside the repo (conservative)', () => {
+    // A `..` segment is left intact so an out-of-tree path cannot silently
+    // normalize onto an in-tree change-set entry.
+    assert.equal(phase.normalizeRepoPath('../hooks.json'), '../hooks.json');
+  });
+});
+
+// --- GH-607 review fix: P0.1 in-place extension under REAL git ---------------
+//
+// The tmpdir fixtures in buildCtx are NOT git repos, so `readAddedLines`
+// returns null and the phase satisfies a MUST-reuse symbol via the LEGACY
+// full-blob proxy (`symbolPresentInBlobs`) — the P0.1 `isInPlaceExtension`
+// branch never executes there. These tests build a real git repo so
+// `readAddedLines` yields a genuine `main...HEAD` diff whose added lines do
+// NOT contain the symbol token (the declaration sits on a context line),
+// forcing `symbolPresentInAdded` to return false and making
+// `isInPlaceExtension` the ONLY thing that can pass the audit.
+
+test.describe('GH-607 P0.1 — in-place extension under real git', () => {
+  const childProcess = require('node:child_process');
+
+  function git(cwd, args) {
+    const r = childProcess.spawnSync('git', args, { cwd, encoding: 'utf8' });
+    if (r.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${r.stderr || r.stdout}`);
+    }
+    return r.stdout;
+  }
+
+  // `files` maps repo-relative path → { base, head }. The base commit lands on
+  // `main`; the working change lands on a `feature` commit so `main...HEAD` is a
+  // real ahead-diff. Only `changedFiles` are recorded in pr-context.json.
+  function buildInPlaceGitCtx({ spec, files, changedFiles }) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gh607-inplace-'));
+    git(root, ['init', '-q', '-b', 'main']);
+    git(root, ['config', 'user.email', 'test@example.com']);
+    git(root, ['config', 'user.name', 'Test']);
+    for (const [rel, { base }] of Object.entries(files)) {
+      const abs = path.join(root, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, base, 'utf8');
+    }
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'base']);
+    git(root, ['checkout', '-q', '-b', 'feature']);
+    for (const [rel, { head }] of Object.entries(files)) {
+      fs.writeFileSync(path.join(root, rel), head, 'utf8');
+    }
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-q', '-m', 'work']);
+
+    const tasksDir = path.join(root, 'tasks', 'GH-607');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, 'spec.md'), spec, 'utf8');
+    fs.writeFileSync(
+      path.join(tasksDir, 'pr-context.json'),
+      JSON.stringify({ files: changedFiles }, null, 2),
+      'utf8'
+    );
+    return {
+      ctx: { tasksDir, worktreeRoot: root, failures: [] },
+      cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+    };
+  }
+
+  const spec = [
+    '# Spec',
+    '',
+    '## Reuse Audit',
+    '',
+    '- `MATCHED_LABELS` MUST be reused from `lib/labels.js`',
+    '',
+  ].join('\n');
+
+  test('symbol on a context line of a genuinely-modified .js file passes via isInPlaceExtension', async () => {
+    // Base already declares MATCHED_LABELS across multiple lines; the feature
+    // commit only ADDS a new array element. `git diff -U0` therefore contains no
+    // MATCHED_LABELS token on a `+` line, so symbolPresentInAdded is false and
+    // ONLY the P0.1 branch (declaring file modified + scoped blob) can pass it.
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec,
+      changedFiles: ['lib/labels.js'],
+      files: {
+        'lib/labels.js': {
+          base: "const MATCHED_LABELS = [\n  'a',\n  'b',\n];\n",
+          head: "const MATCHED_LABELS = [\n  'a',\n  'b',\n  'c',\n];\n",
+        },
+      },
+    });
+    try {
+      // Guard: prove the symbol is NOT on an added line, so a green result can
+      // only come from isInPlaceExtension — not the primary added-line check.
+      const added = phase.symbolPresentInAdded(
+        'MATCHED_LABELS',
+        // reproduce what validate() passes: the scoped added lines for the file
+        require('node:child_process')
+          .spawnSync('git', ['diff', '-U0', 'main...HEAD', '--', 'lib/labels.js'], {
+            cwd: ctx.worktreeRoot,
+            encoding: 'utf8',
+          })
+          .stdout.split('\n')
+          .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+          .map((l) => l.slice(1))
+          .join('\n')
+      );
+      assert.equal(added, false, 'guard: MATCHED_LABELS must NOT appear on an added line');
+
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, true, 'in-place extension under real git must pass via P0.1');
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+        'no failure record for a genuine in-place extension'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('symbol only in an UNMODIFIED declaring file still fails under real git (anti-gaming)', async () => {
+    // lib/labels.js is unchanged (base === head) so git omits it from the diff
+    // and it is NOT in changedFiles; only an unrelated file changed. The P0.1
+    // relaxation must NOT fire and the audit must fail — anti-gaming holds even
+    // when git IS available (the exact condition the tmpdir negative control
+    // could not reach).
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec,
+      changedFiles: ['src/unrelated.js'],
+      files: {
+        'lib/labels.js': {
+          base: "const MATCHED_LABELS = ['a', 'b'];\n",
+          head: "const MATCHED_LABELS = ['a', 'b'];\n",
+        },
+        'src/unrelated.js': {
+          base: 'const base = 0;\n',
+          head: 'const base = 0;\nconst extra = 1;\n',
+        },
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, false, 'unmodified declaring file must still fail under real git');
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the unmodified-only symbol');
+      assert.match(
+        rec.observed,
+        /unmodified file/i,
+        'observed must name the unmodified-file miss class'
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (reuse_audit_enforcement.js:282): for a config-path entry the
+  // primary symbol check ran against the COMBINED diff before the scoped config
+  // check, so the config symbol text added in an UNRELATED file made present=true
+  // and skipped isConfigEntryReused(). Here `my-hook` is added in src/other.js
+  // while the declared config file hooks.json is UNTOUCHED (byte-identical, not in
+  // the change set) — it must stay non-reused; config entries are judged only
+  // against their own declared file.
+  test('config symbol text in an unrelated changed file does NOT satisfy an untouched config entry (P1)', async () => {
+    const cfgSpec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-hook` MUST be reused from `hooks.json`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec: cfgSpec,
+      changedFiles: ['src/other.js'],
+      files: {
+        'hooks.json': { base: '{\n}\n', head: '{\n}\n' },
+        'src/other.js': {
+          base: 'const base = 0;\n',
+          head: 'const base = 0;\nconst wire = "my-hook";\n',
+        },
+      },
+    });
+    try {
+      // Guard: the combined diff DOES contain the symbol text (the exact bait the
+      // pre-fix primary check swallowed), so it is the per-file SCOPING — not an
+      // absent needle — that fails the entry.
+      const combined = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'src/other.js']);
+      assert.match(
+        combined,
+        /my-hook/,
+        'guard: unrelated file added lines must contain the symbol'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'config entry must NOT pass when the symbol text is only in an unrelated changed file'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the leaked config entry');
+    } finally {
+      cleanup();
+    }
+  });
+
+  // Greptile P1 (isConfigPath extensionless): an extensionless declared path
+  // (Dockerfile/Makefile/CODEOWNERS) must be treated as config and scoped to its
+  // own file — otherwise it falls through to the importable-symbol branch and the
+  // symbol text in an UNRELATED changed file leaks a false pass. Here `my-target`
+  // is added in src/other.js while the declared Dockerfile is untouched.
+  test('extensionless config (Dockerfile) symbol in an unrelated file does NOT satisfy an untouched entry', async () => {
+    const cfgSpec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `my-target` MUST be reused from `Dockerfile`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildInPlaceGitCtx({
+      spec: cfgSpec,
+      changedFiles: ['src/other.js'],
+      files: {
+        Dockerfile: { base: 'FROM node:22\n', head: 'FROM node:22\n' },
+        'src/other.js': {
+          base: 'const base = 0;\n',
+          head: 'const base = 0;\nconst wire = "my-target";\n',
+        },
+      },
+    });
+    try {
+      const combined = git(ctx.worktreeRoot, ['diff', '-U0', 'main...HEAD', '--', 'src/other.js']);
+      assert.match(
+        combined,
+        /my-target/,
+        'guard: unrelated file added lines must contain the symbol'
+      );
+
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'extensionless config entry must NOT pass when the symbol is only in an unrelated file'
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record must be pushed for the leaked extensionless config entry');
+    } finally {
+      cleanup();
+    }
+  });
+});
