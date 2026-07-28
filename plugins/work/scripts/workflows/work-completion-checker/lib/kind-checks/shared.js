@@ -149,6 +149,19 @@ function readBriefRequirements(tasksDir) {
 }
 
 /**
+ * GH-607 (R7): pick the declared source path from a Reuse Audit bullet match.
+ * Three path orderings are captured by `readReuseAudit`'s regex — pre-verb
+ * `from \`path\`` (group 2), pre-verb parenthesized `(\`path\`)` (group 3),
+ * and post-verb `from \`path\`` (group 5) — falling back to `null` when the
+ * bullet declares no path. (Group 4 is the verb phrase itself, from which
+ * `mustReuse` is derived — never a path.) Extracted so the disjunction lives
+ * outside `readReuseAudit` (keeps its cyclomatic complexity within the gate).
+ */
+function pickDeclaredReusePath(match) {
+  return match[2] || match[3] || match[5] || null;
+}
+
+/**
  * Parse the `## Reuse Audit` section of spec.md and return an array of
  * `{ symbol, line, mustReuse }` records. Returns `null` when the section
  * is absent (signals "spec doesn't declare reuse"), and `[]` when the
@@ -192,11 +205,24 @@ function readReuseAudit(specDir) {
     // `` `Symbol` from `path` MUST be reused `` ordering spec-writer also
     // emits (GH-282 follow-up: the canonical shape puts `from \`path\``
     // AFTER the verb, but the parser must accept either side).
+    //
+    // GH-607 (R7): the declared source path is additionally CAPTURED (not just
+    // tolerated) into an additive `path` field so downstream consumers can
+    // classify config-file entries without re-parsing. Three path orderings
+    // are captured — pre-verb `from \`path\`` (group 2), pre-verb
+    // parenthesized `(\`path\`)` (group 3), and post-verb `from \`path\``
+    // (group 5) — falling back to `null` when the bullet declares no path.
+    // The verb phrase is its OWN capture group (group 4) so `mustReuse` is
+    // derived from the verb alone — testing the whole match (`m[0]`) would
+    // mis-classify a `may be reused` bullet as MUST whenever the symbol name
+    // or declared path merely contains the substring "must" (e.g.
+    // `MustacheRenderer`, `must-reuse-helper.js`).
     const m = raw.match(
-      /^\s*[-*]\s+`([^`]+)`\s*(?:from\s+`[^`]+`\s*|\([^)]*\)\s*)?(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
+      /^\s*[-*]\s+`([^`]+)`\s*(?:from\s+`([^`]+)`\s*|\(`([^`]+)`\)\s*|\([^)]*\)\s*)?(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)(?:\s+from\s+`([^`]+)`)?/i
     );
     if (!m) continue;
-    const mustReuse = /MUST/i.test(m[2]);
+    const mustReuse = /MUST/i.test(m[4]);
+    const declaredPath = pickDeclaredReusePath(m);
     entries.push({
       symbol: m[1],
       // headingLine is the 1-indexed line of `## Reuse Audit`; sliceSection
@@ -206,6 +232,9 @@ function readReuseAudit(specDir) {
       // line above its actual location in spec.md (review feedback).
       line: headingLine + 1 + i,
       mustReuse,
+      // GH-607 (R7): declared source path (or `null`). Additive — no existing
+      // field is renamed or removed; existing consumers are unaffected.
+      path: declaredPath,
       // Self-evident, per-entry identifier — Reuse Audit entries in spec.md
       // have no explicit R-ID, so we synthesize one. Used by failure records
       // in lieu of the previously hard-pinned 'R1'.
