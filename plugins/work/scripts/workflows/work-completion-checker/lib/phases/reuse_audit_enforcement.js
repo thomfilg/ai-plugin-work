@@ -25,6 +25,21 @@ const config = require('../../../lib/config');
 
 const SUFFIX_RE = /([A-Z][a-z0-9]+)$/;
 
+// GH-607: canonicalize a repo-relative path so spec-declared spellings
+// (`./hooks.json`, `foo//bar.json`, a leading `/`) compare equal to git's
+// `--name-only` output (repo-relative, no `./`, single separators). Conservative:
+// a `..` segment is left intact so an out-of-tree path can't silently normalize
+// onto a matching in-tree one.
+function normalizeRepoPath(p) {
+  if (typeof p !== 'string' || p.length === 0) return p;
+  let out = p
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/{2,}/g, '/');
+  while (out.startsWith('./')) out = out.slice(2);
+  return out.replace(/\/$/, '');
+}
+
 /**
  * Extract candidate tokens from `diffContent` that share `symbol`'s
  * trailing PascalCase suffix (e.g. for `ContentPageToolbar`, the suffix
@@ -63,7 +78,9 @@ function loadChangedContents(ctx, changed) {
   const out = [];
   for (const rel of changed) {
     const abs = path.isAbsolute(rel) ? rel : path.join(root, rel);
-    out.push({ rel, content: readFileSafe(abs) });
+    // GH-607: key blobs by canonical repo-relative path so `entry.path`
+    // (spec-declared spelling) matches regardless of `./` prefix etc.
+    out.push({ rel: normalizeRepoPath(rel), content: readFileSafe(abs) });
   }
   return out;
 }
@@ -121,22 +138,86 @@ function symbolPresentInAdded(symbol, addedLines) {
   return re.test(addedLines);
 }
 
+// GH-607: shared word-boundary matcher so `symbolPresentInBlobs` and
+// `symbolPresentInBlobsScoped` cannot drift in how they detect a symbol.
+function wordBoundaryRe(symbol) {
+  return new RegExp(`\\b${escapeRegex(symbol)}\\b`);
+}
+
 function symbolPresentInBlobs(symbol, fileBlobs) {
-  const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`);
+  const re = wordBoundaryRe(symbol);
   return fileBlobs.some((f) => re.test(f.content));
+}
+
+// GH-607 (R1): scoped blob check — the symbol must appear in the blob whose
+// `rel` matches `relPath`. Used for the P0.1 in-place-extension relaxation so
+// a symbol present only in some OTHER modified file cannot satisfy the audit.
+function symbolPresentInBlobsScoped(symbol, fileBlobs, relPath) {
+  const re = wordBoundaryRe(symbol);
+  return fileBlobs.some((f) => f.rel === relPath && re.test(f.content));
+}
+
+// GH-607 (R2): non-JS/TS declared paths are treated as config-file entries and
+// matched by path/block presence rather than the importable-symbol heuristic.
+const JS_TS_EXTENSIONS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs']);
+
+function isConfigPath(p) {
+  if (!p || typeof p !== 'string') return false;
+  const ext = path.extname(p).toLowerCase();
+  if (ext === '') return true; // extensionless (Dockerfile/Makefile/dotfile) → config, not importable
+  return !JS_TS_EXTENSIONS.has(ext);
+}
+
+// GH-607 (R2): a config-file MUST-reuse entry counts as reused only when its
+// declared path is in the change set AND the declared SYMBOL appears as a whole
+// token on the added lines of THAT declared file (callers pass the file's own
+// `readAddedLines`). Greptile P1 (evidence strength): the match uses the SAME
+// word-boundary token matcher as the importable-symbol paths — never the declared
+// path/filename text (mentioning the config filename must not satisfy the entry)
+// and never a substring (`my-hook` is not satisfied by `my-hookish`).
+function configEntryPresent(entry, scopedAddedLines, changedSet) {
+  if (!entry || !entry.path) return false;
+  if (typeof entry.symbol !== 'string' || entry.symbol.length === 0) return false;
+  if (!changedSet || !changedSet.has(normalizeRepoPath(entry.path))) return false;
+  if (scopedAddedLines === null || scopedAddedLines === undefined || scopedAddedLines === '') {
+    return false;
+  }
+  return wordBoundaryRe(entry.symbol).test(scopedAddedLines);
 }
 
 function errMessage(err) {
   return err && err.message ? err.message : String(err);
 }
 
-function buildMissingFailure(entry, joined) {
+// GH-607 (R5/P1.1): distinguish the two miss classes when there is no
+// suffix-candidate "did you mean to extend X?" hint — a symbol whose declaring
+// file exists on disk with the symbol but was NOT modified in this change
+// ("unmodified file") vs a symbol no changed file references at all.
+function missClassMessage(symbol, declaredInUnmodifiedFile) {
+  return declaredInUnmodifiedFile
+    ? `${symbol} not found in diff — declared in an unmodified file (not reused here)`
+    : `${symbol} not found in diff — no changed file references it`;
+}
+
+// GH-607 (R5): the symbol's declaring file exists on disk and contains the
+// symbol, yet that file was NOT modified in this change (not in `changedSet`).
+// This is the "declared in an unmodified file" miss class.
+function declaredInUnmodifiedFile(ctx, entry, changedSet) {
+  if (!entry.path) return false;
+  if (changedSet && changedSet.has(normalizeRepoPath(entry.path))) return false;
+  const root = ctx.worktreeRoot || process.cwd();
+  const abs = path.isAbsolute(entry.path) ? entry.path : path.join(root, entry.path);
+  const content = readFileSafe(abs);
+  return content !== '' && wordBoundaryRe(entry.symbol).test(content);
+}
+
+function buildMissingFailure(entry, joined, declaredElsewhere) {
   const symbol = entry.symbol;
   const candidates = extractSuffixCandidates(symbol, joined);
   const observed =
     candidates.length > 0
       ? `found ${candidates[0]} in diff — did you mean to extend ${symbol}?`
-      : `${symbol} not found in diff — imported instead by no changed file`;
+      : missClassMessage(symbol, declaredElsewhere);
   return makeFailure({
     // requirementId is synthesized by readReuseAudit() as `REUSE-<n>` so each
     // MUST-reuse entry has a stable, self-evident identifier rather than the
@@ -150,19 +231,63 @@ function buildMissingFailure(entry, joined) {
   });
 }
 
-function checkMustReuseEntries(entries, blobs, joined, addedLines, failures) {
+// GH-607: does the declaring file for `entry` appear in the change set with
+// non-empty content? Gate for the P0.1 in-place-extension relaxation and for
+// the refined "unmodified file" miss message.
+function declaringFileModified(entry, changedSet, blobs) {
+  if (!entry.path || !changedSet) return false;
+  const norm = normalizeRepoPath(entry.path);
+  if (!changedSet.has(norm)) return false;
+  return blobs.some((b) => b.rel === norm && b.content !== '');
+}
+
+// GH-607 (R1/P0.1): in-place extension — the symbol is not on an added line,
+// but its declaring file WAS modified in this change, so a scoped blob check
+// on that single file counts it as reused (anti-gaming: only fires when the
+// declaring file was genuinely modified).
+function isInPlaceExtension(entry, changedSet, blobs) {
+  return (
+    declaringFileModified(entry, changedSet, blobs) &&
+    symbolPresentInBlobsScoped(entry.symbol, blobs, normalizeRepoPath(entry.path))
+  );
+}
+
+// GH-607 (R2/P0.2): config-file entry — non-JS/TS declared path matched per-file AND
+// per-added-line: only the declared file's OWN `git diff -U0` added lines satisfy it
+// (never the combined/all-blobs set — Greptile P1). Fallback (Greptile P1): when the
+// diff is UNAVAILABLE (readAddedLines null) do NOT use full blob content — the symbol
+// trivially pre-exists in its own config file, so fail toward not-reused (no stale pass).
+function isConfigEntryReused(ctx, entry, changedSet) {
+  if (!isConfigPath(entry.path)) return false;
+  const norm = normalizeRepoPath(entry.path);
+  const scoped = readAddedLines(ctx, [norm]);
+  if (scoped === null) return false;
+  return configEntryPresent(entry, scoped, changedSet);
+}
+
+// Returns true when `entry` counts as reused. Config-path entries are judged
+// SOLELY by their declared file (above); the primary combined-diff / all-blobs
+// symbol check must NOT run for them, or the config symbol text in an unrelated
+// changed file would leak a false pass (Greptile P1). Importable-symbol entries
+// use the added-line check (B3) + legacy full-content fallback + in-place relax.
+function isReuseEntrySatisfied(ctx, entry, blobs, addedLines, changedSet) {
+  if (isConfigPath(entry.path)) return isConfigEntryReused(ctx, entry, changedSet);
+  const addedHit = symbolPresentInAdded(entry.symbol, addedLines);
+  const present = addedHit === null ? symbolPresentInBlobs(entry.symbol, blobs) : addedHit;
+  return present || isInPlaceExtension(entry, changedSet, blobs);
+}
+
+function checkMustReuseEntries(ctx, entries, blobs, joined, addedLines, failures, changedSet) {
   let mustChecked = 0;
   let mustMissing = 0;
   for (const entry of entries) {
     if (!entry || entry.mustReuse !== true) continue;
     mustChecked += 1;
-    // Prefer added-line match (B3). If git was unavailable, fall back to the
-    // legacy full-content proxy so we don't fail-closed on missing tooling.
-    const addedHit = symbolPresentInAdded(entry.symbol, addedLines);
-    const present = addedHit === null ? symbolPresentInBlobs(entry.symbol, blobs) : addedHit;
-    if (present) continue;
+    if (isReuseEntrySatisfied(ctx, entry, blobs, addedLines, changedSet)) continue;
     mustMissing += 1;
-    failures.push(buildMissingFailure(entry, joined));
+    failures.push(
+      buildMissingFailure(entry, joined, declaredInUnmodifiedFile(ctx, entry, changedSet))
+    );
   }
   return { mustChecked, mustMissing };
 }
@@ -210,15 +335,20 @@ function validate(ctx) {
 
   try {
     const changed = readChangedFiles(ctx) || [];
+    // GH-607: canonicalize the change-set keys so `entry.path` (spec-declared
+    // spelling like `./hooks.json`) matches git's repo-relative output.
+    const changedSet = new Set(changed.map(normalizeRepoPath));
     const blobs = loadChangedContents(ctx, changed);
     const joined = blobs.map((b) => b.content).join('\n');
     const addedLines = readAddedLines(ctx, changed);
     const { mustChecked, mustMissing } = checkMustReuseEntries(
+      ctx,
       entries,
       blobs,
       joined,
       addedLines,
-      failures
+      failures,
+      changedSet
     );
     ctx.reuseAuditChecked = mustChecked;
     appendForCheckType(ctx.tasksDir, 'reuse_audit', failures.slice(startLen), {
@@ -262,3 +392,7 @@ module.exports.instructions = instructions;
 module.exports.extractSuffixCandidates = extractSuffixCandidates;
 module.exports.symbolPresentInAdded = symbolPresentInAdded;
 module.exports.symbolPresentInBlobs = symbolPresentInBlobs;
+module.exports.symbolPresentInBlobsScoped = symbolPresentInBlobsScoped;
+module.exports.isConfigPath = isConfigPath;
+module.exports.configEntryPresent = configEntryPresent;
+module.exports.normalizeRepoPath = normalizeRepoPath;

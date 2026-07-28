@@ -135,6 +135,180 @@ test.describe('readReuseAudit(specDir)', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // R7 (Task 1) — the declared source `path` is threaded through each record as
+  // an additive field so the config-file branch (Task 2) can classify entries
+  // without re-parsing. Covers all three path-bearing bullet orderings plus the
+  // no-path case (`path: null`).
+  test('threads declared `path` for the canonical ordering: `Symbol` MUST be reused from `path`', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `readReuseAudit` MUST be reused from `plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/shared.js` — parser entry point',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].symbol, 'readReuseAudit');
+      assert.equal(
+        result[0].path,
+        'plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/shared.js'
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('threads declared `path` for the path-before-verb ordering: `Symbol` from `path` MUST be reused', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `readReuseAudit` from `lib/kind-checks/shared.js` MUST be reused — parser entry point',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].symbol, 'readReuseAudit');
+      assert.equal(result[0].path, 'lib/kind-checks/shared.js');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('threads declared `path` for the parenthesized ordering: `Symbol` (`path`) MUST be reused', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `hooks` (`plugins/work/hooks/hooks.json`) MUST be reused — config entry',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].symbol, 'hooks');
+      assert.equal(result[0].path, 'plugins/work/hooks/hooks.json');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('sets `path: null` when the bullet declares no source path', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `SomePattern` MUST be reused — mirrored pattern, no explicit path',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].symbol, 'SomePattern');
+      assert.equal(result[0].path, null);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // GH-607 review fix: `mustReuse` is derived from the VERB capture group, not
+  // the whole matched bullet. A `may be reused` (soft) entry whose SYMBOL or
+  // declared PATH merely contains the substring "must" must stay
+  // `mustReuse: false` — testing `m[0]` mis-hardened these into enforced
+  // MUST-reuse requirements, manufacturing false-positive gate failures.
+  test('soft `may be reused` entry with "must" in the SYMBOL stays mustReuse:false', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `MustacheRenderer` may be reused from `src/mustache.js` — mirrored only',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].symbol, 'MustacheRenderer');
+      assert.equal(result[0].mustReuse, false, 'symbol containing "must" must NOT force MUST');
+      assert.equal(result[0].path, 'src/mustache.js');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('soft `may be reused` entry with "must" in the PATH stays mustReuse:false', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `Helper` may be reused from `plugins/foo/must-reuse-helper.js` — mirrored only',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].symbol, 'Helper');
+      assert.equal(result[0].mustReuse, false, 'path containing "must" must NOT force MUST');
+      assert.equal(result[0].path, 'plugins/foo/must-reuse-helper.js');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('genuine MUST entry with "must" in the path is still mustReuse:true (no false-negative)', () => {
+    const dir = mkTmp();
+    try {
+      writeSpec(
+        dir,
+        [
+          '# Spec',
+          '',
+          '## Reuse Audit',
+          '',
+          '- `Helper` MUST be reused from `plugins/foo/must-reuse-helper.js` — imported',
+          '',
+        ].join('\n')
+      );
+      const result = shared.readReuseAudit(dir);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].mustReuse, true, 'a real MUST verb must remain enforced');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 test.describe('readSuggestedScopeFiles(tasksDir)', () => {
