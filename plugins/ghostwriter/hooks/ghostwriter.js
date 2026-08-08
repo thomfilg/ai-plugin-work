@@ -24,8 +24,9 @@ const path = require('node:path');
 const LIB_DIR = path.join(__dirname, '..', 'lib');
 const runtime = require(path.join(LIB_DIR, 'runtime'));
 const { logHookError } = require(path.join(LIB_DIR, 'hookEntrypoint'));
-const { inspectCommand, renderBlock } = require(path.join(LIB_DIR, 'guard'));
+const { inspectCommand, inspectToolCall, renderBlock } = require(path.join(LIB_DIR, 'guard'));
 const { hasAuthorshipSurface } = require(path.join(LIB_DIR, 'git-surfaces'));
+const { isForgeTool } = require(path.join(LIB_DIR, 'forge-surfaces'));
 
 /** Is anything actually at stake in this command? Never throws. */
 function authorsGitObject(command) {
@@ -36,23 +37,45 @@ function authorsGitObject(command) {
   }
 }
 
-function handle({ rt, evt }) {
-  const command = evt.shellCommand;
-  if (!command) return;
+function blockOnError(rt, err, subject) {
+  rt.emit.block(
+    `ghostwriter: could not verify this ${subject} (${err.message}).\n` +
+      'Blocking rather than letting unchecked authorship through.\n'
+  );
+}
 
+/** Bash — git authorship and `gh` posts both ride the shell. */
+function handleCommand(rt, evt, command) {
   let verdict;
   try {
     verdict = inspectCommand(command, { cwd: evt.cwd });
   } catch (err) {
     if (!authorsGitObject(command)) return;
-    rt.emit.block(
-      `ghostwriter: could not verify this git authorship command (${err.message}).\n` +
-        'Blocking rather than letting an unchecked commit through.\n'
-    );
+    blockOnError(rt, err, 'git authorship command');
     return;
   }
-
   if (verdict.blocked) rt.emit.block(renderBlock(verdict));
+}
+
+/** A forge MCP call — the text arrives as named fields, no parsing needed. */
+function handleToolCall(rt, evt) {
+  let verdict;
+  try {
+    verdict = inspectToolCall(evt.rawToolName, evt.toolInput, { cwd: evt.cwd });
+  } catch (err) {
+    blockOnError(rt, err, 'forge tool call');
+    return;
+  }
+  if (verdict.blocked) rt.emit.block(renderBlock(verdict));
+}
+
+function handle({ rt, evt }) {
+  const command = evt.shellCommand;
+  if (command) {
+    handleCommand(rt, evt, command);
+    return;
+  }
+  if (isForgeTool(evt.rawToolName)) handleToolCall(rt, evt);
 }
 
 runtime.runHook(handle, {

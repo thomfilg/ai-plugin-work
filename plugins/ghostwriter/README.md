@@ -2,7 +2,12 @@
 
 **The agent writes. The person signs.**
 
-A standalone plugin with exactly one job: an AI tool may not credit itself for work in git. No co-author trailers, no "Generated with …" footers, no product links in the commit body, no session stamps, and no committing under a name that is a tool.
+A standalone plugin with exactly one job, applied everywhere an agent can sign something: an AI tool may not credit itself for the work, and may not do the work under a machine's account.
+
+That covers two questions at every surface:
+
+- **What it says** — no co-author trailers, no "Generated with …" footers, no product links, no session stamps. In commit messages, and in pull requests, issues and comments.
+- **Who it says wrote it** — no committing or commenting as a tool-named or bot account instead of the person's own.
 
 Naming a product is not attribution. `feat: add <vendor> adapter` is ordinary engineering and always ships.
 
@@ -10,11 +15,23 @@ Naming a product is not attribution. `feat: add <vendor> adapter` is ordinary en
 
 | Layer | Covers | Where |
 |---|---|---|
-| `PreToolUse` hook on `Bash` | every git authorship command an agent runs | `hooks/ghostwriter.js` |
+| `PreToolUse` on `Bash` | git authorship, and `gh` posts to PRs and issues | `hooks/ghostwriter.js` |
+| `PreToolUse` on `mcp__github__*` | PR, issue and comment text posted through MCP | same hook |
 | `commit-msg` git hook (opt-in) | commits from a terminal, a script, an editor | `/ghostwriter:install` |
 | CLI | checking a message by hand or from CI | `scripts/ghostwriter-check.js` |
 
-The PreToolUse hook is always on once the plugin is installed. The git hook is opt-in because it writes into the repository's hooks directory.
+The PreToolUse hooks are always on once the plugin is installed. The git hook is opt-in because it writes into the repository's hooks directory.
+
+## Pinning the human (optional)
+
+By default the identity rules are a blocklist: they catch tool names and bot-shaped accounts (`…[bot]`, `release-bot`, `github-actions`). That cannot catch a plainly-named app account, and it cannot tell one person from another. Set the expected human and the question becomes exact — everything must be signed by them:
+
+```bash
+export GHOSTWRITER_HUMAN_EMAIL=me@example.com
+export GHOSTWRITER_HUMAN_LOGIN=my-github-login
+```
+
+With a human pinned, anything else is refused, including an identity the guard simply cannot read.
 
 ## What gets blocked
 

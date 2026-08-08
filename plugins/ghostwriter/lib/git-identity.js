@@ -57,4 +57,35 @@ function resolveGitUser(cwd, gitDir) {
   };
 }
 
-module.exports = { resolveGitUser, gitConfig };
+/**
+ * The GitHub account `gh` would post as.
+ *
+ * Best effort by design: `gh auth status` is the only place the active login
+ * is written down, its wording has moved between versions, and it prints to
+ * stderr on some. An unresolvable account returns '' — the guard decides what
+ * that means, and the answer differs depending on whether an expected identity
+ * is configured.
+ *
+ * @param {string} cwd
+ * @returns {string} the login, or '' when it cannot be read.
+ */
+function resolveGhAccount(cwd) {
+  try {
+    const output = execFileSync('gh', ['auth', 'status'], {
+      cwd: cwd || process.cwd(),
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const match = /account\s+(\S+)/i.exec(output);
+    return match ? match[1] : '';
+  } catch (err) {
+    // gh writes the status to stderr on older versions, and exits non-zero
+    // when any host is logged out — the login we want may still be in there.
+    const text = (err && (err.stdout || '') + (err.stderr || '')) || '';
+    const match = /account\s+(\S+)/i.exec(text);
+    return match ? match[1] : '';
+  }
+}
+
+module.exports = { resolveGitUser, resolveGhAccount, gitConfig };

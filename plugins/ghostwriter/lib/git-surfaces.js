@@ -22,7 +22,8 @@
  * `bash -c "git commit -m …"` is a surface exactly like the bare form.
  */
 
-const { tokenize, longFlagValue } = require('./shell-tokenize');
+const { longFlagValue } = require('./shell-tokenize');
+const { scanSegments, splitEnvPrefix } = require('./command-scan');
 const {
   identityEntry,
   parseAuthorSpec,
@@ -56,33 +57,6 @@ const IDENTITY_SUBCOMMANDS = new Set([
 ]);
 
 /**
- * Commands that run another command. The git invocation is either further
- * along the same argv (`env`, `sudo`, `timeout`, `xargs`) or inside a string
- * argument (`bash -c "…"`, `eval "…"`); both shapes are handled.
- */
-const WRAPPER_BINARIES = new Set([
-  'env',
-  'command',
-  'exec',
-  'eval',
-  'nice',
-  'nohup',
-  'sudo',
-  'doas',
-  'time',
-  'timeout',
-  'stdbuf',
-  'xargs',
-  'setsid',
-  'bash',
-  'sh',
-  'zsh',
-  'dash',
-  'ksh',
-  'busybox',
-]);
-
-/**
  * `git config` actions that READ or REMOVE. None of them can introduce an AI
  * identity, and `--get <name> <value-pattern>` in particular would otherwise
  * read as a write of the pattern.
@@ -104,12 +78,7 @@ const CONFIG_READ_FLAGS = new Set([
   '--rename-section',
 ]);
 
-const MAX_UNWRAP_DEPTH = 3;
-
-const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const GIT_BINARY_RE = /(?:^|\/)git$/;
-/** A token that itself contains a git invocation — a `-c` script payload. */
-const EMBEDDED_GIT_RE = /(?:^|[\s;&|(])git(?:\s|$)/;
 /** `< file` / `<file` — git reads the message from there under `-F -`. */
 const REDIRECT_RE = /^<(.*)$/;
 
@@ -119,27 +88,6 @@ const REDIRECT_RE = /^<(.*)$/;
  */
 const MESSAGE_FLAG = { long: '--message', short: /^-[a-zA-Z]*m$/ };
 const FILE_FLAG = { long: '--file', short: /^-[a-zA-Z]*F$/ };
-
-function baseName(token) {
-  const at = token.lastIndexOf('/');
-  return at === -1 ? token : token.slice(at + 1);
-}
-
-function hasEmbeddedGit(token) {
-  return EMBEDDED_GIT_RE.test(token);
-}
-
-/** Split leading `VAR=value` assignments off a segment's tokens. */
-function splitEnvPrefix(tokens) {
-  const env = [];
-  let i = 0;
-  while (i < tokens.length && ENV_ASSIGNMENT_RE.test(tokens[i])) {
-    const eq = tokens[i].indexOf('=');
-    env.push({ name: tokens[i].slice(0, eq), value: tokens[i].slice(eq + 1) });
-    i += 1;
-  }
-  return { env, argv: tokens.slice(i), prefix: tokens.slice(0, i) };
-}
 
 /**
  * Record the repository a command targets, as we skip git's global flags.
@@ -262,53 +210,15 @@ function classifySegment(tokens) {
   return authoringSurface(argv, found, env);
 }
 
-/**
- * Peel one wrapper off a segment. Returns the inner argv to re-classify (the
- * env prefix rides along, so `GIT_AUTHOR_NAME=… env git commit` still works)
- * plus any script payloads to re-scan whole. Null when not a wrapper.
- */
-function unwrapSegment(tokens) {
-  const { argv, prefix } = splitEnvPrefix(tokens);
-  if (!argv.length || !WRAPPER_BINARIES.has(baseName(argv[0]))) return null;
-  const rest = argv.slice(1);
-  const gitAt = rest.findIndex((token) => GIT_BINARY_RE.test(token));
-  if (gitAt === -1) return { argv: null, scripts: rest.filter(hasEmbeddedGit) };
-  // `env VAR=value git …` — the idiomatic form — puts the assignment AFTER the
-  // wrapper word. It still reaches git, so it has to survive the peel; dropping
-  // it here would hand `env GIT_AUTHOR_NAME=<tool> git commit` a free pass.
-  const carried = rest.slice(0, gitAt).filter((token) => ENV_ASSIGNMENT_RE.test(token));
-  return {
-    argv: [...prefix, ...carried, ...rest.slice(gitAt)],
-    scripts: rest.filter(hasEmbeddedGit),
-  };
-}
-
-/** Classify one segment, peeling wrappers until a surface appears. */
-function collectSurfaces(tokens, out, depth) {
-  const surface = classifySegment(tokens);
-  if (surface) {
-    out.push(surface);
-    return;
-  }
-  if (depth >= MAX_UNWRAP_DEPTH) return;
-  const inner = unwrapSegment(tokens);
-  if (!inner) return;
-  if (inner.argv) collectSurfaces(inner.argv, out, depth + 1);
-  for (const script of inner.scripts) {
-    for (const segment of tokenize(script)) collectSurfaces(segment, out, depth + 1);
-  }
-}
-
-/**
- * Find every git authorship surface in a shell command.
- *
- * @param {string} command - the raw Bash tool input.
- * @returns {{surfaces: Array<object>}}
- */
+/** Every git authorship surface in a shell command, wrappers included. */
 function scanCommand(command) {
-  const surfaces = [];
-  for (const tokens of tokenize(command)) collectSurfaces(tokens, surfaces, 0);
-  return { surfaces };
+  return {
+    surfaces: scanSegments(command, {
+      binary: 'git',
+      binaryRe: GIT_BINARY_RE,
+      classify: classifySegment,
+    }),
+  };
 }
 
 /** Cheap predicate: does this command author or re-identify a git object? */
@@ -317,13 +227,11 @@ function hasAuthorshipSurface(command) {
 }
 
 module.exports = {
-  tokenize,
   scanCommand,
   hasAuthorshipSurface,
   parseAuthorSpec,
   identityEntry,
   MESSAGE_SUBCOMMANDS,
   IDENTITY_SUBCOMMANDS,
-  WRAPPER_BINARIES,
   CONFIG_READ_FLAGS,
 };
