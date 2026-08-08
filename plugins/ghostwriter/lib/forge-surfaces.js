@@ -120,10 +120,55 @@ function readApiFields(argv, start, out) {
   }
 }
 
-/** The first two non-flag words after `gh` — its command group and action. */
+/**
+ * `gh` options that consume the FOLLOWING token as their value.
+ *
+ * Without this list the value is read as a word, and the first two words are
+ * how the command group and action are found: `gh --repo owner/name pr create`
+ * offers `owner/name` where `pr` was expected, no group matches, and no post
+ * surface is built — so no pass runs and the whole command publishes
+ * uninspected. A missed group is not a weaker check, it is no check.
+ *
+ * The `--flag=value` forms need no entry: they are one token, and a token
+ * starting with `-` is already skipped.
+ */
+const VALUE_OPTIONS = new Set([
+  '-R',
+  '--repo',
+  '--hostname',
+  '-H',
+  '--header',
+  '-X',
+  '--method',
+  '-f',
+  '--field',
+  '-F',
+  '--raw-field',
+  '-q',
+  '--jq',
+  '-t',
+  '--template',
+  '--input',
+  '--cache',
+  '-b',
+  '--body',
+  '--body-file',
+  '--title',
+  '-n',
+  '--notes',
+  '--notes-file',
+]);
+
+/** The first two words after `gh` — its command group and action. */
 function commandWords(argv) {
   const words = [];
   for (let i = 1; i < argv.length && words.length < 2; i++) {
+    // A value is not a word. Skipping it keeps the POSITIONAL rule intact,
+    // which is what stops `gh pr list --search create` reading as `pr create`.
+    if (VALUE_OPTIONS.has(argv[i])) {
+      i += 1;
+      continue;
+    }
     if (!argv[i].startsWith('-')) words.push({ word: argv[i], index: i });
   }
   return words;

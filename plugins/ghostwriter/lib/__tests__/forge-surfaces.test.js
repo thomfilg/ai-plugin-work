@@ -204,3 +204,30 @@ describe('scanToolFiles — files committed through the API', () => {
     assert.deepEqual(scanToolFiles('Write', { path: 'a.js', content: 'a' }), []);
   });
 });
+
+// A missed command group is not a weaker check — it is no check. The group and
+// action are found positionally, so anything that puts a VALUE where a word was
+// expected takes the whole command out of the guard's sight.
+describe('scanForgeCommand — options in front of the command group', () => {
+  it('finds the group behind a value-bearing global option', () => {
+    for (const command of [
+      'gh -R o/r pr comment 1 --body hello',
+      'gh --repo o/r issue comment 1 --body hello',
+      'gh --hostname h.example pr create --title x --body hello',
+    ]) {
+      assert.deepEqual(texts(command).slice(-1), ['hello'], command);
+    }
+  });
+
+  it('finds `api` behind one too', () => {
+    assert.equal(onlyPost('gh -R o/r api repos/o/r/issues/1/comments -f body=x').kind, 'api');
+  });
+
+  it('does not read a flag VALUE as the action', () => {
+    // The positional rule is what keeps this from matching: `create` here is
+    // a search term, and treating it as the action would inspect — and could
+    // refuse — a read-only command.
+    assert.deepEqual(scanForgeCommand('gh pr list --search create').surfaces, []);
+    assert.deepEqual(scanForgeCommand('gh pr view 784').surfaces, []);
+  });
+});
