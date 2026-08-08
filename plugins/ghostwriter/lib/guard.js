@@ -36,7 +36,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
+const {
+  checkText,
+  checkIdentity,
+  checkIdentityComplete,
+  checkExpectedIdentity,
+} = require('./attribution');
 const { scanCommand, identityEntry } = require('./git-surfaces');
 const { resolveGitUser, resolveCommitInfo, resolveGhAccount } = require('./git-identity');
 const { scanForgeCommand, scanToolCall } = require('./forge-surfaces');
@@ -256,6 +261,11 @@ function checkEffectiveIdentity(surfaces, io) {
     const user = io.resolveIdentity(cwd, gitDir, surface.configSources);
     const result = checkIdentity(user);
     if (!result.ok) return finding(result, 'the configured git identity');
+    // An identity that names nobody is checked BEFORE the expected-human pass:
+    // "you set no email" is the actionable sentence, and `unexpectedIdentity`
+    // reporting `(no identity resolved)` would bury it.
+    const complete = checkIdentityComplete(user);
+    if (!complete.ok) return finding(complete, 'the configured git identity');
     const expected = checkExpectedIdentity(user, io.expected);
     if (!expected.ok) return finding(expected, 'the configured git identity');
   }

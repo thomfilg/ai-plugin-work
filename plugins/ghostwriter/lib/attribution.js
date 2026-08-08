@@ -72,6 +72,11 @@ const AGENCY_PREPOSITIONS = 'with|by|using|via';
  * Product-attribution links only — the URLs a tool stamps into a footer to
  * credit itself. Vendor documentation hosts are deliberately NOT here: a
  * commit that links an API doc page is describing work, not signing it.
+ *
+ * Matched on a HOST boundary (see ATTRIBUTION_URL_RE): `<vendor>.com/<tool>` is
+ * the footer link, `developers.<vendor>.com/<tool>/plugins` is the docs site,
+ * and a substring match cannot tell them apart. Prose that cites the docs is
+ * describing the work, which is the whole distinction this file is built on.
  */
 const ATTRIBUTION_URLS = [
   'cl' + 'aude.ai/code',
@@ -87,6 +92,9 @@ function escapeRegExp(text) {
 }
 
 const ATTRIBUTION_URL_ALT = ATTRIBUTION_URLS.map(escapeRegExp).join('|');
+
+/** The alternation, anchored so a longer host cannot contain a listed one. */
+const ATTRIBUTION_URL_RE = new RegExp(`(?<![\\w.-])(?:${ATTRIBUTION_URL_ALT})`, 'i');
 
 /**
  * The ordered attribution rule set.
@@ -117,7 +125,7 @@ const ATTRIBUTION_RULES = Object.freeze([
   },
   {
     name: 'aiAttributionLink',
-    re: new RegExp(`(?:${ATTRIBUTION_URL_ALT})`, 'i'),
+    re: ATTRIBUTION_URL_RE,
     reason: 'the text carries an AI product attribution link',
     hint: 'Remove the tool footer link. A commit cites its ticket, not its editor.',
   },
@@ -259,6 +267,36 @@ function checkIdentity(user) {
 }
 
 /**
+ * Whether an identity names a person at all.
+ *
+ * A commit needs BOTH halves. Miss one and git does not stop: unless
+ * `user.useConfigOnly` is set it invents the pair from the account and the
+ * hostname, and the commit lands as `root <root@a1b2c3d4e5f6>` — a machine's
+ * byline, arrived at by omission rather than by claim. `checkIdentity` cannot
+ * see that: a blank field names no tool and looks like no bot.
+ *
+ * Scoped to identities the guard actually RESOLVED. `resolved: false` means the
+ * target could not be interrogated (no git, not a repository) — a command git
+ * itself will refuse, and not a fact about the person running it.
+ *
+ * @param {{name?: string, email?: string, resolved?: boolean}} user
+ */
+function checkIdentityComplete(user) {
+  if (user && user.resolved === false) return PASS;
+  const name = asText(user && user.name).trim();
+  const email = asText(user && user.email).trim();
+  if (name && email) return PASS;
+  const missing = [!name && 'user.name', !email && 'user.email'].filter(Boolean);
+  return {
+    ok: false,
+    rule: 'missingIdentity',
+    reason: `the commit would be authored with no ${missing.join(' and no ')}`,
+    hint: `Set the human author: git config user.name "Your Name" && git config user.email you@example.com`,
+    evidence: `${missing.join(', ')} unset (name=${name || '∅'}, email=${email || '∅'})`,
+  };
+}
+
+/**
  * Whether an identity is the human this repository expects.
  *
  * Blocklists answer "is this obviously a machine?"; they cannot answer "is
@@ -306,6 +344,7 @@ module.exports = {
   PASS,
   checkText,
   checkIdentity,
+  checkIdentityComplete,
   checkExpectedIdentity,
   stripCode,
 };

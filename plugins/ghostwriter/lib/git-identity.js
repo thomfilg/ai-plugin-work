@@ -13,6 +13,13 @@
  * that is not a repository, or a config read that times out must never turn
  * into a blocked command — the guard treats an unknown identity as clean and
  * relies on its other rules.
+ *
+ * An EMPTY identity is a different thing from an unreadable one, and the two
+ * used to be indistinguishable here. A repository with no `user.email` still
+ * commits — git invents `user@hostname` — so "no identity configured" has to
+ * reach the guard as a fact, not as the same '' a missing git returns. Hence
+ * `resolved`: true when this repository answered, false when there was nobody
+ * to ask.
  */
 
 const { execFileSync } = require('node:child_process');
@@ -46,18 +53,44 @@ function gitConfig(cwd, key, gitDir, configSources) {
 }
 
 /**
+ * Whether this target is a repository git can answer about at all.
+ *
+ * Asked only when a field came back empty, so the common case — both set —
+ * costs no extra process. `rev-parse` is the cheapest question that fails for
+ * every reason a config read fails: no git, no repository, no permission.
+ */
+function isRepository(cwd, gitDir, configSources) {
+  const args = ['-C', cwd];
+  if (gitDir) args.push('--git-dir', gitDir);
+  args.push('rev-parse', '--absolute-git-dir');
+  try {
+    execFileSync('git', args, {
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, ...(configSources || {}) },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The identity a commit authored against this target will carry.
  *
  * @param {string} cwd - directory the command runs in.
  * @param {string} [gitDir] - repository selected by `--git-dir` / `GIT_DIR`.
- * @returns {{name: string, email: string}}
+ * @returns {{name: string, email: string, resolved: boolean}} `resolved` false
+ *   means the target could not be interrogated — an empty pair there says
+ *   nothing about the identity, so the guard must not read it as one.
  */
 function resolveGitUser(cwd, gitDir, configSources) {
   const dir = cwd || process.cwd();
-  return {
-    name: gitConfig(dir, 'user.name', gitDir, configSources),
-    email: gitConfig(dir, 'user.email', gitDir, configSources),
-  };
+  const name = gitConfig(dir, 'user.name', gitDir, configSources);
+  const email = gitConfig(dir, 'user.email', gitDir, configSources);
+  const resolved = name && email ? true : isRepository(dir, gitDir, configSources);
+  return { name, email, resolved };
 }
 
 /**
@@ -125,4 +158,4 @@ function resolveGhAccount(cwd) {
   }
 }
 
-module.exports = { resolveGitUser, resolveCommitInfo, resolveGhAccount, gitConfig };
+module.exports = { resolveGitUser, resolveCommitInfo, resolveGhAccount, gitConfig, isRepository };
