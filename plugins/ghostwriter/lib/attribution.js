@@ -136,6 +136,24 @@ const ATTRIBUTION_RULES = Object.freeze([
 /** A bare tool token in a name/email is authorship by itself. */
 const AI_IDENTITY_RE = new RegExp(`\\b(?:${AI_NAME_ALT})\\b`, 'i');
 
+/**
+ * Identities that are a machine rather than a person, whatever they are named.
+ * A generically-named app account (`some-project-botApp[bot]`) carries no tool
+ * token, so the vocabulary above never sees it — but a commit or comment made
+ * under it is still not the work of the person who asked for it.
+ *
+ * Deliberately boundary-anchored: `Abbot` and `Robot` are not bots, `my-bot`
+ * and `ci_bot@example.com` are.
+ */
+const BOT_IDENTITY_RES = [
+  /\[bot\]/i,
+  /(?:^|[\s\-_.])bots?$/i,
+  /(?:^|[\s\-_.])(?:app|service|machine)$/i,
+  /(?:^|[-_.+])bots?@/i,
+  /\bgithub-actions\b/i,
+  /\bdependabot\b/i,
+];
+
 const PASS = Object.freeze({ ok: true });
 const MAX_EVIDENCE_LEN = 120;
 
@@ -164,6 +182,23 @@ function violation(rule, text, match) {
   };
 }
 
+/** Fenced blocks and inline spans, replaced by blanks of the same line count. */
+const FENCED_CODE_RE = /^[ \t]*(?:```|~~~)[\s\S]*?^[ \t]*(?:```|~~~)[ \t]*$/gm;
+const INLINE_CODE_RE = /`[^`\n]*`/g;
+
+/**
+ * Blank out code so PROSE rules read what a document asserts, not what it
+ * quotes. A README or PR description that documents this very rule contains
+ * `Co-Authored-By: <tool>` as an EXAMPLE; a footer that signs the document
+ * does not sit in a code fence. Newlines are preserved so evidence still
+ * reports the right line.
+ */
+function stripCode(text) {
+  return text
+    .replace(FENCED_CODE_RE, (block) => block.replace(/[^\n]/g, ' '))
+    .replace(INLINE_CODE_RE, (span) => span.replace(/[^\n]/g, ' '));
+}
+
 /**
  * Run the attribution rules over free text.
  *
@@ -171,14 +206,19 @@ function violation(rule, text, match) {
  * ordinary shell syntax cannot trip one.
  *
  * @param {string} text
+ * @param {{prose?: boolean}} [opts] - `prose` blanks code blocks first, for
+ *   surfaces where quoting an example is normal (PR bodies, comments, issues).
+ *   Commit messages stay strict: an attribution hidden in a fenced block there
+ *   is far more likely to be evasion than documentation.
  * @returns {{ok: true}|{ok: false, rule: string, reason: string, hint: string, evidence: string}}
  */
-function checkText(text) {
-  const subject = asText(text);
-  if (!subject) return PASS;
+function checkText(text, opts) {
+  const raw = asText(text);
+  if (!raw) return PASS;
+  const subject = opts && opts.prose ? stripCode(raw) : raw;
   for (const rule of ATTRIBUTION_RULES) {
     const match = rule.re.exec(subject);
-    if (match) return violation(rule, subject, match);
+    if (match) return violation(rule, raw, match);
   }
   return PASS;
 }
@@ -195,13 +235,66 @@ function checkIdentity(user) {
   const email = asText(user && user.email).trim();
   const rendered = email ? `${name} <${email}>` : name;
   if (!rendered.trim()) return PASS;
-  if (!AI_IDENTITY_RE.test(rendered)) return PASS;
+  const evidence =
+    rendered.length > MAX_EVIDENCE_LEN ? rendered.slice(0, MAX_EVIDENCE_LEN) : rendered;
+  if (AI_IDENTITY_RE.test(rendered)) {
+    return {
+      ok: false,
+      rule: 'aiIdentity',
+      reason: 'the identity names an AI tool',
+      hint: 'Use a real person’s name and email — the work is theirs, not the tool’s.',
+      evidence,
+    };
+  }
+  if (BOT_IDENTITY_RES.some((re) => re.test(name) || re.test(email))) {
+    return {
+      ok: false,
+      rule: 'botIdentity',
+      reason: 'the identity is a bot or app account, not a person',
+      hint: 'Author under the human account. A bot byline hides who actually did the work.',
+      evidence,
+    };
+  }
+  return PASS;
+}
+
+/**
+ * Whether an identity is the human this repository expects.
+ *
+ * Blocklists answer "is this obviously a machine?"; they cannot answer "is
+ * this the right person?". When an expected identity is configured, that
+ * stricter question is the one asked — anything else is refused, including a
+ * perfectly human-looking account that simply is not the one that should be
+ * signing. An unresolvable identity is refused too: unknown is not approved.
+ *
+ * @param {{name?: string, email?: string}} user
+ * @param {{emails?: string[], logins?: string[]}} expected
+ */
+/** Emails and logins collapse to one list — no login is ever an email. */
+function expectedList(expected) {
+  const source = expected || {};
+  return [...(source.emails || []), ...(source.logins || [])];
+}
+
+function isAllowed(allowed, value) {
+  if (!value) return false;
+  const needle = value.toLowerCase();
+  return allowed.some((entry) => entry.toLowerCase() === needle);
+}
+
+function checkExpectedIdentity(user, expected) {
+  const allowed = expectedList(expected);
+  if (!allowed.length) return PASS;
+  const name = asText(user && user.name).trim();
+  const email = asText(user && user.email).trim();
+  if (isAllowed(allowed, email) || isAllowed(allowed, name)) return PASS;
+  const rendered = email ? `${name} <${email}>` : name;
   return {
     ok: false,
-    rule: 'aiIdentity',
-    reason: 'the committing identity names an AI tool',
-    hint: 'Set git user.name/user.email to a real person before committing.',
-    evidence: rendered.length > MAX_EVIDENCE_LEN ? rendered.slice(0, MAX_EVIDENCE_LEN) : rendered,
+    rule: 'unexpectedIdentity',
+    reason: 'the identity is not the human this repository expects',
+    hint: `Expected one of: ${allowed.join(', ')}.`,
+    evidence: rendered || '(no identity resolved)',
   };
 }
 
@@ -209,7 +302,10 @@ module.exports = {
   AI_TOOL_NAMES,
   ATTRIBUTION_RULES,
   AI_IDENTITY_RE,
+  BOT_IDENTITY_RES,
   PASS,
   checkText,
   checkIdentity,
+  checkExpectedIdentity,
+  stripCode,
 };

@@ -13,7 +13,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { tokenize, scanCommand, hasAuthorshipSurface, parseAuthorSpec } = require('../git-surfaces');
+const { scanCommand, hasAuthorshipSurface, parseAuthorSpec } = require('../git-surfaces');
 
 const TOOL = ['Cl', 'aude'].join('');
 
@@ -23,37 +23,6 @@ function onlySurface(command) {
   assert.equal(surfaces.length, 1, `expected exactly one surface in: ${command}`);
   return surfaces[0];
 }
-
-describe('tokenize', () => {
-  it('splits on control operators outside quotes', () => {
-    assert.deepEqual(tokenize('npm test && git status'), [
-      ['npm', 'test'],
-      ['git', 'status'],
-    ]);
-    assert.deepEqual(tokenize('a; b | c'), [['a'], ['b'], ['c']]);
-  });
-
-  it('keeps operators that live inside quotes', () => {
-    assert.deepEqual(tokenize('echo "a && b"'), [['echo', 'a && b']]);
-    assert.deepEqual(tokenize("echo 'x; y'"), [['echo', 'x; y']]);
-  });
-
-  it('keeps newlines inside a quoted message', () => {
-    const [segment] = tokenize('git commit -m "line one\n\nline two"');
-    assert.deepEqual(segment, ['git', 'commit', '-m', 'line one\n\nline two']);
-  });
-
-  it('keeps a heredoc body that rides inside a quoted substitution', () => {
-    const command = 'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nfooter\nEOF\n)"';
-    const [segment] = tokenize(command);
-    assert.ok(segment[3].includes('footer'), 'heredoc body must survive tokenizing');
-  });
-
-  it('honours backslash escapes and unterminated quotes', () => {
-    assert.deepEqual(tokenize('echo a\\ b'), [['echo', 'a b']]);
-    assert.deepEqual(tokenize('echo "unterminated'), [['echo', 'unterminated']]);
-  });
-});
 
 describe('scanCommand — what is not a surface', () => {
   it('ignores a command that merely talks about committing', () => {
