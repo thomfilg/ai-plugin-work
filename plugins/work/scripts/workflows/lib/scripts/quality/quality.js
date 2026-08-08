@@ -46,6 +46,8 @@ const TEST_FILE_RE = /(?:^|[\\/])__tests__[\\/]|\.test\.js$|\.spec\.js$/;
 // the static rules and jscpd — while the masters under factories/ stay
 // covered. Mirror any change in scripts/sync-vendored.js VENDOR_SETS.
 const VENDORED_DIRS = [
+  'plugins/ghostwriter/lib/hookEntrypoint',
+  'plugins/ghostwriter/lib/runtime',
   'plugins/heimdall/lib/hookEntrypoint',
   'plugins/heimdall/lib/pathSafe',
   'plugins/heimdall/lib/runtime',

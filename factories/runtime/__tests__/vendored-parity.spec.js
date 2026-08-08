@@ -94,9 +94,10 @@ describe('VENDOR_SETS table shape', () => {
     );
   });
 
-  it('runtime master keeps its four plugin vendor dirs', () => {
+  it('runtime master keeps its five plugin vendor dirs', () => {
     assert.ok(RUNTIME_SET, 'factories/runtime must stay in VENDOR_SETS');
     assert.deepEqual(RUNTIME_SET.vendorDirs, [
+      'plugins/ghostwriter/lib/runtime',
       'plugins/heimdall/lib/runtime',
       'plugins/maestro/scripts/lib/runtime',
       'plugins/synapsys/lib/runtime',
@@ -115,6 +116,7 @@ describe('VENDOR_SETS table shape', () => {
     ],
     'factories/safeIO': ['plugins/work/scripts/workflows/lib/safeIO'],
     'factories/hookEntrypoint': [
+      'plugins/ghostwriter/lib/hookEntrypoint',
       'plugins/synapsys/lib/hookEntrypoint',
       'plugins/work/scripts/workflows/lib/hookEntrypoint',
       'plugins/heimdall/lib/hookEntrypoint',

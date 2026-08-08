@@ -30,6 +30,7 @@ const PLUGIN_DIRS = {
   synapsys: 'plugins/synapsys',
   maestro: 'plugins/maestro',
   heimdall: 'plugins/heimdall',
+  ghostwriter: 'plugins/ghostwriter',
 };
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-doctor-test-'));
@@ -135,7 +136,7 @@ describe('runtime-doctor CLI', () => {
     assert.equal(code, 1);
     const parsed = JSON.parse(stdout);
     assert.equal(parsed.gatesOff, true);
-    assert.equal(parsed.plugins.length, 4);
+    assert.equal(parsed.plugins.length, Object.keys(PLUGIN_DIRS).length);
     assert.ok(parsed.lanes.length > 0);
     assert.ok(parsed.lanes.every((lane) => 'claude' in lane && 'codex' in lane));
   });
