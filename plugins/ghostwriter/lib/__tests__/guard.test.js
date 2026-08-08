@@ -546,6 +546,16 @@ describe('guard — imported patches', () => {
     assert.equal(verdict.rule, 'unverifiablePatch');
   });
 
+  it('leaves an import already under way alone', () => {
+    // `--continue` carries no patch — the patch is the one in
+    // .git/rebase-apply from the hunk that failed five minutes ago. Demanding
+    // one would refuse the most ordinary command in the conflict loop, and
+    // every other pass still runs on the commit it produces.
+    for (const command of ['git am --continue', 'git am --skip', 'git am --abort']) {
+      assert.deepEqual(inspect(command), { blocked: false }, command);
+    }
+  });
+
   it('reads the diff with the FILE rules, not the message ones', () => {
     // A patch is mostly a diff, and a diff is file content: `author:` is an
     // object key there, not a trailer.

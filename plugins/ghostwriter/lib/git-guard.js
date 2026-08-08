@@ -187,7 +187,10 @@ function checkPatchFiles(surfaces, io) {
     if (!PATCH_SUBCOMMANDS.has(surface.kind)) continue;
     // No file and no redirect means the patch arrives on stdin, from a pipe
     // the guard cannot see. An import whose author nobody read is the case
-    // this pass exists for, so it is refused rather than assumed clean.
+    // this pass exists for, so it is refused rather than assumed clean —
+    // unless the command is RESUMING an import, where there is no patch to
+    // name and every other pass still applies.
+    if (surface.resumesPatch) continue;
     if (!surface.patchFiles.length) {
       return finding(
         {
