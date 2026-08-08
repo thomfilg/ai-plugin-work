@@ -57,6 +57,24 @@ ghostwriter: this command would sign the work as an AI.
 The change belongs to the person who asked for it. Tools do not get a byline.
 ```
 
+## What the PreToolUse layer cannot see
+
+The hook inspects a command **before** the shell runs it, so it reads the command as written, not as expanded. Anything whose content only exists after expansion is invisible to it:
+
+```bash
+git commit -m "feat: x
+
+$(cat footer.txt)"        # the footer is not in the command text
+git commit -m "$FOOTER"   # neither is the variable's value
+cat footer.txt | git commit -F -
+```
+
+This is not a gap that can be closed by better parsing — evaluating those would mean executing the command, which a guard must never do. Forms whose content *is* in the command text are covered: heredoc bodies, `$(cat <<'EOF' … EOF)`, `< file` redirects, and `echo "…" | git commit -F -` all get inspected.
+
+**The `commit-msg` hook is the layer that closes this.** Git hands it the final message, after every expansion, so it sees exactly what would be committed. If you want the guarantee to hold against evasion rather than accident, run `/ghostwriter:install` — the PreToolUse hook gives fast feedback at the point of the mistake, and the git hook is the backstop that cannot be talked around.
+
+Identity is treated more strictly than message text, because there are fewer ways to write it: `--config-env=user.name=VAR` is resolved from the command's own assignments or the guard's environment, and a value the guard genuinely cannot read blocks as `unverifiableIdentity` rather than passing. Message files too large to read in full block as `unverifiableMessage`. A partial check is never reported as a pass.
+
 ## Failure policy
 
 Two tiers, because the right answer differs by how much is at stake:
