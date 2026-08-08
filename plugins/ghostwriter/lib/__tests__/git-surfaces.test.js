@@ -195,6 +195,25 @@ describe('scanCommand — message surfaces', () => {
     assert.equal(onlySurface('git commit -m x').dir, null);
   });
 
+  // `--git-dir` selects the repository whose CONFIG git reads, independently
+  // of the process directory — so it decides which identity the commit gets.
+  it('records --git-dir and GIT_DIR as the config-bearing target', () => {
+    assert.equal(onlySurface('git --git-dir=/other/.git commit -m x').gitDir, '/other/.git');
+    assert.equal(onlySurface('git --git-dir /other/.git commit -m x').gitDir, '/other/.git');
+    assert.equal(onlySurface('GIT_DIR=/other/.git git commit -m x').gitDir, '/other/.git');
+    assert.equal(onlySurface('git commit -m x').gitDir, null);
+  });
+
+  it('keeps -C and --git-dir separate — they select different things', () => {
+    const surface = onlySurface('git -C sub --git-dir=rel/.git commit -m x');
+    assert.equal(surface.dir, 'sub');
+    assert.equal(surface.gitDir, 'rel/.git');
+  });
+
+  it('does not treat --work-tree as config-bearing', () => {
+    assert.equal(onlySurface('git --work-tree=/other commit -m x').gitDir, null);
+  });
+
   it('sees through git global flags', () => {
     const surface = onlySurface('git -C /tmp/repo --no-pager commit -m "feat: x"');
     assert.equal(surface.kind, 'commit');

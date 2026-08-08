@@ -142,24 +142,46 @@ function splitEnvPrefix(tokens) {
 }
 
 /**
- * Locate the git subcommand in `argv`, skipping git's own global flags and
- * capturing the `-C` target so downstream checks run against the repository
- * git will actually touch. Repeated `-C` values compound in git; the last one
- * is kept, which is the common single-flag case.
+ * Record the repository a command targets, as we skip git's global flags.
  *
- * @returns {{subcommand: string, index: number, dir: string|null}|null}
+ * `-C` moves the process directory; `--git-dir` points at the repository
+ * whose config git will read. They are independent — `git --git-dir=X commit`
+ * commits into X while still sitting in the shell's directory — so both are
+ * kept, and the identity pass needs both to ask the right repository.
+ * `--work-tree` selects the files, not the config, so it carries no identity.
+ */
+function captureTarget(argv, i, target) {
+  const dir = longFlagValue(argv, i, '-C');
+  if (dir !== null) target.dir = dir;
+  const gitDir = longFlagValue(argv, i, '--git-dir');
+  if (gitDir !== null) target.gitDir = gitDir;
+}
+
+/**
+ * Locate the git subcommand in `argv`, skipping git's own global flags and
+ * capturing the repository target. Repeated values compound in git; the last
+ * one is kept, which is the common single-flag case.
+ *
+ * @returns {{subcommand: string, index: number, dir: string|null,
+ *   gitDir: string|null}|null}
  */
 function findSubcommand(argv) {
   if (!argv.length || !GIT_BINARY_RE.test(argv[0])) return null;
-  let dir = null;
+  const target = { dir: null, gitDir: null };
   let i = 1;
   while (i < argv.length) {
     const token = argv[i];
-    if (!token.startsWith('-')) return { subcommand: token, index: i, dir };
-    if (token === '-C' && argv[i + 1] !== undefined) dir = argv[i + 1];
+    if (!token.startsWith('-')) return { subcommand: token, index: i, ...target };
+    captureTarget(argv, i, target);
     i += GIT_GLOBAL_VALUE_FLAGS.has(token) ? 2 : 1;
   }
   return null;
+}
+
+/** `GIT_DIR=` reaches git the same way `--git-dir` does. */
+function envGitDir(env) {
+  const entry = env.find((assignment) => assignment.name === 'GIT_DIR');
+  return entry ? entry.value : null;
 }
 
 /** Push the value of one value-bearing flag at `argv[i]` onto `target`. */
@@ -194,12 +216,13 @@ function readMessageArgs(argv, start, out) {
   }
 }
 
-function newSurface(kind, writesMessage, writesCommit, dir) {
+function newSurface(kind, writesMessage, writesCommit, target) {
   return {
     kind,
     writesMessage,
     writesCommit,
-    dir: dir || null,
+    dir: target.dir || null,
+    gitDir: target.gitDir || null,
     messages: [],
     messageFiles: [],
     identities: [],
@@ -213,7 +236,7 @@ function newSurface(kind, writesMessage, writesCommit, dir) {
  */
 function configSurface(argv, found) {
   if (argv.some((token) => CONFIG_READ_FLAGS.has(token))) return null;
-  const surface = newSurface('config', false, false, found.dir);
+  const surface = newSurface('config', false, false, found);
   readConfigIdentity(argv, found.index + 1, surface);
   return surface.identities.length ? surface : null;
 }
@@ -223,7 +246,8 @@ function authoringSurface(argv, found, env) {
   const writesMessage = MESSAGE_SUBCOMMANDS.has(found.subcommand);
   const writesCommit = IDENTITY_SUBCOMMANDS.has(found.subcommand);
   if (!writesMessage && !writesCommit) return null;
-  const surface = newSurface(found.subcommand, writesMessage, writesCommit, found.dir);
+  const target = { dir: found.dir, gitDir: found.gitDir || envGitDir(env) };
+  const surface = newSurface(found.subcommand, writesMessage, writesCommit, target);
   readMessageArgs(argv, found.index + 1, surface);
   readIdentities(argv, found.index, env, surface);
   return surface;
