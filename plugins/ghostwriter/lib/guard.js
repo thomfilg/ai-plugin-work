@@ -32,33 +32,33 @@ const { resolveGitUser } = require('./git-identity');
 const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
 
 /**
- * Message files are read whole up to this size. Past it only the head and the
- * tail are read — a bounded read is necessary (a `-F` target can be any file
- * the caller names), but reading only the HEAD would be the wrong bound:
- * trailers and tool footers live at the END of a message.
+ * A `-F` target can be any file the caller names, so the read has to be
+ * bounded — but a PARTIAL read is not a safe bound. Sampling the head, the
+ * tail, or any other window leaves a region git will happily commit and the
+ * guard never saw. So: read the whole file up to this limit (far past any real
+ * commit message), and treat anything larger as UNVERIFIABLE rather than
+ * clean. Blocking a 32 MiB commit message is not a cost worth optimising.
  */
-const MAX_MESSAGE_FILE_BYTES = 1024 * 1024;
-const EDGE_BYTES = 128 * 1024;
+const MAX_MESSAGE_FILE_BYTES = 32 * 1024 * 1024;
 const ALLOW = Object.freeze({ blocked: false });
 
-/** Read `count` bytes of an open file starting at `position`. */
-function readChunk(fd, position, count) {
-  const buffer = Buffer.alloc(count);
-  const read = fs.readSync(fd, buffer, 0, count, position);
-  return buffer.toString('utf8', 0, read);
-}
-
+/**
+ * Read a message file in full.
+ *
+ * @returns {{text: string, truncated: boolean}} `truncated` means the file was
+ *   too large to inspect — never that part of it was checked and passed.
+ */
 function readTextFile(filePath, cwd) {
   let fd;
   try {
     fd = fs.openSync(path.resolve(cwd || process.cwd(), filePath), 'r');
     const { size } = fs.fstatSync(fd);
-    if (size <= MAX_MESSAGE_FILE_BYTES) return readChunk(fd, 0, size);
-    // Head and tail, joined by a newline so neither edge can splice a false
-    // match across the gap.
-    return `${readChunk(fd, 0, EDGE_BYTES)}\n${readChunk(fd, size - EDGE_BYTES, EDGE_BYTES)}`;
+    if (size > MAX_MESSAGE_FILE_BYTES) return { text: '', truncated: true };
+    const buffer = Buffer.alloc(size);
+    const read = fs.readSync(fd, buffer, 0, size, 0);
+    return { text: buffer.toString('utf8', 0, read), truncated: false };
   } catch {
-    return '';
+    return { text: '', truncated: false };
   } finally {
     if (fd !== undefined) {
       try {
@@ -69,6 +69,20 @@ function readTextFile(filePath, cwd) {
     }
   }
 }
+
+/** Accept either shape from an injected reader: a plain string or the record. */
+function normalizeRead(value) {
+  if (typeof value === 'string') return { text: value, truncated: false };
+  return { text: (value && value.text) || '', truncated: Boolean(value && value.truncated) };
+}
+
+/** A file the guard could not read in full is not a file it can clear. */
+const UNVERIFIABLE = Object.freeze({
+  rule: 'unverifiableMessage',
+  reason: 'the message file is too large to inspect in full',
+  hint: 'Shorten the message file so the guard can read all of it.',
+  evidence: `larger than ${MAX_MESSAGE_FILE_BYTES} bytes`,
+});
 
 function defaultIo(io) {
   const opts = io || {};
@@ -111,13 +125,16 @@ function surfaceCwd(surface, io) {
   return surface.dir ? path.resolve(io.cwd, surface.dir) : io.cwd;
 }
 
-/** Pass 2 — every `-F` / `--file` / redirected message body we can read. */
+/** Pass 2 — every `-F` / `--file` / redirected message body, read in full. */
 function checkMessageFiles(surfaces, io) {
   for (const surface of surfaces) {
     for (const file of surface.messageFiles) {
       if (!file || file.startsWith('-')) continue;
-      const result = checkText(io.readMessageFile(file, surfaceCwd(surface, io)));
-      if (!result.ok) return finding(result, `git ${surface.kind} message file ${file}`);
+      const where = `git ${surface.kind} message file ${file}`;
+      const read = normalizeRead(io.readMessageFile(file, surfaceCwd(surface, io)));
+      const result = checkText(read.text);
+      if (!result.ok) return finding(result, where);
+      if (read.truncated) return finding(UNVERIFIABLE, where);
     }
   }
   return null;
