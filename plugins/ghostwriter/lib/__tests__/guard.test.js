@@ -122,6 +122,75 @@ describe('guard — the five passes', () => {
   });
 });
 
+// Every case here was a reachable bypass before the fix that follows it: the
+// guard saw no surface at all, or checked the wrong repository, so nothing
+// downstream ever ran.
+describe('guard — bypasses that must stay closed', () => {
+  it('inspects a git command reached through a shell wrapper', () => {
+    const verdict = inspect(`bash -c "git commit -m 'x\n\nCo-Authored-By: ${TOOL} <a@b>'"`);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'aiCoAuthorTrailer');
+  });
+
+  it('inspects a git command reached through env / sudo / timeout', () => {
+    for (const wrapper of ['env', 'sudo -u someone', 'timeout 30']) {
+      const verdict = inspect(`${wrapper} git commit --author="${TOOL} <a@b>" -m "feat: x"`);
+      assert.equal(verdict.blocked, true, wrapper);
+      assert.equal(verdict.rule, 'aiIdentity', wrapper);
+    }
+  });
+
+  it('blocks a GIT_CONFIG_KEY_n identity injection', () => {
+    const command =
+      `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=${TOOL} ` +
+      'git commit -m "feat: x"';
+    const verdict = inspect(command);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'GIT_CONFIG_KEY_0 on git commit');
+  });
+
+  it('resolves the effective identity against the -C target', () => {
+    const asked = [];
+    const verdict = inspect('git -C other/repo commit -m "feat: x"', {
+      resolveIdentity: (cwd) => {
+        asked.push(cwd);
+        return cwd === '/repo/other/repo' ? AI_USER : HUMAN;
+      },
+    });
+    assert.deepEqual(asked, ['/repo/other/repo'], 'the shell cwd is not the committing repo');
+    assert.equal(verdict.blocked, true);
+  });
+
+  it('resolves a relative message file against the -C target', () => {
+    const asked = [];
+    inspect('git -C other/repo commit -F msg.txt', {
+      readMessageFile: (file, cwd) => {
+        asked.push([file, cwd]);
+        return '';
+      },
+    });
+    assert.deepEqual(asked, [['msg.txt', '/repo/other/repo']]);
+  });
+
+  it('reads the message from a `<` redirect feeding `-F -`', () => {
+    const verdict = inspect('git commit -F - < msg.txt', {
+      readMessageFile: () => `feat: x\n\nCo-Authored-By: ${TOOL} <a@b>`,
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'git commit message file msg.txt');
+  });
+
+  it('allows read-only config queries that author nothing', () => {
+    for (const command of [
+      `git config --get user.name ${TOOL.toLowerCase()}`,
+      'git config --list',
+      'git config --unset user.name',
+    ]) {
+      assert.deepEqual(inspect(command), { blocked: false }, command);
+    }
+  });
+});
+
 describe('guard — the operator override', () => {
   const dirty = `git commit -m "feat: x\n\nCo-Authored-By: ${TOOL} <a@b>"`;
 
