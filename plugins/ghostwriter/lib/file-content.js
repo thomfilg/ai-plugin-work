@@ -77,28 +77,38 @@ function inspectFileWrites(files, opts) {
 
 const PATCH_HEADER_RE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/;
 const PATCH_MOVE_RE = /^\*\*\* Move to: (.+)$/;
+/** `+++ b/path` — git's own name for the file a hunk lands in. */
+const DIFF_HEADER_RE = /^\+\+\+ (?:b\/)?(.+)$/;
 
 /**
- * Split a codex `apply_patch` payload into the lines each file GAINS.
+ * The lines each file GAINS, in either patch dialect.
  *
- * The runtime's `extractWriteContent` returns every added line as one blob,
- * which loses the association between a line and the file it lands in — and
- * that association is the whole input to the prose/strict decision. A markdown
- * paragraph read strictly and a source comment read as prose are both wrong
- * answers, arrived at by throwing away information the patch already carries.
+ * Additions only, deliberately. A change that DELETES an attribution shows the
+ * offending line with a `-`, and reading the whole patch would block the very
+ * cleanup this plugin exists to encourage. Context lines are the same story:
+ * attribution already in the tree is a fact about history, and this reads what
+ * a change proposes to add to it.
  *
- * @param {string} patchText
+ * Split per file rather than flattened, because the association between a line
+ * and the file it lands in is the whole input to the prose/strict decision — a
+ * markdown paragraph read strictly and a source comment read as prose are both
+ * wrong answers, arrived at by discarding what the patch already says.
+ *
+ * @param {string} text
+ * @param {(line: string) => {path: string|null}|null} readHeader - the path a
+ *   following block lands in; `null` when the line is not a header, and a null
+ *   `path` for a header that names no destination (a deletion).
  * @returns {Array<{path: string, text: string}>}
  */
-function patchAdditions(patchText) {
-  if (typeof patchText !== 'string') return [];
+function additions(text, readHeader) {
+  if (typeof text !== 'string') return [];
   const files = [];
   let current = null;
-  for (const line of patchText.split('\n')) {
-    const header = PATCH_HEADER_RE.exec(line) || PATCH_MOVE_RE.exec(line);
+  for (const line of text.split('\n')) {
+    const header = readHeader(line);
     if (header) {
-      current = { path: header[1].trim(), lines: [] };
-      files.push(current);
+      current = header.path ? { path: header.path, lines: [] } : null;
+      if (current) files.push(current);
       continue;
     }
     // `+++`/`---` are diff furniture, not content. A real added line that
@@ -108,6 +118,25 @@ function patchAdditions(patchText) {
       current.lines.push(line.slice(1));
   }
   return files.map((file) => ({ path: file.path, text: file.lines.join('\n') }));
+}
+
+/** Codex `apply_patch` payloads (`*** Add File: …`). */
+function patchAdditions(patchText) {
+  return additions(patchText, (line) => {
+    const header = PATCH_HEADER_RE.exec(line) || PATCH_MOVE_RE.exec(line);
+    return header ? { path: header[1].trim() } : null;
+  });
+}
+
+/** Unified diffs — `git diff`, `git diff --cached`, a mailed patch. */
+function unifiedAdditions(diffText) {
+  return additions(diffText, (line) => {
+    const header = DIFF_HEADER_RE.exec(line);
+    if (!header) return null;
+    const name = header[1].trim();
+    // `/dev/null` is a deletion: the file gains nothing because it is gone.
+    return { path: name === '/dev/null' ? null : name };
+  });
 }
 
 /**
@@ -131,6 +160,7 @@ function writeFiles(rawToolName, toolInput) {
 module.exports = {
   inspectFileWrites,
   writeFiles,
+  unifiedAdditions,
   checkFileText,
   patchAdditions,
   isProseFile,

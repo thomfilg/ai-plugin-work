@@ -1,15 +1,15 @@
 'use strict';
 
 /**
- * Tests for scripts/install-commit-msg-hook.js.
+ * Tests for scripts/install-git-hooks.js.
  *
- * The assertion that matters most is the end-to-end one: after installing, a
+ * The assertions that matter most are the end-to-end ones: after installing, a
  * REAL `git commit` carrying an attribution trailer is rejected by git itself,
- * and a clean one lands. Everything else here guards the installer's manners —
- * it must never clobber somebody else's commit-msg hook, and it must never
- * delete a hook it did not write.
+ * a real commit whose staged FILES carry one is rejected too, and a clean
+ * commit lands. Everything else here guards the installer's manners — it must
+ * never clobber somebody else's hook, and never delete one it did not write.
  *
- * Run with: node --test plugins/ghostwriter/scripts/__tests__/install-commit-msg-hook.test.js
+ * Run with: node --test plugins/ghostwriter/scripts/__tests__/install-git-hooks.test.js
  */
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const INSTALLER = path.resolve(__dirname, '..', 'install-commit-msg-hook.js');
+const INSTALLER = path.resolve(__dirname, '..', 'install-git-hooks.js');
 const TOOL = ['Cl', 'aude'].join('');
 
 let repo;
@@ -36,8 +36,8 @@ function install(...args) {
   return { code: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
 }
 
-function hookPath() {
-  return path.join(repo, '.git', 'hooks', 'commit-msg');
+function hookPath(name = 'commit-msg') {
+  return path.join(repo, '.git', 'hooks', name);
 }
 
 beforeEach(() => {
@@ -53,14 +53,18 @@ afterEach(() => {
   if (repo) fs.rmSync(repo, { recursive: true, force: true });
 });
 
-describe('install-commit-msg-hook — lifecycle', () => {
-  it('reports absent, installs, then reports ours', () => {
-    assert.match(install('--status').stdout, /is absent/);
+describe('install-git-hooks — lifecycle', () => {
+  it('reports absent, installs both hooks, then reports ours', () => {
+    assert.match(install('--status').stdout, /commit-msg hook is absent/);
+    assert.match(install('--status').stdout, /pre-commit hook is absent/);
     const result = install();
     assert.equal(result.code, 0);
-    assert.match(result.stdout, /installed at/);
-    assert.match(install('--status').stdout, /is ours/);
-    assert.ok(fs.statSync(hookPath()).mode & 0o111, 'hook must be executable');
+    for (const name of ['commit-msg', 'pre-commit']) {
+      assert.match(result.stdout, new RegExp(`${name} hook installed at`));
+      assert.ok(fs.statSync(hookPath(name)).mode & 0o111, `${name} must be executable`);
+    }
+    assert.match(install('--status').stdout, /commit-msg hook is ours/);
+    assert.match(install('--status').stdout, /pre-commit hook is ours/);
   });
 
   it('is idempotent', () => {
@@ -69,10 +73,11 @@ describe('install-commit-msg-hook — lifecycle', () => {
     assert.match(install('--status').stdout, /is ours/);
   });
 
-  it('uninstalls its own hook and tolerates a missing one', () => {
+  it('uninstalls its own hooks and tolerates a missing one', () => {
     install();
     assert.equal(install('--uninstall').code, 0);
     assert.equal(fs.existsSync(hookPath()), false);
+    assert.equal(fs.existsSync(hookPath('pre-commit')), false);
     assert.equal(install('--uninstall').code, 0);
   });
 
@@ -95,7 +100,7 @@ describe('install-commit-msg-hook — lifecycle', () => {
   });
 });
 
-describe('install-commit-msg-hook — other people’s hooks', () => {
+describe('install-git-hooks — other people’s hooks', () => {
   it('refuses to overwrite a foreign hook, and says how to chain instead', () => {
     fs.mkdirSync(path.dirname(hookPath()), { recursive: true });
     fs.writeFileSync(hookPath(), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
@@ -121,7 +126,7 @@ describe('install-commit-msg-hook — other people’s hooks', () => {
   });
 });
 
-describe('install-commit-msg-hook — real commits', () => {
+describe('install-git-hooks — real commits', () => {
   it('git itself rejects an attributed message and accepts a clean one', () => {
     install();
     const rejected = git('commit', '-m', `feat: x\n\nCo-Authored-By: ${TOOL} <a@b>`);
@@ -131,5 +136,26 @@ describe('install-commit-msg-hook — real commits', () => {
     const accepted = git('commit', '-m', 'feat: add the file (#12)');
     assert.equal(accepted.status, 0, accepted.stderr);
     assert.match(git('log', '--oneline').stdout, /feat: add the file/);
+  });
+
+  // The message half is not the whole change. A footer written into a FILE by
+  // an editor, a script or a second agent reaches the pull request under a
+  // perfectly clean commit message.
+  it('git itself rejects a staged file that carries a footer', () => {
+    install();
+    fs.writeFileSync(path.join(repo, 'src.js'), `// Generated with ${TOOL} Code\nconst a = 1;\n`);
+    git('add', '-A');
+    const rejected = git('commit', '-m', 'feat: add src (#12)');
+    assert.notEqual(rejected.status, 0, 'the attributed file must not land');
+    assert.match(rejected.stderr, /ghostwriter:/);
+    assert.match(rejected.stderr, /src\.js/);
+  });
+
+  it('lets the same commit through once the footer is gone', () => {
+    install();
+    fs.writeFileSync(path.join(repo, 'src.js'), 'const a = 1;\n');
+    git('add', '-A');
+    const accepted = git('commit', '-m', 'feat: add src (#12)');
+    assert.equal(accepted.status, 0, accepted.stderr);
   });
 });
