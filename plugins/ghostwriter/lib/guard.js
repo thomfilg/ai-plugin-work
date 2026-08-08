@@ -119,7 +119,9 @@ function checkMessageArgs(surfaces) {
  * shell's cwd, so both later passes have to follow it.
  */
 function surfaceCwd(surface, io) {
-  return surface.dir ? path.resolve(io.cwd, surface.dir) : io.cwd;
+  // `-C` compounds, so every value applies in order: `-C outer -C inner`
+  // lands in outer/inner. path.resolve does exactly that, absolutes included.
+  return surface.dirs && surface.dirs.length ? path.resolve(io.cwd, ...surface.dirs) : io.cwd;
 }
 
 /**
@@ -128,7 +130,13 @@ function surfaceCwd(surface, io) {
  * sit in a clean repo and author into another one.
  */
 function surfaceGitDir(surface, io) {
-  return surface.gitDir ? path.resolve(surfaceCwd(surface, io), surface.gitDir) : null;
+  // A GIT_DIR already exported in the session reaches git without appearing in
+  // the command at all. The guard's own `git config` read inherits it too, so
+  // the two agree either way — but threading it explicitly makes that a stated
+  // contract rather than a coincidence, and keeps it right if the guard's
+  // environment ever stops matching the command's.
+  const selected = surface.gitDir || io.env.GIT_DIR;
+  return selected ? path.resolve(surfaceCwd(surface, io), selected) : null;
 }
 
 /** Pass 2 — every `-F` / `--file` / redirected message body, read in full. */

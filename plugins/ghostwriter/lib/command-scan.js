@@ -74,7 +74,8 @@ function embeddedRe(name) {
  *
  * Env assignments survive the peel from BOTH sides of the wrapper word:
  * `VAR=v env cmd` and the idiomatic `env VAR=v cmd` alike. Dropping the second
- * would hand every `env GIT_AUTHOR_NAME=… git commit` a free pass.
+ * would hand every `env GIT_AUTHOR_NAME=… git commit` a free pass. They are
+ * also handed to any script payload, which a spawned shell inherits.
  */
 function unwrapSegment(tokens, spec) {
   const { argv, prefix } = splitEnvPrefix(tokens);
@@ -82,9 +83,10 @@ function unwrapSegment(tokens, spec) {
   const rest = argv.slice(1);
   const scripts = rest.filter((token) => spec.embedded.test(token));
   const at = rest.findIndex((token) => spec.binaryRe.test(token));
-  if (at === -1) return { argv: null, scripts };
+  const inherited = [...prefix, ...rest.filter((token) => ENV_ASSIGNMENT_RE.test(token))];
+  if (at === -1) return { argv: null, scripts, inherited };
   const carried = rest.slice(0, at).filter((token) => ENV_ASSIGNMENT_RE.test(token));
-  return { argv: [...prefix, ...carried, ...rest.slice(at)], scripts };
+  return { argv: [...prefix, ...carried, ...rest.slice(at)], scripts, inherited };
 }
 
 function collectSegment(tokens, spec, out, depth) {
@@ -97,8 +99,13 @@ function collectSegment(tokens, spec, out, depth) {
   const inner = unwrapSegment(tokens, spec);
   if (!inner) return;
   if (inner.argv) collectSegment(inner.argv, spec, out, depth + 1);
+  // A spawned shell INHERITS the assignments in front of it, so
+  // `GIT_AUTHOR_NAME=… bash -c "git commit"` reaches git with that identity.
+  // The script's own segments have to be classified carrying them.
   for (const script of inner.scripts) {
-    for (const segment of tokenize(script)) collectSegment(segment, spec, out, depth + 1);
+    for (const segment of tokenize(script)) {
+      collectSegment([...inner.inherited, ...segment], spec, out, depth + 1);
+    }
   }
 }
 
