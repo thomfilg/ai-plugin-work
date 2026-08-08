@@ -30,10 +30,14 @@ jobs:
           # Full history: every check below is a range against the base.
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      # No setup-node step on purpose. The scanner is plain CommonJS over
+      # node:fs, node:path and node:child_process with no dependencies and no
+      # install, so the runner's preinstalled node runs it — and every action
+      # this job does not use is one whose code cannot change underneath it.
+      # (Review on #785 asked for both actions to be pinned to commit SHAs.
+      # Removing one is the half of that which does not need a SHA looked up;
+      # pinning `checkout` is worth doing across all four workflows in this
+      # repository at once, rather than here alone.)
 
       - name: Resolve the base
         id: base
