@@ -132,34 +132,84 @@ function resolveCommitInfo(cwd, gitDir, ref) {
 }
 
 /**
- * The GitHub account `gh` would post as.
- *
- * Best effort by design: `gh auth status` is the only place the active login
- * is written down, its wording has moved between versions, and it prints to
- * stderr on some. An unresolvable account returns '' — the guard decides what
- * that means, and the answer differs depending on whether an expected identity
- * is configured.
- *
- * @param {string} cwd
- * @returns {string} the login, or '' when it cannot be read.
+ * `gh auth status` has said this two ways across versions: the current
+ * `account <login>` and the older `Logged in to github.com as <login>`.
  */
-function resolveGhAccount(cwd) {
+const GH_ACCOUNT_RES = [/account\s+(\S+)/i, /logged in to \S+ as (\S+)/i];
+
+function firstLogin(text) {
+  for (const re of GH_ACCOUNT_RES) {
+    const match = re.exec(text || '');
+    if (match) return match[1];
+  }
+  return '';
+}
+
+/**
+ * `gh auth status`, whose output goes to stdout or stderr depending on version.
+ *
+ * @returns {string|null} the login, '' when gh answered without one, and null
+ *   when there is no `gh` on this machine at all — a distinction the guard
+ *   needs, because a command that cannot run posts nothing.
+ */
+function readAuthStatus(cwd) {
   try {
-    const output = execFileSync('gh', ['auth', 'status'], {
-      cwd: cwd || process.cwd(),
-      encoding: 'utf8',
-      timeout: GIT_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const match = /account\s+(\S+)/i.exec(output);
-    return match ? match[1] : '';
+    return firstLogin(
+      execFileSync('gh', ['auth', 'status'], {
+        cwd,
+        encoding: 'utf8',
+        timeout: GIT_TIMEOUT_MS,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    );
   } catch (err) {
+    if (err && err.code === 'ENOENT') return null;
     // gh writes the status to stderr on older versions, and exits non-zero
     // when any host is logged out — the login we want may still be in there.
-    const text = (err && (err.stdout || '') + (err.stderr || '')) || '';
-    const match = /account\s+(\S+)/i.exec(text);
-    return match ? match[1] : '';
+    return firstLogin(`${(err && err.stdout) || ''}${(err && err.stderr) || ''}`);
   }
+}
+
+/**
+ * The API's own answer, asked only when the status text did not parse.
+ *
+ * Worth one network call: the alternative is reporting "the posting account
+ * could not be read" — which blocks — because a human-readable status line
+ * changed its wording. This asks the question that has a stable answer.
+ */
+function readApiLogin(cwd) {
+  try {
+    return execFileSync('gh', ['api', 'user', '--jq', '.login'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The GitHub account `gh` would post as.
+ *
+ * An unresolvable account returns '' — and the guard treats that as a post
+ * whose author cannot be named, which is the thing it is looking for. Hence
+ * the two probes: a wording change in a status message must not be able to
+ * turn into a refusal.
+ *
+ * No `gh` on the machine is a different answer again, and returns null. That
+ * command posts nothing, fails on its own, and says why far better than a
+ * guard would.
+ *
+ * @param {string} cwd
+ * @returns {string|null} the login, '' when unreadable, null when gh is absent.
+ */
+function resolveGhAccount(cwd) {
+  const dir = cwd || process.cwd();
+  const status = readAuthStatus(dir);
+  if (status === null) return null;
+  return status || readApiLogin(dir);
 }
 
 /**

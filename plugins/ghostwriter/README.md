@@ -38,6 +38,14 @@ export GHOSTWRITER_HUMAN_LOGIN=my-github-login
 
 With a human pinned, anything else is refused, including an identity the guard simply cannot read.
 
+### Who a post is published as
+
+Independently of pinning, a `gh` post is refused when the account cannot be named: a `GH_TOKEN` supplied by the command (which replaces the logged-in account), or a `gh` that answers without a login. Both are the anonymous form of the same rule — the identity checks cannot run on nothing.
+
+The account is read from `gh auth status`, falling back to `gh api user` when the wording of that status has moved between versions. A machine with no `gh` at all is left alone: the command posts nothing and explains itself better than a guard would.
+
+**A forge MCP call is the one place this cannot be answered.** The credential lives in the MCP server, so no reading of the call reveals who it will post as. That gap is refused only when a human is pinned — the strong mode is opt-in on purpose, because refusing every MCP post by default would make the plugin something people uninstall, and a guard nobody keeps enabled prevents nothing.
+
 ## What gets blocked
 
 Five rules, applied in that order so the sharpest evidence wins:
