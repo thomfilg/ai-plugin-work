@@ -37,6 +37,7 @@ function inspect(command, overrides = {}) {
     readMessageFile: () => '',
     resolveIdentity: () => HUMAN,
     resolveAccount: () => 'a-human-login',
+    resolveCommitAuthor: () => HUMAN,
     expected: { emails: [], logins: [], configured: false },
     ...overrides,
   });
@@ -276,6 +277,42 @@ describe('guard — bypasses that must stay closed', () => {
     const verdict = inspect(`GIT_AUTHOR_NAME=${TOOL} bash -c "git commit -m ok"`);
     assert.equal(verdict.blocked, true);
     assert.equal(verdict.rule, 'aiIdentity');
+  });
+
+  it('reads the config file a GIT_CONFIG_GLOBAL redirect points at', () => {
+    const seen = [];
+    const verdict = inspect('GIT_CONFIG_GLOBAL=/tmp/other.cfg git commit -m "feat: x"', {
+      resolveIdentity: (cwd, gitDir, sources) => {
+        seen.push(sources);
+        return sources && sources.GIT_CONFIG_GLOBAL ? AI_USER : HUMAN;
+      },
+    });
+    assert.deepEqual(seen, [{ GIT_CONFIG_GLOBAL: '/tmp/other.cfg' }]);
+    assert.equal(verdict.blocked, true, 'reading the guard-side config would clear this');
+  });
+
+  it('blocks an author copied from a bot commit, and allows a human one', () => {
+    const BOT = { name: 'proj-botApp[bot]', email: 'x@users.noreply.github.com' };
+    for (const command of ['git cherry-pick abc123', 'git commit -C abc123']) {
+      const verdict = inspect(command, { resolveCommitAuthor: () => BOT });
+      assert.equal(verdict.blocked, true, command);
+      assert.equal(verdict.where, 'the author copied from abc123', command);
+    }
+    assert.deepEqual(inspect('git cherry-pick abc123'), { blocked: false });
+  });
+
+  it('leaves a revert alone — git authors it as the reverter', () => {
+    const BOT = { name: 'some-bot', email: 'b@x.com' };
+    assert.deepEqual(inspect('git revert abc123', { resolveCommitAuthor: () => BOT }), {
+      blocked: false,
+    });
+  });
+
+  it('allows an unresolvable ref, which git would reject itself', () => {
+    assert.deepEqual(
+      inspect('git cherry-pick nope', { resolveCommitAuthor: () => ({ name: '', email: '' }) }),
+      { blocked: false }
+    );
   });
 
   it('follows a GIT_DIR inherited from the session, not just the command', () => {

@@ -118,6 +118,21 @@ function readConfigEnvIdentity(argv, end, env, out) {
   }
 }
 
+/**
+ * `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` point git at DIFFERENT config
+ * files. The identity in them is the one git will use, so the guard has to
+ * read the same files rather than the ones it would find on its own.
+ */
+const CONFIG_SOURCE_ENV_RE = /^GIT_CONFIG_(?:GLOBAL|SYSTEM)$/;
+
+function readConfigSources(env) {
+  const sources = {};
+  for (const entry of env) {
+    if (CONFIG_SOURCE_ENV_RE.test(entry.name)) sources[entry.name] = entry.value;
+  }
+  return sources;
+}
+
 /** Every identity a command names, collected onto `out.identities`. */
 function readIdentities(argv, subcommandIndex, env, out) {
   readEnvIdentities(env, out);
@@ -128,6 +143,7 @@ function readIdentities(argv, subcommandIndex, env, out) {
 
 module.exports = {
   identityEntry,
+  readConfigSources,
   parseAuthorSpec,
   readIdentities,
   readConfigIdentity,

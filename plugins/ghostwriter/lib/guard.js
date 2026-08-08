@@ -38,7 +38,7 @@ const path = require('node:path');
 
 const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
 const { scanCommand, identityEntry } = require('./git-surfaces');
-const { resolveGitUser, resolveGhAccount } = require('./git-identity');
+const { resolveGitUser, resolveCommitAuthor, resolveGhAccount } = require('./git-identity');
 const { scanForgeCommand, scanToolCall } = require('./forge-surfaces');
 const {
   checkPostText,
@@ -98,6 +98,7 @@ function defaultIo(io) {
     env: opts.env || process.env,
     readMessageFile: opts.readMessageFile || ((p, cwd) => readTextFile(p, cwd)),
     resolveIdentity: opts.resolveIdentity || resolveGitUser,
+    resolveCommitAuthor: opts.resolveCommitAuthor || resolveCommitAuthor,
     resolveAccount: opts.resolveAccount || resolveGhAccount,
     expected: opts.expected || readExpectedIdentity(opts.env || process.env),
   };
@@ -212,6 +213,26 @@ function checkRawCommand(command, surfaces) {
   return result.ok ? null : finding(result, 'the command text');
 }
 
+/**
+ * A copied author — `git cherry-pick <ref>`, `git commit -C <ref>`. The new
+ * commit carries the SOURCE commit's author, so the configured identity pass
+ * would clear a perfectly clean human while a tool byline lands anyway.
+ */
+function checkCopiedAuthors(surfaces, io) {
+  for (const surface of surfaces) {
+    for (const ref of surface.authorRefs || []) {
+      const cwd = surfaceCwd(surface, io);
+      const author = io.resolveCommitAuthor(cwd, surfaceGitDir(surface, io), ref);
+      const where = `the author copied from ${ref}`;
+      const result = checkIdentity(author);
+      if (!result.ok) return finding(result, where);
+      const expected = checkExpectedIdentity(author, io.expected);
+      if (!expected.ok) return finding(expected, where);
+    }
+  }
+  return null;
+}
+
 /** Pass 5 — the identity git would stamp on the object being written. */
 function checkEffectiveIdentity(surfaces, io) {
   const seen = new Set();
@@ -222,7 +243,7 @@ function checkEffectiveIdentity(surfaces, io) {
     const key = `${cwd}\u0000${gitDir || ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const user = io.resolveIdentity(cwd, gitDir);
+    const user = io.resolveIdentity(cwd, gitDir, surface.configSources);
     const result = checkIdentity(user);
     if (!result.ok) return finding(result, 'the configured git identity');
     const expected = checkExpectedIdentity(user, io.expected);
@@ -244,6 +265,7 @@ const COMMAND_PASSES = [
   (c) => checkPostText(c.posts, c.ctx),
   (c) => checkRawPost(c.command, c.posts),
   (c) => checkPostAccount(c.posts, c.ctx),
+  (c) => checkCopiedAuthors(c.surfaces, c.ctx),
   (c) => checkEffectiveIdentity(c.surfaces, c.ctx),
 ];
 
