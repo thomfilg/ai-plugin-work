@@ -47,6 +47,7 @@ const {
   unverifiableAccount,
 } = require('./forge-guard');
 const { readExpectedIdentity } = require('./expected-identity');
+const { MAX_UNWRAP_DEPTH } = require('./command-scan');
 const { finding, normalizeRead, UNVERIFIABLE, MAX_MESSAGE_FILE_BYTES } = require('./finding');
 
 /** Operator override, honoured ONLY from the hook's own environment. */
@@ -100,6 +101,21 @@ function defaultIo(io) {
     resolveAccount: opts.resolveAccount || resolveGhAccount,
     expected: opts.expected || readExpectedIdentity(opts.env || process.env),
   };
+}
+
+/** A command nested past the traversal cap was never inspected at all. */
+function checkUnverifiableSurfaces(surfaces, posts) {
+  const buried = [...surfaces, ...posts].find((surface) => surface.unverifiable);
+  if (!buried) return null;
+  return finding(
+    {
+      rule: 'unverifiableCommand',
+      reason: 'the command is nested too deeply in wrappers to inspect',
+      hint: 'Run the git or gh command directly instead of through nested shells.',
+      evidence: `wrapper depth beyond ${MAX_UNWRAP_DEPTH}`,
+    },
+    'the command text'
+  );
 }
 
 /** Pass 1 — every `-m` / `--message` value on every authoring surface. */
@@ -220,6 +236,7 @@ function checkEffectiveIdentity(surfaces, io) {
  * a readable fact rather than the shape of a boolean chain.
  */
 const COMMAND_PASSES = [
+  (c) => checkUnverifiableSurfaces(c.surfaces, c.posts),
   (c) => checkMessageArgs(c.surfaces),
   (c) => checkMessageFiles(c.surfaces, c.ctx),
   (c) => checkIdentityLiterals(c.surfaces, c.ctx),

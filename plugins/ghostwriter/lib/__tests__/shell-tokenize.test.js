@@ -39,6 +39,14 @@ describe('tokenize', () => {
     assert.ok(segment[3].includes('footer'), 'heredoc body must survive tokenizing');
   });
 
+  // bash escapes only $ ` " \\ and a newline inside double quotes. Collapsing
+  // `\n` to `n` would silently rewrite the text the rules are about to read.
+  it('keeps a backslash that bash would keep inside double quotes', () => {
+    assert.deepEqual(tokenize('echo "a\\nb"'), [['echo', 'a\\nb']]);
+    assert.deepEqual(tokenize('echo "a\\$b"'), [['echo', 'a$b']]);
+    assert.deepEqual(tokenize('echo "a\\\\b"'), [['echo', 'a\\b']]);
+  });
+
   it('honours backslash escapes and unterminated quotes', () => {
     assert.deepEqual(tokenize('echo a\\ b'), [['echo', 'a b']]);
     assert.deepEqual(tokenize('echo "unterminated'), [['echo', 'unterminated']]);

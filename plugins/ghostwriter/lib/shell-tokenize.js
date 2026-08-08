@@ -43,13 +43,21 @@ function pushSegment(state) {
  * closing quote. An unterminated quote consumes the rest of the text rather
  * than throwing.
  */
+/**
+ * Inside double quotes a backslash escapes only these; before anything else
+ * it is a literal character. `"\n"` is a backslash and an n in bash, NOT a
+ * newline — collapsing it to `n` would silently rewrite the very text the
+ * rules are about to read.
+ */
+const DQUOTE_ESCAPABLE = new Set(['$', '`', '"', '\\', '\n']);
+
 function consumeQuoted(state, text, start) {
   const quote = text[start];
   state.open = true;
   let i = start + 1;
   while (i < text.length) {
     const ch = text[i];
-    if (quote === '"' && ch === '\\' && i + 1 < text.length) {
+    if (quote === '"' && ch === '\\' && DQUOTE_ESCAPABLE.has(text[i + 1])) {
       state.word += text[i + 1];
       i += 2;
       continue;
