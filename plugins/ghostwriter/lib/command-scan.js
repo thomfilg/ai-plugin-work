@@ -43,7 +43,7 @@ const WRAPPER_BINARIES = new Set([
   'busybox',
 ]);
 
-const MAX_UNWRAP_DEPTH = 3;
+const MAX_UNWRAP_DEPTH = 5;
 const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 function baseName(token) {
@@ -63,9 +63,17 @@ function splitEnvPrefix(tokens) {
   return { env, argv: tokens.slice(i), prefix: tokens.slice(0, i) };
 }
 
-/** A token that itself contains an invocation of `name` — a script payload. */
+/**
+ * A token that itself contains an invocation of `name` — a script payload.
+ *
+ * The boundary before the name has to be permissive: a nested payload arrives
+ * as `bash -c "git commit …"`, where the character in front of `git` is a
+ * QUOTE. A probe that only accepted whitespace and shell operators missed
+ * every payload nested more than one level deep. Path separators must pass
+ * too, for `/usr/bin/git`, while `mygit` must not.
+ */
 function embeddedRe(name) {
-  return new RegExp(`(?:^|[\\s;&|(])${name}(?:\\s|$)`);
+  return new RegExp(`(?:^|[^A-Za-z0-9_-])${name}(?:\\s|$)`);
 }
 
 /**
@@ -95,9 +103,16 @@ function collectSegment(tokens, spec, out, depth) {
     out.push(surface);
     return;
   }
-  if (depth >= MAX_UNWRAP_DEPTH) return;
   const inner = unwrapSegment(tokens, spec);
   if (!inner) return;
+  // Bounded work is right — a command must not be able to make the guard
+  // recurse forever. But giving up must not read as "nothing here": a segment
+  // still wrapping the guarded binary at the cap is UNCHECKED, not clean, and
+  // the guard refuses it on the same principle as an unreadable file.
+  if (depth >= MAX_UNWRAP_DEPTH) {
+    if (inner.argv || inner.scripts.length) out.push({ unverifiable: 'wrapper-depth' });
+    return;
+  }
   if (inner.argv) collectSegment(inner.argv, spec, out, depth + 1);
   // A spawned shell INHERITS the assignments in front of it, so
   // `GIT_AUTHOR_NAME=… bash -c "git commit"` reaches git with that identity.

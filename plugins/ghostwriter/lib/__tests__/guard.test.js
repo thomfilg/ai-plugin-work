@@ -252,6 +252,25 @@ describe('guard — bypasses that must stay closed', () => {
     assert.deepEqual(asked, ['/repo/outer/inner'], 'the last -C alone is the wrong directory');
   });
 
+  // Nesting re-quotes the payload at every level, so the exact rule that fires
+  // depends on how the newlines survive. What must hold at any depth is that
+  // the attribution is SEEN.
+  it('inspects a commit buried in several levels of shell', () => {
+    for (let depth = 1; depth <= 5; depth++) {
+      let command = `git commit -m "x\n\nCo-Authored-By: ${TOOL} <a@b>"`;
+      for (let i = 0; i < depth; i++) command = `bash -c ${JSON.stringify(command)}`;
+      assert.equal(inspect(command).blocked, true, `depth ${depth}`);
+    }
+  });
+
+  it('refuses a command nested past the traversal cap rather than allowing it', () => {
+    let command = 'git commit -m "feat: x"';
+    for (let i = 0; i < 9; i++) command = `bash -c ${JSON.stringify(command)}`;
+    const verdict = inspect(command);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiableCommand');
+  });
+
   it('carries an identity assignment into a shell the wrapper spawns', () => {
     // `GIT_AUTHOR_NAME=… bash -c "git commit"` — the spawned shell inherits it.
     const verdict = inspect(`GIT_AUTHOR_NAME=${TOOL} bash -c "git commit -m ok"`);

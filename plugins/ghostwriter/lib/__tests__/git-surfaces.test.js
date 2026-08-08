@@ -17,6 +17,13 @@ const { scanCommand, hasAuthorshipSurface, parseAuthorSpec } = require('../git-s
 
 const TOOL = ['Cl', 'aude'].join('');
 
+/** Wrap `inner` in `depth` levels of `bash -c`, quoting correctly each time. */
+function nestShell(depth, inner) {
+  let command = inner;
+  for (let i = 0; i < depth; i++) command = `bash -c ${JSON.stringify(command)}`;
+  return command;
+}
+
 /** The single surface of a command, asserted to exist. */
 function onlySurface(command) {
   const { surfaces } = scanCommand(command);
@@ -126,9 +133,27 @@ describe('scanCommand — wrappers', () => {
     assert.deepEqual(scanCommand('env FOO=bar ls -la').surfaces, []);
   });
 
-  it('stops peeling at a bounded depth rather than recursing forever', () => {
-    const deep = 'bash -c "bash -c \'bash -c \\"bash -c git commit -m x\\"\'"';
-    assert.doesNotThrow(() => scanCommand(deep));
+  // A nested payload arrives as `bash -c "git commit …"`, where the character
+  // in front of `git` is a QUOTE. A probe that only accepted whitespace missed
+  // every payload nested more than one level deep.
+  it('sees through nesting more than one level deep', () => {
+    for (let depth = 1; depth <= 5; depth++) {
+      const command = nestShell(depth, 'git commit -m "feat: x"');
+      const { surfaces } = scanCommand(command);
+      assert.equal(surfaces.length, 1, `depth ${depth}`);
+      assert.deepEqual(surfaces[0].messages, ['feat: x'], `depth ${depth}`);
+    }
+  });
+
+  // Bounded work is right; giving up must not read as "nothing here".
+  it('marks a command buried past the cap as unverifiable, not clean', () => {
+    const { surfaces } = scanCommand(nestShell(8, 'git commit -m x'));
+    assert.equal(surfaces.length, 1);
+    assert.equal(surfaces[0].unverifiable, 'wrapper-depth');
+  });
+
+  it('does not mark deep wrappers that run something else', () => {
+    assert.deepEqual(scanCommand(nestShell(8, 'ls -la')).surfaces, []);
   });
 });
 
