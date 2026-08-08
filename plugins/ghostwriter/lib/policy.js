@@ -1,0 +1,24 @@
+'use strict';
+
+/**
+ * policy.js — the operator override, in one place.
+ *
+ * Every enforcement point honours the same escape hatch, and each one used to
+ * spell it itself. Kept here so the guard, the file-content rules and the CLI
+ * cannot drift into disagreeing about what lifts the rules.
+ *
+ * The override is read from the ENVIRONMENT the enforcement point inherited.
+ * A value carried by the thing being inspected — an assignment in the command,
+ * a line in the file — is not an override; it is the offence, spelled
+ * differently. Callers that inspect text a command supplies check for that
+ * separately (see guard.js `selfGranted`).
+ */
+
+const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
+
+/** Has the operator lifted the rules for this process? */
+function isOverridden(env) {
+  return (env || {})[OVERRIDE_ENV] === '1';
+}
+
+module.exports = { OVERRIDE_ENV, isOverridden };

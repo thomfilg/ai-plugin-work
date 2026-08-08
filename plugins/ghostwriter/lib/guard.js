@@ -36,15 +36,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const {
-  checkText,
-  checkIdentity,
-  checkIdentityComplete,
-  checkExpectedIdentity,
-} = require('./attribution');
+const { checkText } = require('./attribution');
+const { checkIdentity, checkIdentityComplete, checkExpectedIdentity } = require('./identity-rules');
 const { scanCommand, identityEntry } = require('./git-surfaces');
 const { resolveGitUser, resolveCommitInfo, resolveGhAccount } = require('./git-identity');
-const { scanForgeCommand, scanToolCall } = require('./forge-surfaces');
+const { scanForgeCommand, scanToolCall, scanToolFiles } = require('./forge-surfaces');
+const { inspectFileWrites } = require('./file-content');
 const {
   checkPostText,
   checkRawPost,
@@ -54,9 +51,8 @@ const {
 const { readExpectedIdentity } = require('./expected-identity');
 const { MAX_UNWRAP_DEPTH } = require('./command-scan');
 const { finding, normalizeRead, UNVERIFIABLE, MAX_MESSAGE_FILE_BYTES } = require('./finding');
-
-/** Operator override, honoured ONLY from the hook's own environment. */
-const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
+const { OVERRIDE_ENV, isOverridden } = require('./policy');
+const { renderBlock } = require('./report');
 
 /**
  * A `-F` target can be any file the caller names, so the read has to be
@@ -289,6 +285,11 @@ const COMMAND_PASSES = [
   (c) => checkEffectiveIdentity(c.surfaces, c.ctx),
 ];
 
+/** A verdict as a finding-or-null, so it composes with the pass helpers. */
+function nullIfAllowed(verdict) {
+  return verdict && verdict.blocked ? verdict : null;
+}
+
 /** The first pass that finds something, or null when every pass is clean. */
 function firstFinding(passes, context) {
   for (const pass of passes) {
@@ -316,44 +317,23 @@ function inspectCommand(command, io) {
   // thing the guard exists to prevent, spelled differently. Only the hook's
   // inherited environment can lift the rules.
   const selfGranted = String(command).includes(OVERRIDE_ENV);
-  if (!selfGranted && ctx.env[OVERRIDE_ENV] === '1') return ALLOW;
+  if (!selfGranted && isOverridden(ctx.env)) return ALLOW;
 
   const hit = firstFinding(COMMAND_PASSES, { command, surfaces, posts, ctx });
   if (!hit) return ALLOW;
   return selfGranted ? { ...hit, selfGranted: true } : hit;
 }
 
-/** Render a finding as the stderr block the runtime shows the agent. */
-function renderBlock(hit) {
-  const lines = [
-    'ghostwriter: this command would sign the work as an AI.',
-    '',
-    `  rule      ${hit.rule}`,
-    `  where     ${hit.where}`,
-    `  problem   ${hit.reason}`,
-    `  evidence  ${hit.evidence}`,
-    '',
-    `↳ Fix: ${hit.hint}`,
-    '',
-    'The change belongs to the person who asked for it. Tools do not get a byline.',
-  ];
-  if (hit.selfGranted) {
-    lines.push(
-      '',
-      `Note: ${OVERRIDE_ENV} set inside the command is ignored — the override is`,
-      "honoured only from the operator's own environment."
-    );
-  }
-  return `${lines.join('\n')}\n`;
-}
-
 /**
  * Decide whether a forge MCP tool call may run.
  *
- * The text is inspected exactly as the CLI path's is. The posting ACCOUNT is
- * not: the credential lives in the MCP server, so no inspection of the call
- * can reveal who it will post as. When an expected human is configured that
- * gap is refused rather than assumed away.
+ * The text is inspected exactly as the CLI path's is, and so is any FILE the
+ * call carries: `create_or_update_file` and `push_files` commit content
+ * without a working tree or a shell, so the command walker never sees them and
+ * the file rules have to be applied to the call itself. The posting ACCOUNT is
+ * the one thing that cannot be inspected: the credential lives in the MCP
+ * server, so no reading of the call can reveal who it will post as. When an
+ * expected human is configured that gap is refused rather than assumed away.
  *
  * @param {string} toolName
  * @param {object} toolInput
@@ -362,11 +342,12 @@ function renderBlock(hit) {
 function inspectToolCall(toolName, toolInput, io) {
   const ctx = defaultIo(io);
   const { surfaces } = scanToolCall(toolName, toolInput);
-  if (!surfaces.length) return ALLOW;
-  if (ctx.env[OVERRIDE_ENV] === '1') return ALLOW;
-  const hit = checkPostText(surfaces, ctx);
+  const files = scanToolFiles(toolName, toolInput);
+  if (!surfaces.length && !files.length) return ALLOW;
+  if (isOverridden(ctx.env)) return ALLOW;
+  const hit = checkPostText(surfaces, ctx) || nullIfAllowed(inspectFileWrites(files, ctx));
   if (hit) return hit;
-  if (!ctx.expected.configured) return ALLOW;
+  if (!surfaces.length || !ctx.expected.configured) return ALLOW;
   return finding(
     unverifiableAccount(
       "an MCP tool posts under the server's credential, which the guard cannot read"
@@ -375,9 +356,29 @@ function inspectToolCall(toolName, toolInput, io) {
   );
 }
 
+/**
+ * Decide whether a file write may proceed.
+ *
+ * The other entry points ask what a change SAYS about itself in the places a
+ * change is announced. This one asks the same question of the change itself:
+ * a footer written into a source file ships in the diff, appears in the pull
+ * request, and stays in the tree after both are forgotten.
+ *
+ * @param {Array<{path: string, text: string}>} files - see file-content.js
+ *   `writeFiles`, which builds these from a write tool's input.
+ * @param {object} [io]
+ */
+function inspectWrite(files, io) {
+  const ctx = defaultIo(io);
+  if (!files || !files.length) return ALLOW;
+  if (isOverridden(ctx.env)) return ALLOW;
+  return inspectFileWrites(files, ctx);
+}
+
 module.exports = {
   inspectCommand,
   inspectToolCall,
+  inspectWrite,
   renderBlock,
   readTextFile,
   OVERRIDE_ENV,
