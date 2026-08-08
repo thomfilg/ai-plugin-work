@@ -14,12 +14,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  checkText,
-  checkIdentity,
-  checkIdentityComplete,
-  AI_TOOL_NAMES,
-} = require('../attribution');
+const { checkText, AI_TOOL_NAMES } = require('../attribution');
 
 const TOOL = ['Cl', 'aude'].join('');
 const TOOL_ALT = ['Co', 'dex'].join('');
@@ -36,7 +31,12 @@ function assertBlocked(result, rule) {
 
 describe('attribution vocabulary', () => {
   it('carries no contiguous tool-name literal in its own source', () => {
-    const source = require('node:fs').readFileSync(require.resolve('../attribution.js'), 'utf8');
+    // Case-INSENSITIVE, because the rules are: a comment that spells a name
+    // with a capital is exactly as self-matching as one that does not, and a
+    // case-sensitive assertion here quietly let two through.
+    const source = require('node:fs')
+      .readFileSync(require.resolve('../attribution.js'), 'utf8')
+      .toLowerCase();
     for (const name of AI_TOOL_NAMES) {
       assert.ok(!source.includes(name), `source must not spell "${name}" contiguously`);
     }
@@ -125,72 +125,16 @@ describe('checkText — attribution is blocked', () => {
   });
 });
 
-describe('checkIdentity — a bare token is the offence', () => {
-  it('passes a human identity', () => {
-    assert.deepEqual(checkIdentity({ name: 'Ada Lovelace', email: 'ada@example.com' }), {
-      ok: true,
-    });
-  });
-
-  it('passes an empty identity (unknown, not AI)', () => {
-    assert.deepEqual(checkIdentity({ name: '', email: '' }), { ok: true });
-    assert.deepEqual(checkIdentity(null), { ok: true });
-  });
-
-  it('rejects a tool name in user.name', () => {
-    assertBlocked(checkIdentity({ name: TOOL, email: 'a@example.com' }), 'aiIdentity');
-  });
-
-  it('rejects a vendor domain in user.email', () => {
-    const email = `noreply@${['anthro', 'pic'].join('')}.com`;
-    assertBlocked(checkIdentity({ name: 'Someone', email }), 'aiIdentity');
-  });
-
-  it('quotes the rendered identity as evidence', () => {
-    const result = checkIdentity({ name: TOOL, email: 'a@example.com' });
-    assert.equal(result.evidence, `${TOOL} <a@example.com>`);
-  });
-});
-
-// A commit with no configured identity does not fail — git invents
-// `user@hostname` and stamps the machine. `checkIdentity` cannot see that: a
-// blank field names no tool and looks like no bot, so it needs its own rule.
-describe('checkIdentityComplete — a byline nobody signed', () => {
-  it('accepts a complete human identity', () => {
-    assert.deepEqual(
-      checkIdentityComplete({ name: 'Ada Lovelace', email: 'ada@example.com' }),
-      { ok: true }
-    );
-  });
-
-  it('rejects a missing email', () => {
-    const result = checkIdentityComplete({ name: 'Ada Lovelace', email: '' });
-    assertBlocked(result, 'missingIdentity');
-    assert.ok(result.evidence.includes('user.email'));
-    assert.ok(!result.evidence.includes('user.name'), 'must name only what is missing');
-  });
-
-  it('rejects a missing name', () => {
-    assertBlocked(checkIdentityComplete({ name: '   ', email: 'ada@example.com' }), 'missingIdentity');
-  });
-
-  it('names both halves when neither is set', () => {
-    const result = checkIdentityComplete({ name: '', email: '' });
-    assertBlocked(result, 'missingIdentity');
-    assert.ok(result.evidence.includes('user.name') && result.evidence.includes('user.email'));
-  });
-
-  it('stays silent when the target could not be interrogated at all', () => {
-    // resolved:false is "there was nobody to ask" — no git, no repository.
-    // git refuses such a command itself; an empty pair there is not a byline.
-    assert.deepEqual(checkIdentityComplete({ name: '', email: '', resolved: false }), { ok: true });
-  });
-});
-
 describe('aiAttributionLink — host boundary', () => {
   it('blocks the product footer link', () => {
-    assertBlocked(checkText(`Generated with [x](https://${VENDOR}.com/${TOOL_ALT})`), 'aiGeneratedPhrase');
-    assertBlocked(checkText(`See https://${VENDOR}.com/${TOOL_ALT} for details`), 'aiAttributionLink');
+    assertBlocked(
+      checkText(`Generated with [x](https://${VENDOR}.com/${TOOL_ALT})`),
+      'aiGeneratedPhrase'
+    );
+    assertBlocked(
+      checkText(`See https://${VENDOR}.com/${TOOL_ALT} for details`),
+      'aiAttributionLink'
+    );
   });
 
   it('allows a documentation host that merely contains it', () => {

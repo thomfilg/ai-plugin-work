@@ -21,8 +21,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { checkText, checkIdentity, checkIdentityComplete } = require(
-  path.join(__dirname, '..', 'lib', 'attribution')
+const { checkText } = require(path.join(__dirname, '..', 'lib', 'attribution'));
+const { checkIdentity, checkIdentityComplete } = require(
+  path.join(__dirname, '..', 'lib', 'identity-rules')
 );
 const { resolveGitUser } = require(path.join(__dirname, '..', 'lib', 'git-identity'));
 const { OVERRIDE_ENV } = require(path.join(__dirname, '..', 'lib', 'guard'));

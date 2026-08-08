@@ -241,6 +241,93 @@ describe('ghostwriter hook — pull requests and comments', () => {
   });
 });
 
+// A footer in a source file is the attribution that lasts: it ships in the
+// diff, shows up in the pull request, and stays in the tree after the message
+// and the description are both forgotten. Nothing in the message passes sees
+// it, because it is not a message.
+describe('ghostwriter hook — file content', () => {
+  function runWrite(toolName, toolInput, cwd = repoDir) {
+    return runHook(null, {
+      payload: {
+        session_id: 'gw-1',
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: toolInput,
+        cwd,
+      },
+    });
+  }
+
+  it('blocks a generated-with footer written into a source file', () => {
+    const result = runWrite('Write', {
+      file_path: 'src/index.js',
+      content: `// Generated with ${TOOL} Code\nmodule.exports = 1;\n`,
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /aiGeneratedPhrase/);
+    assert.match(result.stderr, /src\/index\.js/);
+  });
+
+  it('blocks a trailer added by an Edit', () => {
+    const result = runWrite('Edit', {
+      file_path: 'src/index.js',
+      old_string: 'x',
+      new_string: `x\n// Co-Authored-By: ${TOOL} <a@b>`,
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /aiCoAuthorTrailer/);
+  });
+
+  it('allows ordinary code that merely names a product', () => {
+    const result = runWrite('Write', {
+      file_path: 'src/index.js',
+      content: `// ${TOOL} adapter\nmodule.exports = 1;\n`,
+    });
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, '');
+  });
+
+  it('allows a document quoting the trailer it documents', () => {
+    const result = runWrite('Write', {
+      file_path: 'docs/policy.md',
+      content: `# Policy\n\nRejected:\n\n\`\`\`\nCo-Authored-By: ${TOOL}\n\`\`\`\n`,
+    });
+    assert.equal(result.code, 0);
+  });
+
+  it('leaves a read alone', () => {
+    assert.equal(runWrite('Read', { file_path: 'src/index.js' }).code, 0);
+  });
+
+  it('blocks file content committed through an MCP call', () => {
+    // No shell, no working tree — the command walker never sees this one.
+    const result = runWrite('mcp__github__create_or_update_file', {
+      owner: 'o',
+      repo: 'r',
+      path: 'src/a.js',
+      content: `// Generated with ${TOOL} Code`,
+      message: 'feat: add a',
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /aiGeneratedPhrase/);
+  });
+
+  it('blocks one dirty file inside a multi-file MCP push', () => {
+    const result = runWrite('mcp__github__push_files', {
+      owner: 'o',
+      repo: 'r',
+      branch: 'main',
+      message: 'feat: add two files',
+      files: [
+        { path: 'a.js', content: 'const a = 1;' },
+        { path: 'b.js', content: `/* Written by ${TOOL} */` },
+      ],
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /b\.js/);
+  });
+});
+
 describe('ghostwriter hook — the operator override', () => {
   const dirty = `git commit -m "feat: x\n\nCo-Authored-By: ${TOOL} <a@b>"`;
 

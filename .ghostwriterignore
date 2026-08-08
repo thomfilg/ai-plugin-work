@@ -1,0 +1,7 @@
+# Files exempt from ghostwriter's FILE rules (see plugins/ghostwriter/lib/ignore.js).
+# Only file CONTENT is exempted here — commit messages, pull request bodies and
+# committing identities are never covered by this list.
+
+# The work plugin's own commit-message rules, whose comments quote the footer
+# they exist to reject. Quoting the offence is the file's job.
+plugins/work/scripts/workflows/work/hooks/commit-msg-rules.js

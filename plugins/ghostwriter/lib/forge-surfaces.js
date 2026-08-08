@@ -148,6 +148,32 @@ function scanForgeCommand(command) {
   };
 }
 
+/**
+ * Tool-input keys carrying FILE content — a commit made without a working
+ * tree, straight through the API. `create_or_update_file` writes one file;
+ * `push_files` writes a list. Neither passes through the shell, so nothing the
+ * command walker does can see them, and the text they carry lands in the
+ * repository exactly as a `git commit` would put it there.
+ *
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @returns {Array<{path: string, text: string}>}
+ */
+function scanToolFiles(toolName, toolInput) {
+  if (!isForgeTool(toolName) || !toolInput || typeof toolInput !== 'object') return [];
+  const files = [];
+  const add = (entry) => {
+    if (!entry || typeof entry.content !== 'string' || !entry.content) return;
+    files.push({
+      path: typeof entry.path === 'string' && entry.path ? entry.path : `${toolName} content`,
+      text: entry.content,
+    });
+  };
+  add(toolInput);
+  if (Array.isArray(toolInput.files)) toolInput.files.forEach(add);
+  return files;
+}
+
 /** Is this MCP tool one that publishes to a forge? */
 function isForgeTool(toolName) {
   return typeof toolName === 'string' && toolName.startsWith('mcp__github__');
@@ -176,6 +202,7 @@ function scanToolCall(toolName, toolInput) {
 module.exports = {
   scanForgeCommand,
   scanToolCall,
+  scanToolFiles,
   isForgeTool,
   classifyGhSegment,
   GH_POST_COMMANDS,
