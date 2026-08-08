@@ -38,7 +38,7 @@ const path = require('node:path');
 
 const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
 const { scanCommand, identityEntry } = require('./git-surfaces');
-const { resolveGitUser, resolveCommitAuthor, resolveGhAccount } = require('./git-identity');
+const { resolveGitUser, resolveCommitInfo, resolveGhAccount } = require('./git-identity');
 const { scanForgeCommand, scanToolCall } = require('./forge-surfaces');
 const {
   checkPostText,
@@ -98,7 +98,7 @@ function defaultIo(io) {
     env: opts.env || process.env,
     readMessageFile: opts.readMessageFile || ((p, cwd) => readTextFile(p, cwd)),
     resolveIdentity: opts.resolveIdentity || resolveGitUser,
-    resolveCommitAuthor: opts.resolveCommitAuthor || resolveCommitAuthor,
+    resolveCommitInfo: opts.resolveCommitInfo || resolveCommitInfo,
     resolveAccount: opts.resolveAccount || resolveGhAccount,
     expected: opts.expected || readExpectedIdentity(opts.env || process.env),
   };
@@ -214,20 +214,30 @@ function checkRawCommand(command, surfaces) {
 }
 
 /**
- * A copied author — `git cherry-pick <ref>`, `git commit -C <ref>`. The new
- * commit carries the SOURCE commit's author, so the configured identity pass
- * would clear a perfectly clean human while a tool byline lands anyway.
+ * A copied commit — `git cherry-pick <ref>`, `git commit -C <ref>`.
+ *
+ * BOTH halves ride along: the source commit's author, which the configured
+ * identity pass would never see, and its message, which none of the message
+ * passes receive because it appears nowhere in the command. Checking one and
+ * not the other leaves exactly half the copy uninspected.
  */
-function checkCopiedAuthors(surfaces, io) {
+function checkCopiedCommit(surface, ref, io) {
+  const cwd = surfaceCwd(surface, io);
+  const source = io.resolveCommitInfo(cwd, surfaceGitDir(surface, io), ref);
+  const author = checkIdentity(source);
+  if (!author.ok) return finding(author, `the author copied from ${ref}`);
+  const expected = checkExpectedIdentity(source, io.expected);
+  if (!expected.ok) return finding(expected, `the author copied from ${ref}`);
+  const message = checkText(source.message);
+  if (!message.ok) return finding(message, `the message copied from ${ref}`);
+  return null;
+}
+
+function checkCopiedCommits(surfaces, io) {
   for (const surface of surfaces) {
     for (const ref of surface.authorRefs || []) {
-      const cwd = surfaceCwd(surface, io);
-      const author = io.resolveCommitAuthor(cwd, surfaceGitDir(surface, io), ref);
-      const where = `the author copied from ${ref}`;
-      const result = checkIdentity(author);
-      if (!result.ok) return finding(result, where);
-      const expected = checkExpectedIdentity(author, io.expected);
-      if (!expected.ok) return finding(expected, where);
+      const hit = checkCopiedCommit(surface, ref, io);
+      if (hit) return hit;
     }
   }
   return null;
@@ -265,7 +275,7 @@ const COMMAND_PASSES = [
   (c) => checkPostText(c.posts, c.ctx),
   (c) => checkRawPost(c.command, c.posts),
   (c) => checkPostAccount(c.posts, c.ctx),
-  (c) => checkCopiedAuthors(c.surfaces, c.ctx),
+  (c) => checkCopiedCommits(c.surfaces, c.ctx),
   (c) => checkEffectiveIdentity(c.surfaces, c.ctx),
 ];
 

@@ -37,7 +37,7 @@ function inspect(command, overrides = {}) {
     readMessageFile: () => '',
     resolveIdentity: () => HUMAN,
     resolveAccount: () => 'a-human-login',
-    resolveCommitAuthor: () => HUMAN,
+    resolveCommitInfo: () => ({ ...HUMAN, message: 'feat: clean' }),
     expected: { emails: [], logins: [], configured: false },
     ...overrides,
   });
@@ -294,23 +294,57 @@ describe('guard — bypasses that must stay closed', () => {
   it('blocks an author copied from a bot commit, and allows a human one', () => {
     const BOT = { name: 'proj-botApp[bot]', email: 'x@users.noreply.github.com' };
     for (const command of ['git cherry-pick abc123', 'git commit -C abc123']) {
-      const verdict = inspect(command, { resolveCommitAuthor: () => BOT });
+      const verdict = inspect(command, {
+        resolveCommitInfo: () => ({ ...BOT, message: 'feat: clean' }),
+      });
       assert.equal(verdict.blocked, true, command);
       assert.equal(verdict.where, 'the author copied from abc123', command);
     }
     assert.deepEqual(inspect('git cherry-pick abc123'), { blocked: false });
   });
 
+  // `commit -C` copies the message as well as the author. Checking one and not
+  // the other leaves half the copy uninspected.
+  it('blocks an attributed message copied from another commit', () => {
+    for (const command of ['git cherry-pick abc123', 'git commit -C abc123']) {
+      const verdict = inspect(command, {
+        resolveCommitInfo: () => ({
+          ...HUMAN,
+          message: `feat: x\n\nCo-Authored-By: ${TOOL} <a@b>`,
+        }),
+      });
+      assert.equal(verdict.blocked, true, command);
+      assert.equal(verdict.rule, 'aiCoAuthorTrailer', command);
+      assert.equal(verdict.where, 'the message copied from abc123', command);
+    }
+  });
+
+  it('allows a copy whose author and message are both clean', () => {
+    assert.deepEqual(
+      inspect('git commit -C abc123', {
+        resolveCommitInfo: () => ({ ...HUMAN, message: 'feat: a clean subject' }),
+      }),
+      { blocked: false }
+    );
+  });
+
   it('leaves a revert alone — git authors it as the reverter', () => {
     const BOT = { name: 'some-bot', email: 'b@x.com' };
-    assert.deepEqual(inspect('git revert abc123', { resolveCommitAuthor: () => BOT }), {
-      blocked: false,
-    });
+    assert.deepEqual(
+      inspect('git revert abc123', {
+        resolveCommitInfo: () => ({ ...BOT, message: 'feat: clean' }),
+      }),
+      {
+        blocked: false,
+      }
+    );
   });
 
   it('allows an unresolvable ref, which git would reject itself', () => {
     assert.deepEqual(
-      inspect('git cherry-pick nope', { resolveCommitAuthor: () => ({ name: '', email: '' }) }),
+      inspect('git cherry-pick nope', {
+        resolveCommitInfo: () => ({ name: '', email: '', message: '' }),
+      }),
       { blocked: false }
     );
   });
