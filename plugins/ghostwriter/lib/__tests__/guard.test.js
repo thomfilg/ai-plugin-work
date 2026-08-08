@@ -233,6 +233,44 @@ describe('guard — bypasses that must stay closed', () => {
     assert.deepEqual(asked, [['/repo/sub', '/repo/sub/rel/.git']]);
   });
 
+  it('reads a message file named with an attached -F', () => {
+    const verdict = inspect('git commit -Fmsg.txt', {
+      readMessageFile: () => `feat: x\n\nCo-Authored-By: ${TOOL} <a@b>`,
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'aiCoAuthorTrailer');
+  });
+
+  it('compounds repeated -C values the way git does', () => {
+    const asked = [];
+    inspect('git -C outer -C inner commit -m "feat: x"', {
+      resolveIdentity: (cwd) => {
+        asked.push(cwd);
+        return HUMAN;
+      },
+    });
+    assert.deepEqual(asked, ['/repo/outer/inner'], 'the last -C alone is the wrong directory');
+  });
+
+  it('carries an identity assignment into a shell the wrapper spawns', () => {
+    // `GIT_AUTHOR_NAME=… bash -c "git commit"` — the spawned shell inherits it.
+    const verdict = inspect(`GIT_AUTHOR_NAME=${TOOL} bash -c "git commit -m ok"`);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'aiIdentity');
+  });
+
+  it('follows a GIT_DIR inherited from the session, not just the command', () => {
+    const asked = [];
+    inspect('git commit -m "feat: x"', {
+      env: { GIT_DIR: '/other/.git' },
+      resolveIdentity: (cwd, gitDir) => {
+        asked.push(gitDir);
+        return HUMAN;
+      },
+    });
+    assert.deepEqual(asked, ['/other/.git']);
+  });
+
   it('resolves a relative message file against the -C target', () => {
     const asked = [];
     inspect('git -C other/repo commit -F msg.txt', {

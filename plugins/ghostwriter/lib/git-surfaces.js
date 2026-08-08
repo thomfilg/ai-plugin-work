@@ -83,11 +83,24 @@ const GIT_BINARY_RE = /(?:^|\/)git$/;
 const REDIRECT_RE = /^<(.*)$/;
 
 /**
- * The two value-bearing flags read the same way: `--long value`, `--long=value`
- * or a combined short cluster such as `-am` / `-aF`.
+ * The two value-bearing flags read the same way: `--long value`,
+ * `--long=value`, a combined short cluster whose value is the NEXT token
+ * (`-am msg`), or one with the value ATTACHED to it (`-mmsg`, `-Fmsg.txt`).
+ * git accepts all four; a reader that handles only the first three leaves the
+ * attached form entirely uninspected. Each attached pattern excludes the OTHER
+ * flag's letter so `-Fmsg.txt` is a file and not also a message called
+ * "sg.txt".
  */
-const MESSAGE_FLAG = { long: '--message', short: /^-[a-zA-Z]*m$/ };
-const FILE_FLAG = { long: '--file', short: /^-[a-zA-Z]*F$/ };
+const MESSAGE_FLAG = {
+  long: '--message',
+  short: /^-[a-zA-Z]*m$/,
+  attached: /^-[^-F]*m(.+)$/,
+};
+const FILE_FLAG = {
+  long: '--file',
+  short: /^-[a-zA-Z]*F$/,
+  attached: /^-[^-m]*F(.+)$/,
+};
 
 /**
  * Record the repository a command targets, as we skip git's global flags.
@@ -96,11 +109,14 @@ const FILE_FLAG = { long: '--file', short: /^-[a-zA-Z]*F$/ };
  * whose config git will read. They are independent — `git --git-dir=X commit`
  * commits into X while still sitting in the shell's directory — so both are
  * kept, and the identity pass needs both to ask the right repository.
+ *
+ * `-C` COMPOUNDS: `git -C outer -C inner` lands in `outer/inner`, so every
+ * value is kept in order rather than the last one winning.
  * `--work-tree` selects the files, not the config, so it carries no identity.
  */
 function captureTarget(argv, i, target) {
   const dir = longFlagValue(argv, i, '-C');
-  if (dir !== null) target.dir = dir;
+  if (dir !== null) target.dirs.push(dir);
   const gitDir = longFlagValue(argv, i, '--git-dir');
   if (gitDir !== null) target.gitDir = gitDir;
 }
@@ -110,12 +126,12 @@ function captureTarget(argv, i, target) {
  * capturing the repository target. Repeated values compound in git; the last
  * one is kept, which is the common single-flag case.
  *
- * @returns {{subcommand: string, index: number, dir: string|null,
+ * @returns {{subcommand: string, index: number, dirs: string[],
  *   gitDir: string|null}|null}
  */
 function findSubcommand(argv) {
   if (!argv.length || !GIT_BINARY_RE.test(argv[0])) return null;
-  const target = { dir: null, gitDir: null };
+  const target = { dirs: [], gitDir: null };
   let i = 1;
   while (i < argv.length) {
     const token = argv[i];
@@ -139,7 +155,12 @@ function collectFlagValue(argv, i, spec, target) {
     target.push(long);
     return;
   }
-  if (spec.short.test(argv[i]) && i + 1 < argv.length) target.push(argv[i + 1]);
+  if (spec.short.test(argv[i])) {
+    if (i + 1 < argv.length) target.push(argv[i + 1]);
+    return;
+  }
+  const attached = spec.attached.exec(argv[i]);
+  if (attached) target.push(attached[1]);
 }
 
 /**
@@ -169,7 +190,7 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     kind,
     writesMessage,
     writesCommit,
-    dir: target.dir || null,
+    dirs: target.dirs || [],
     gitDir: target.gitDir || null,
     messages: [],
     messageFiles: [],
@@ -194,7 +215,7 @@ function authoringSurface(argv, found, env) {
   const writesMessage = MESSAGE_SUBCOMMANDS.has(found.subcommand);
   const writesCommit = IDENTITY_SUBCOMMANDS.has(found.subcommand);
   if (!writesMessage && !writesCommit) return null;
-  const target = { dir: found.dir, gitDir: found.gitDir || envGitDir(env) };
+  const target = { dirs: found.dirs, gitDir: found.gitDir || envGitDir(env) };
   const surface = newSurface(found.subcommand, writesMessage, writesCommit, target);
   readMessageArgs(argv, found.index + 1, surface);
   readIdentities(argv, found.index, env, surface);

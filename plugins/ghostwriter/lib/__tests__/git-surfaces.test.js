@@ -143,6 +143,20 @@ describe('scanCommand — message surfaces', () => {
     assert.deepEqual(onlySurface('git commit -am "fix: y"').messages, ['fix: y']);
   });
 
+  // git accepts the value attached to the cluster, with no space. A reader
+  // that only handles the spaced form never sees this message or file at all.
+  it('reads an ATTACHED short-flag value', () => {
+    assert.deepEqual(onlySurface('git commit -mhello').messages, ['hello']);
+    assert.deepEqual(onlySurface('git commit -amhello').messages, ['hello']);
+    assert.deepEqual(onlySurface('git commit -Fmsg.txt').messageFiles, ['msg.txt']);
+    assert.deepEqual(onlySurface('git commit -aFmsg.txt').messageFiles, ['msg.txt']);
+  });
+
+  it("does not let one attached cluster claim the other flag's value", () => {
+    assert.deepEqual(onlySurface('git commit -Fmsg.txt').messages, []);
+    assert.deepEqual(onlySurface('git commit -mhello').messageFiles, []);
+  });
+
   it('reads repeated -m paragraphs', () => {
     assert.deepEqual(onlySurface('git commit -m subject -m body').messages, ['subject', 'body']);
   });
@@ -160,8 +174,14 @@ describe('scanCommand — message surfaces', () => {
   });
 
   it('records the -C target so later checks follow the right repository', () => {
-    assert.equal(onlySurface('git -C /other/repo commit -m x').dir, '/other/repo');
-    assert.equal(onlySurface('git commit -m x').dir, null);
+    assert.deepEqual(onlySurface('git -C /other/repo commit -m x').dirs, ['/other/repo']);
+    assert.deepEqual(onlySurface('git commit -m x').dirs, []);
+  });
+
+  // git COMPOUNDS them: `-C outer -C inner` lands in outer/inner, so keeping
+  // only the last would resolve against the wrong directory.
+  it('keeps every -C value in order, because they compound', () => {
+    assert.deepEqual(onlySurface('git -C outer -C inner commit -m x').dirs, ['outer', 'inner']);
   });
 
   // `--git-dir` selects the repository whose CONFIG git reads, independently
@@ -175,7 +195,7 @@ describe('scanCommand — message surfaces', () => {
 
   it('keeps -C and --git-dir separate — they select different things', () => {
     const surface = onlySurface('git -C sub --git-dir=rel/.git commit -m x');
-    assert.equal(surface.dir, 'sub');
+    assert.deepEqual(surface.dirs, ['sub']);
     assert.equal(surface.gitDir, 'rel/.git');
   });
 
