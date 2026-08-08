@@ -688,10 +688,21 @@ describe('guard — the posting account', () => {
     assert.equal(verdict.rule, 'unverifiableAccount');
   });
 
-  it('allows an unreadable account when no human is pinned', () => {
-    assert.deepEqual(inspect('gh pr comment 1 --body ok', { resolveAccount: () => '' }), {
+  it('leaves the command alone when there is no gh on the machine', () => {
+    // null is "nothing here can post" — that command fails on its own and
+    // explains itself better than a guard would.
+    assert.deepEqual(inspect('gh pr comment 1 --body ok', { resolveAccount: () => null }), {
       blocked: false,
     });
+  });
+
+  it('blocks an account nobody can name, pinned human or not', () => {
+    // The anonymous half of the same rule. `gh` itself refuses to post with no
+    // account, so refusing here costs a working command nothing — and the
+    // identity checks cannot run on '' any more than on a tool name.
+    const verdict = inspect('gh pr comment 1 --body ok', { resolveAccount: () => '' });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiableAccount');
   });
 });
 

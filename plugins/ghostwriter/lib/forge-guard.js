@@ -84,8 +84,15 @@ function checkPostAccount(posts, io) {
     );
   }
   const login = io.resolveAccount(io.cwd);
+  // null is "there is no `gh` here" — that command posts nothing and explains
+  // itself better than a guard would.
+  if (login === null) return null;
   if (!login) {
-    if (!io.expected.configured) return null;
+    // Not conditional on a pinned human. A post published under an account
+    // nobody can name is the anonymous half of the same rule: the identity
+    // checks below cannot run on '' any more than they can on a tool name,
+    // and `gh` itself refuses to post when it has no account — so a refusal
+    // here costs a working command nothing.
     return finding(
       unverifiableAccount('the posting account could not be read'),
       `gh ${posts[0].kind}`
