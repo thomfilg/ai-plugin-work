@@ -1,0 +1,63 @@
+name: Attribution
+
+# The last enforcement point, and the only one that cannot be routed around.
+#
+# The plugin's hooks run where the agent runs, and the git hooks run where they
+# are installed. Neither covers a branch pushed from a laptop that has neither,
+# and neither covers the pull request's own description, which is written on
+# github.com. This job asks the same questions of what actually arrived.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ghostwriter:
+    runs-on: ubuntu-latest
+    name: No AI self-attribution
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history: every check below is a range against the base.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve the base
+        id: base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          BASE="$BASE_SHA"
+          if [ -z "$BASE" ]; then
+            git fetch --no-tags origin "$BASE_REF"
+            BASE="origin/$BASE_REF"
+          fi
+          echo "sha=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Files this pull request adds
+        run: node plugins/ghostwriter/scripts/ghostwriter-scan.js --diff "${{ steps.base.outputs.sha }}"
+
+      - name: Commits this pull request adds — message and author
+        run: node plugins/ghostwriter/scripts/ghostwriter-scan.js --commits "${{ steps.base.outputs.sha }}"
+
+      - name: The pull request's own title and description
+        # Via env, never interpolated into the script: the title and body are
+        # written by whoever opened the pull request, and a `run:` block that
+        # substitutes them at template time executes what they wrote.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" |
+            node plugins/ghostwriter/scripts/ghostwriter-check.js --prose -

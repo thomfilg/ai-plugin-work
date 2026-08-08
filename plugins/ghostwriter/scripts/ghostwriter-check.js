@@ -14,6 +14,13 @@
  *   ghostwriter-check.js --message "<text>"   validate literal text
  *   ghostwriter-check.js -                    validate a message on stdin
  *   ghostwriter-check.js --identity [dir]     validate the git identity in dir
+ *   ghostwriter-check.js --prose <any of the above>
+ *
+ * `--prose` blanks code blocks before the rules read the text, for surfaces
+ * where quoting an example is normal: a pull request description, an issue
+ * comment, a release note. A commit message stays strict, because an
+ * attribution hidden in a fence there is far likelier to be evasion than
+ * documentation — and a document that must quote a footer puts it in a fence.
  *
  * Exit codes: 0 clean, 1 attribution found, 2 usage error.
  */
@@ -38,9 +45,17 @@ const USAGE = [
   '  ghostwriter-check.js --message "<text>"   validate literal text',
   '  ghostwriter-check.js -                    validate a message on stdin',
   '  ghostwriter-check.js --identity [dir]     validate the git identity in dir',
+  '  ghostwriter-check.js --prose <any of the above>   read it as published prose',
 ].join('\n');
 
 function parseArgs(argv) {
+  const prose = argv[0] === '--prose';
+  const rest = prose ? argv.slice(1) : argv;
+  const parsed = parseInput(rest);
+  return parsed.error ? parsed : { ...parsed, prose };
+}
+
+function parseInput(argv) {
   if (!argv.length) return { error: 'no input given' };
   const [first, second] = argv;
   if (first === '--identity') return { mode: 'identity', value: second || process.cwd() };
@@ -105,7 +120,7 @@ function main(argv) {
     process.stderr.write(`ghostwriter-check: cannot read input (${err.message})\n`);
     return EXIT_USAGE;
   }
-  const result = checkText(stripGitComments(text));
+  const result = checkText(stripGitComments(text), { prose: args.prose });
   if (result.ok) return EXIT_OK;
   report(result, 'this message');
   return EXIT_FOUND;
