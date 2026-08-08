@@ -28,7 +28,7 @@ const EXIT_OK = 0;
 const EXIT_REFUSED = 1;
 const EXIT_USAGE = 2;
 
-const MARKER = '# ghostwriter-commit-msg v1';
+const { COMMIT_MSG_MARKER: MARKER } = require(path.join(__dirname, '..', 'lib', 'policy'));
 const CHECKER = path.resolve(__dirname, 'ghostwriter-check.js');
 
 function hookBody() {

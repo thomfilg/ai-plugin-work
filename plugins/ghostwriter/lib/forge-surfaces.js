@@ -41,6 +41,13 @@ const GH_POST_COMMANDS = {
 const TEXT_FLAGS = ['--body', '--title', '--notes', '--subject', '--message'];
 const SHORT_TEXT_FLAGS = { '-b': '--body', '-t': '--title', '-n': '--notes', '-m': '--message' };
 const FILE_FLAGS = ['--body-file', '--notes-file'];
+/**
+ * `-F` is `gh`'s short form of `--body-file` on every posting command. Reading
+ * only the long form left the idiomatic invocation — `gh pr create -F body.md`
+ * — publishing a file nobody opened. (Under `gh api` the same letter means a
+ * raw field, which is why that group is read by readApiFields instead.)
+ */
+const SHORT_FILE_FLAGS = { '-F': '--body-file' };
 
 /** `gh api -f body=…` — a field whose key publishes prose. */
 const API_FIELD_FLAGS = ['--field', '--raw-field', '-f', '-F'];
@@ -70,21 +77,34 @@ function newPost(kind) {
   return { kind, texts: [], textFiles: [], tokenOverride: null };
 }
 
+/** Literal text at `argv[i]`: `--body value`, `--body=value`, or `-b value`. */
+function readTextArg(argv, i, kind, out) {
+  for (const flag of TEXT_FLAGS) {
+    const value = longFlagValue(argv, i, flag);
+    if (value !== null) out.texts.push({ where: `gh ${kind} ${flag}`, text: value });
+  }
+  const short = SHORT_TEXT_FLAGS[argv[i]];
+  if (short && i + 1 < argv.length)
+    out.texts.push({ where: `gh ${kind} ${short}`, text: argv[i + 1] });
+}
+
+/** A path to text at `argv[i]`: `--body-file`, `--notes-file`, or `-F`. */
+function readTextFileArg(argv, i, kind, out) {
+  for (const flag of FILE_FLAGS) {
+    const file = longFlagValue(argv, i, flag);
+    if (file !== null) out.textFiles.push({ where: `gh ${kind} ${flag}`, file });
+  }
+  const short = SHORT_FILE_FLAGS[argv[i]];
+  if (short && i + 1 < argv.length) {
+    out.textFiles.push({ where: `gh ${kind} ${short}`, file: argv[i + 1] });
+  }
+}
+
 /** Read `--body` / `-b` / `--body-file` style arguments onto a post surface. */
 function readPostArgs(argv, start, kind, out) {
   for (let i = start; i < argv.length; i++) {
-    const short = SHORT_TEXT_FLAGS[argv[i]];
-    for (const flag of TEXT_FLAGS) {
-      const value = longFlagValue(argv, i, flag);
-      if (value !== null) out.texts.push({ where: `gh ${kind} ${flag}`, text: value });
-    }
-    if (short && i + 1 < argv.length) {
-      out.texts.push({ where: `gh ${kind} ${short}`, text: argv[i + 1] });
-    }
-    for (const flag of FILE_FLAGS) {
-      const file = longFlagValue(argv, i, flag);
-      if (file !== null) out.textFiles.push({ where: `gh ${kind} ${flag}`, file });
-    }
+    readTextArg(argv, i, kind, out);
+    readTextFileArg(argv, i, kind, out);
   }
 }
 

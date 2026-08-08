@@ -31,6 +31,7 @@ const {
   readConfigIdentity,
   readConfigSources,
 } = require('./git-identity-args');
+const { readHookBypass } = require('./git-bypass');
 
 /** `git` global flags that consume the following token as their value. */
 const GIT_GLOBAL_VALUE_FLAGS = new Set([
@@ -59,6 +60,14 @@ const AUTHOR_COPY_SUBCOMMANDS = new Set(['cherry-pick']);
 /** `git commit` flags that reuse another commit's author and message. */
 const REUSE_FLAGS = ['--reuse-message', '--reedit-message'];
 const REUSE_SHORT = new Set(['-C', '-c']);
+
+/**
+ * Subcommands that IMPORT a commit wholesale from a file. `git am` takes the
+ * author from the patch's `From:` header and the message from its body, so
+ * neither the configured identity nor any message argument describes what
+ * actually lands — the patch does, and it has to be read.
+ */
+const PATCH_SUBCOMMANDS = new Set(['am']);
 
 /** Subcommands that stamp a new object with the current committer identity. */
 const IDENTITY_SUBCOMMANDS = new Set([
@@ -96,6 +105,8 @@ const CONFIG_READ_FLAGS = new Set([
 const GIT_BINARY_RE = /(?:^|\/)git$/;
 /** `< file` / `<file` — git reads the message from there under `-F -`. */
 const REDIRECT_RE = /^<(.*)$/;
+/** Any redirect token, for readers that must step over one. */
+const REDIRECT_TOKEN_RE = /^[<>]/;
 
 /**
  * The two value-bearing flags read the same way: `--long value`,
@@ -231,9 +242,35 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     configSources: target.configSources || {},
     messages: [],
     messageFiles: [],
+    patchFiles: [],
     identities: [],
     authorRefs: [],
+    bypassesHooks: null,
   };
+}
+
+/**
+ * Re-file an importing command's inputs as PATCH files.
+ *
+ * A patch is not a message: it carries an author header of its own and a diff
+ * underneath, so it is read with the file rules rather than the message ones.
+ * Positional arguments are the patches; a `< patch` redirect is the same input
+ * arriving another way, and `readMessageArgs` has already collected it.
+ */
+function readPatchArgs(argv, start, out) {
+  for (let i = start; i < argv.length; i++) {
+    const token = argv[i];
+    if (token.startsWith('-')) continue;
+    // Redirect furniture. `readMessageArgs` already resolved `< patch` to its
+    // target; the bare `<` and the path behind it are not arguments.
+    if (REDIRECT_TOKEN_RE.test(token)) {
+      if (token.length === 1) i += 1;
+      continue;
+    }
+    out.patchFiles.push(token);
+  }
+  out.patchFiles = [...new Set([...out.patchFiles, ...out.messageFiles])];
+  out.messageFiles = [];
 }
 
 /**
@@ -260,8 +297,10 @@ function authoringSurface(argv, found, env) {
   };
   const surface = newSurface(found.subcommand, writesMessage, writesCommit, target);
   readMessageArgs(argv, found.index + 1, surface);
+  if (PATCH_SUBCOMMANDS.has(found.subcommand)) readPatchArgs(argv, found.index + 1, surface);
   readAuthorRefs(found.subcommand, argv, found.index + 1, surface);
   readIdentities(argv, found.index, env, surface);
+  surface.bypassesHooks = readHookBypass(argv, found.index, env, found.subcommand);
   return surface;
 }
 
@@ -297,5 +336,6 @@ module.exports = {
   identityEntry,
   MESSAGE_SUBCOMMANDS,
   IDENTITY_SUBCOMMANDS,
+  PATCH_SUBCOMMANDS,
   CONFIG_READ_FLAGS,
 };

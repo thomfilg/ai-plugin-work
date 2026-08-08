@@ -16,9 +16,17 @@
 
 const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
 
+/**
+ * The line that identifies a git hook as ours. Shared because two sides depend
+ * on it meaning the same thing: the installer writes it, and the guard reads
+ * it to decide whether a `--no-verify` is removing a backstop or merely
+ * skipping somebody else's linter.
+ */
+const COMMIT_MSG_MARKER = '# ghostwriter-commit-msg v1';
+
 /** Has the operator lifted the rules for this process? */
 function isOverridden(env) {
   return (env || {})[OVERRIDE_ENV] === '1';
 }
 
-module.exports = { OVERRIDE_ENV, isOverridden };
+module.exports = { OVERRIDE_ENV, COMMIT_MSG_MARKER, isOverridden };

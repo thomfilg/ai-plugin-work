@@ -36,21 +36,34 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { checkText } = require('./attribution');
-const { checkIdentity, checkIdentityComplete, checkExpectedIdentity } = require('./identity-rules');
-const { scanCommand, identityEntry } = require('./git-surfaces');
-const { resolveGitUser, resolveCommitInfo, resolveGhAccount } = require('./git-identity');
+const {
+  resolveGitUser,
+  resolveCommitInfo,
+  resolveGhAccount,
+  resolveInstalledHook,
+} = require('./git-identity');
 const { scanForgeCommand, scanToolCall, scanToolFiles } = require('./forge-surfaces');
 const { inspectFileWrites } = require('./file-content');
+const { scanCommand } = require('./git-surfaces');
 const {
   checkPostText,
   checkRawPost,
   checkPostAccount,
   unverifiableAccount,
 } = require('./forge-guard');
+const {
+  checkMessageArgs,
+  checkMessageFiles,
+  checkIdentityLiterals,
+  checkRawCommand,
+  checkCopiedCommits,
+  checkPatchFiles,
+  checkHookBypass,
+  checkEffectiveIdentity,
+} = require('./git-guard');
 const { readExpectedIdentity } = require('./expected-identity');
 const { MAX_UNWRAP_DEPTH } = require('./command-scan');
-const { finding, normalizeRead, UNVERIFIABLE, MAX_MESSAGE_FILE_BYTES } = require('./finding');
+const { finding, MAX_MESSAGE_FILE_BYTES } = require('./finding');
 const { OVERRIDE_ENV, isOverridden } = require('./policy');
 const { renderBlock } = require('./report');
 
@@ -79,8 +92,12 @@ function readTextFile(filePath, cwd) {
     const buffer = Buffer.alloc(size);
     const read = fs.readSync(fd, buffer, 0, size, 0);
     return { text: buffer.toString('utf8', 0, read), truncated: false };
-  } catch {
-    return { text: '', truncated: false };
+  } catch (err) {
+    // A file that is NOT THERE is a command git will refuse itself, so there
+    // is nothing to guard. Any other failure — a directory, a permission, a
+    // short read — is a file git may well read fine while the guard saw none
+    // of it, and an empty string reads as clean.
+    return { text: '', truncated: false, unreadable: err.code !== 'ENOENT' };
   } finally {
     if (fd !== undefined) {
       try {
@@ -92,16 +109,27 @@ function readTextFile(filePath, cwd) {
   }
 }
 
+/**
+ * The real readers. Every one is replaceable, which is how the decision logic
+ * is exercised without a git repository, a `gh` login, or a filesystem.
+ */
+const IO_DEFAULTS = Object.freeze({
+  readMessageFile: readTextFile,
+  resolveIdentity: resolveGitUser,
+  resolveCommitInfo,
+  resolveAccount: resolveGhAccount,
+  resolveInstalledHook,
+});
+
 function defaultIo(io) {
   const opts = io || {};
+  const env = opts.env || process.env;
   return {
+    ...IO_DEFAULTS,
+    ...opts,
     cwd: opts.cwd || process.cwd(),
-    env: opts.env || process.env,
-    readMessageFile: opts.readMessageFile || ((p, cwd) => readTextFile(p, cwd)),
-    resolveIdentity: opts.resolveIdentity || resolveGitUser,
-    resolveCommitInfo: opts.resolveCommitInfo || resolveCommitInfo,
-    resolveAccount: opts.resolveAccount || resolveGhAccount,
-    expected: opts.expected || readExpectedIdentity(opts.env || process.env),
+    env,
+    expected: opts.expected || readExpectedIdentity(env),
   };
 }
 
@@ -120,154 +148,6 @@ function checkUnverifiableSurfaces(surfaces, posts) {
   );
 }
 
-/** Pass 1 — every `-m` / `--message` value on every authoring surface. */
-function checkMessageArgs(surfaces) {
-  for (const surface of surfaces) {
-    for (const message of surface.messages) {
-      const result = checkText(message);
-      if (!result.ok) return finding(result, `git ${surface.kind} message`);
-    }
-  }
-  return null;
-}
-
-/**
- * The directory this surface actually operates on. `git -C <dir> commit` reads
- * its config — and resolves a relative `-F` path — from there, not from the
- * shell's cwd, so both later passes have to follow it.
- */
-function surfaceCwd(surface, io) {
-  // `-C` compounds, so every value applies in order: `-C outer -C inner`
-  // lands in outer/inner. path.resolve does exactly that, absolutes included.
-  return surface.dirs && surface.dirs.length ? path.resolve(io.cwd, ...surface.dirs) : io.cwd;
-}
-
-/**
- * The repository whose config this surface commits under. `--git-dir` /
- * `GIT_DIR` select it independently of the process directory, so a command can
- * sit in a clean repo and author into another one.
- */
-function surfaceGitDir(surface, io) {
-  // A GIT_DIR already exported in the session reaches git without appearing in
-  // the command at all. The guard's own `git config` read inherits it too, so
-  // the two agree either way — but threading it explicitly makes that a stated
-  // contract rather than a coincidence, and keeps it right if the guard's
-  // environment ever stops matching the command's.
-  const selected = surface.gitDir || io.env.GIT_DIR;
-  return selected ? path.resolve(surfaceCwd(surface, io), selected) : null;
-}
-
-/** Pass 2 — every `-F` / `--file` / redirected message body, read in full. */
-function checkMessageFiles(surfaces, io) {
-  for (const surface of surfaces) {
-    for (const file of surface.messageFiles) {
-      if (!file || file.startsWith('-')) continue;
-      const where = `git ${surface.kind} message file ${file}`;
-      const read = normalizeRead(io.readMessageFile(file, surfaceCwd(surface, io)));
-      const result = checkText(read.text);
-      if (!result.ok) return finding(result, where);
-      if (read.truncated) return finding(UNVERIFIABLE, where);
-    }
-  }
-  return null;
-}
-
-/**
- * An identity recorded as a REFERENCE (`--config-env=user.name=VAR`) resolved
- * against the guard's environment, or null when the variable is not visible.
- */
-function resolveIdentityRef(identity, io) {
-  if (!identity.envVar) return identity;
-  const value = io.env[identity.envVar];
-  if (value === undefined) return null;
-  return identityEntry(identity.source, identity.key, value);
-}
-
-/** A referenced identity nobody can read is not an identity anyone can clear. */
-function unverifiableIdentity(identity) {
-  return {
-    rule: 'unverifiableIdentity',
-    reason: `the committing identity comes from $${identity.envVar}, which the guard cannot read`,
-    hint: 'Set user.name/user.email directly so the identity can be checked.',
-    evidence: `${identity.source}=${identity.envVar}`,
-  };
-}
-
-/** Pass 3 — identities written by the command itself. */
-function checkIdentityLiterals(surfaces, io) {
-  for (const surface of surfaces) {
-    for (const identity of surface.identities) {
-      const where = `${identity.source} on git ${surface.kind}`;
-      const resolved = resolveIdentityRef(identity, io);
-      if (!resolved) return finding(unverifiableIdentity(identity), where);
-      const result = checkIdentity(resolved);
-      if (!result.ok) return finding(result, where);
-    }
-  }
-  return null;
-}
-
-/** Pass 4 — the raw command text, for bodies the tokenizer cannot reach. */
-function checkRawCommand(command, surfaces) {
-  if (!surfaces.some((surface) => surface.writesMessage)) return null;
-  const result = checkText(command);
-  return result.ok ? null : finding(result, 'the command text');
-}
-
-/**
- * A copied commit — `git cherry-pick <ref>`, `git commit -C <ref>`.
- *
- * BOTH halves ride along: the source commit's author, which the configured
- * identity pass would never see, and its message, which none of the message
- * passes receive because it appears nowhere in the command. Checking one and
- * not the other leaves exactly half the copy uninspected.
- */
-function checkCopiedCommit(surface, ref, io) {
-  const cwd = surfaceCwd(surface, io);
-  const source = io.resolveCommitInfo(cwd, surfaceGitDir(surface, io), ref);
-  const author = checkIdentity(source);
-  if (!author.ok) return finding(author, `the author copied from ${ref}`);
-  const expected = checkExpectedIdentity(source, io.expected);
-  if (!expected.ok) return finding(expected, `the author copied from ${ref}`);
-  const message = checkText(source.message);
-  if (!message.ok) return finding(message, `the message copied from ${ref}`);
-  return null;
-}
-
-function checkCopiedCommits(surfaces, io) {
-  for (const surface of surfaces) {
-    for (const ref of surface.authorRefs || []) {
-      const hit = checkCopiedCommit(surface, ref, io);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
-
-/** Pass 5 — the identity git would stamp on the object being written. */
-function checkEffectiveIdentity(surfaces, io) {
-  const seen = new Set();
-  for (const surface of surfaces) {
-    if (!surface.writesCommit) continue;
-    const cwd = surfaceCwd(surface, io);
-    const gitDir = surfaceGitDir(surface, io);
-    const key = `${cwd}\u0000${gitDir || ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const user = io.resolveIdentity(cwd, gitDir, surface.configSources);
-    const result = checkIdentity(user);
-    if (!result.ok) return finding(result, 'the configured git identity');
-    // An identity that names nobody is checked BEFORE the expected-human pass:
-    // "you set no email" is the actionable sentence, and `unexpectedIdentity`
-    // reporting `(no identity resolved)` would bury it.
-    const complete = checkIdentityComplete(user);
-    if (!complete.ok) return finding(complete, 'the configured git identity');
-    const expected = checkExpectedIdentity(user, io.expected);
-    if (!expected.ok) return finding(expected, 'the configured git identity');
-  }
-  return null;
-}
-
 /**
  * The ordered passes, sharpest evidence first. Kept as a list so the order is
  * a readable fact rather than the shape of a boolean chain.
@@ -282,7 +162,9 @@ const COMMAND_PASSES = [
   (c) => checkRawPost(c.command, c.posts),
   (c) => checkPostAccount(c.posts, c.ctx),
   (c) => checkCopiedCommits(c.surfaces, c.ctx),
+  (c) => checkPatchFiles(c.surfaces, c.ctx),
   (c) => checkEffectiveIdentity(c.surfaces, c.ctx),
+  (c) => checkHookBypass(c.surfaces, c.ctx),
 ];
 
 /** A verdict as a finding-or-null, so it composes with the pass helpers. */
