@@ -25,7 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { checkText, checkIdentity } = require('./attribution');
-const { scanCommand } = require('./git-surfaces');
+const { scanCommand, identityEntry } = require('./git-surfaces');
 const { resolveGitUser } = require('./git-identity');
 
 /** Operator override, honoured ONLY from the hook's own environment. */
@@ -140,12 +140,36 @@ function checkMessageFiles(surfaces, io) {
   return null;
 }
 
+/**
+ * An identity recorded as a REFERENCE (`--config-env=user.name=VAR`) resolved
+ * against the guard's environment, or null when the variable is not visible.
+ */
+function resolveIdentityRef(identity, io) {
+  if (!identity.envVar) return identity;
+  const value = io.env[identity.envVar];
+  if (value === undefined) return null;
+  return identityEntry(identity.source, identity.key, value);
+}
+
+/** A referenced identity nobody can read is not an identity anyone can clear. */
+function unverifiableIdentity(identity) {
+  return {
+    rule: 'unverifiableIdentity',
+    reason: `the committing identity comes from $${identity.envVar}, which the guard cannot read`,
+    hint: 'Set user.name/user.email directly so the identity can be checked.',
+    evidence: `${identity.source}=${identity.envVar}`,
+  };
+}
+
 /** Pass 3 — identities written by the command itself. */
-function checkIdentityLiterals(surfaces) {
+function checkIdentityLiterals(surfaces, io) {
   for (const surface of surfaces) {
     for (const identity of surface.identities) {
-      const result = checkIdentity(identity);
-      if (!result.ok) return finding(result, `${identity.source} on git ${surface.kind}`);
+      const where = `${identity.source} on git ${surface.kind}`;
+      const resolved = resolveIdentityRef(identity, io);
+      if (!resolved) return finding(unverifiableIdentity(identity), where);
+      const result = checkIdentity(resolved);
+      if (!result.ok) return finding(result, where);
     }
   }
   return null;
@@ -194,7 +218,7 @@ function inspectCommand(command, io) {
   const hit =
     checkMessageArgs(surfaces) ||
     checkMessageFiles(surfaces, ctx) ||
-    checkIdentityLiterals(surfaces) ||
+    checkIdentityLiterals(surfaces, ctx) ||
     checkRawCommand(command, surfaces) ||
     checkEffectiveIdentity(surfaces, ctx);
   if (!hit) return ALLOW;

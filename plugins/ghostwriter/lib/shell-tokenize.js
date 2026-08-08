@@ -99,4 +99,16 @@ function tokenize(command) {
   return state.segments;
 }
 
-module.exports = { tokenize, asText, SEGMENT_BREAKS, WORD_BREAKS };
+/**
+ * Value of a `--flag=value` / `--flag value` pair at `argv[i]`, or null.
+ * Lives here with the other command-reading primitives so the git modules can
+ * share it without depending on each other.
+ */
+function longFlagValue(argv, i, flag) {
+  const token = argv[i];
+  if (token === flag) return i + 1 < argv.length ? argv[i + 1] : null;
+  if (token.startsWith(`${flag}=`)) return token.slice(flag.length + 1);
+  return null;
+}
+
+module.exports = { tokenize, asText, longFlagValue, SEGMENT_BREAKS, WORD_BREAKS };

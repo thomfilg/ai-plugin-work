@@ -264,6 +264,35 @@ describe('scanCommand — identity surfaces', () => {
     assert.deepEqual(surface.identities, [{ source: 'GIT_CONFIG_KEY_0', name: TOOL, email: '' }]);
   });
 
+  // `--config-env` takes a value, so a parser that does not know that reads
+  // the value as the SUBCOMMAND and loses the surface entirely.
+  it('does not lose the subcommand to a two-token --config-env', () => {
+    for (const command of [
+      'git --config-env=user.name=MYVAR commit -m x',
+      'git --config-env user.name=MYVAR commit -m x',
+    ]) {
+      assert.equal(onlySurface(command).kind, 'commit', command);
+    }
+  });
+
+  it('resolves --config-env against the command’s own assignment', () => {
+    const surface = onlySurface(`MYVAR=${TOOL} git --config-env=user.name=MYVAR commit -m x`);
+    assert.deepEqual(surface.identities, [
+      { source: '--config-env user.name', name: TOOL, email: '' },
+    ]);
+  });
+
+  it('records --config-env as a reference when the command does not set it', () => {
+    const surface = onlySurface('git --config-env=user.email=MYVAR commit -m x');
+    assert.deepEqual(surface.identities, [
+      { source: '--config-env user.email', key: 'user.email', envVar: 'MYVAR' },
+    ]);
+  });
+
+  it('ignores --config-env for keys that are not an identity', () => {
+    assert.deepEqual(onlySurface('git --config-env=core.editor=ED commit -m x').identities, []);
+  });
+
   it('ignores GIT_CONFIG_* pairs for keys that are not an identity', () => {
     const surface = onlySurface(
       'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.editor GIT_CONFIG_VALUE_0=vim git commit -m x'

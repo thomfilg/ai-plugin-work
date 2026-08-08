@@ -22,12 +22,19 @@
  * `bash -c "git commit -m …"` is a surface exactly like the bare form.
  */
 
-const { tokenize, asText } = require('./shell-tokenize');
+const { tokenize, longFlagValue } = require('./shell-tokenize');
+const {
+  identityEntry,
+  parseAuthorSpec,
+  readIdentities,
+  readConfigIdentity,
+} = require('./git-identity-args');
 
 /** `git` global flags that consume the following token as their value. */
 const GIT_GLOBAL_VALUE_FLAGS = new Set([
   '-C',
   '-c',
+  '--config-env',
   '--git-dir',
   '--work-tree',
   '--namespace',
@@ -101,12 +108,6 @@ const MAX_UNWRAP_DEPTH = 3;
 
 const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const GIT_BINARY_RE = /(?:^|\/)git$/;
-const IDENTITY_ENV_RE = /^GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)$/;
-const GIT_CONFIG_KEY_RE = /^GIT_CONFIG_KEY_(\d+)$/;
-const GIT_CONFIG_VALUE_RE = /^GIT_CONFIG_VALUE_(\d+)$/;
-const CONFIG_IDENTITY_KEY_RE = /^user\.(?:name|email)$/i;
-const INLINE_CONFIG_IDENTITY_RE = /^(user\.(?:name|email))=([\s\S]*)$/i;
-const AUTHOR_SPEC_RE = /^\s*(.*?)\s*<([^>]*)>\s*$/;
 /** A token that itself contains a git invocation — a `-c` script payload. */
 const EMBEDDED_GIT_RE = /(?:^|[\s;&|(])git(?:\s|$)/;
 /** `< file` / `<file` — git reads the message from there under `-F -`. */
@@ -161,21 +162,6 @@ function findSubcommand(argv) {
   return null;
 }
 
-/** Value of a `--flag=value` / `--flag value` pair, or null. */
-function longFlagValue(argv, i, flag) {
-  const token = argv[i];
-  if (token === flag) return i + 1 < argv.length ? argv[i + 1] : null;
-  if (token.startsWith(`${flag}=`)) return token.slice(flag.length + 1);
-  return null;
-}
-
-/** Split an `--author` spec ("Name <mail>") into an identity pair. */
-function parseAuthorSpec(spec) {
-  const match = AUTHOR_SPEC_RE.exec(asText(spec));
-  if (!match) return { name: asText(spec).trim(), email: '' };
-  return { name: match[1], email: match[2] };
-}
-
 /** Push the value of one value-bearing flag at `argv[i]` onto `target`. */
 function collectFlagValue(argv, i, spec, target) {
   const long = longFlagValue(argv, i, spec.long);
@@ -205,63 +191,6 @@ function readMessageArgs(argv, start, out) {
     collectRedirect(argv, i, out.messageFiles);
     const author = longFlagValue(argv, i, '--author');
     if (author !== null) out.identities.push({ source: '--author', ...parseAuthorSpec(author) });
-  }
-}
-
-/** One identity entry, routed to `name` or `email` by the key it came from. */
-function identityEntry(source, key, value) {
-  const isEmail = key.toLowerCase().endsWith('email');
-  return { source, name: isEmail ? '' : value, email: isEmail ? value : '' };
-}
-
-/** Collect `GIT_AUTHOR_NAME=…` style identity assignments. */
-function readEnvIdentities(env, out) {
-  for (const entry of env) {
-    if (!IDENTITY_ENV_RE.test(entry.name)) continue;
-    out.identities.push(identityEntry(entry.name, entry.name, entry.value));
-  }
-}
-
-/**
- * Collect `GIT_CONFIG_KEY_n=user.name GIT_CONFIG_VALUE_n=…` pairs — a config
- * override that never touches a config file, so neither the `git config`
- * surface nor the effective-identity pass would ever see it.
- */
-function readGitConfigEnvIdentities(env, out) {
-  const keys = new Map();
-  const values = new Map();
-  for (const entry of env) {
-    const key = GIT_CONFIG_KEY_RE.exec(entry.name);
-    if (key) keys.set(key[1], entry.value);
-    const value = GIT_CONFIG_VALUE_RE.exec(entry.name);
-    if (value) values.set(value[1], entry.value);
-  }
-  for (const [index, key] of keys) {
-    const value = values.get(index);
-    if (value === undefined || !CONFIG_IDENTITY_KEY_RE.test(key)) continue;
-    out.identities.push(identityEntry(`GIT_CONFIG_KEY_${index}`, key, value));
-  }
-}
-
-/** Collect the value of a `git config user.name|user.email <value>` write. */
-function readConfigIdentity(argv, start, out) {
-  for (let i = start; i < argv.length; i++) {
-    if (!CONFIG_IDENTITY_KEY_RE.test(argv[i])) continue;
-    const value = argv[i + 1];
-    if (value === undefined || value.startsWith('-')) continue;
-    out.identities.push(identityEntry(argv[i], argv[i], value));
-  }
-}
-
-/**
- * Collect `git -c user.name=… commit …` overrides — a per-invocation identity
- * that never touches the stored config.
- */
-function readInlineConfigIdentity(argv, end, out) {
-  for (let i = 0; i < end; i++) {
-    if (argv[i] !== '-c') continue;
-    const match = INLINE_CONFIG_IDENTITY_RE.exec(argv[i + 1] || '');
-    if (match) out.identities.push(identityEntry(`-c ${match[1]}`, match[1], match[2]));
   }
 }
 
@@ -296,9 +225,7 @@ function authoringSurface(argv, found, env) {
   if (!writesMessage && !writesCommit) return null;
   const surface = newSurface(found.subcommand, writesMessage, writesCommit, found.dir);
   readMessageArgs(argv, found.index + 1, surface);
-  readEnvIdentities(env, surface);
-  readGitConfigEnvIdentities(env, surface);
-  readInlineConfigIdentity(argv, found.index, surface);
+  readIdentities(argv, found.index, env, surface);
   return surface;
 }
 
@@ -370,6 +297,7 @@ module.exports = {
   scanCommand,
   hasAuthorshipSurface,
   parseAuthorSpec,
+  identityEntry,
   MESSAGE_SUBCOMMANDS,
   IDENTITY_SUBCOMMANDS,
   WRAPPER_BINARIES,

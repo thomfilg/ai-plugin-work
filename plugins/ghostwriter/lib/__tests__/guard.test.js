@@ -149,6 +149,32 @@ describe('guard — bypasses that must stay closed', () => {
     }
   });
 
+  it('blocks a --config-env identity, wherever the value comes from', () => {
+    const fromCommand = inspect(`MYVAR=${TOOL} git --config-env=user.name=MYVAR commit -m "x"`);
+    assert.equal(fromCommand.blocked, true);
+    assert.equal(fromCommand.rule, 'aiIdentity');
+
+    const fromEnv = inspect('git --config-env=user.name=MYVAR commit -m "x"', {
+      env: { MYVAR: TOOL },
+    });
+    assert.equal(fromEnv.blocked, true);
+    assert.equal(fromEnv.rule, 'aiIdentity');
+  });
+
+  it('blocks a --config-env identity it cannot read rather than assuming it is clean', () => {
+    const verdict = inspect('git --config-env=user.name=UNSEEN commit -m "x"');
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiableIdentity');
+    assert.match(verdict.reason, /UNSEEN/);
+  });
+
+  it('allows a --config-env identity that resolves to a person', () => {
+    const verdict = inspect('git --config-env=user.name=WHO commit -m "feat: x"', {
+      env: { WHO: 'Ada Lovelace' },
+    });
+    assert.deepEqual(verdict, { blocked: false });
+  });
+
   it('blocks an identity assignment carried by the wrapper itself', () => {
     const verdict = inspect(`env GIT_AUTHOR_NAME=${TOOL} git commit -m "feat: x"`);
     assert.equal(verdict.blocked, true);
