@@ -1,0 +1,129 @@
+# ghostwriter
+
+**The agent writes. The person signs.**
+
+A standalone plugin with exactly one job: an AI tool may not credit itself for work in git. No co-author trailers, no "Generated with …" footers, no product links in the commit body, no session stamps, and no committing under a name that is a tool.
+
+Naming a product is not attribution. `feat: add <vendor> adapter` is ordinary engineering and always ships.
+
+## How it enforces
+
+| Layer | Covers | Where |
+|---|---|---|
+| `PreToolUse` hook on `Bash` | every git authorship command an agent runs | `hooks/ghostwriter.js` |
+| `commit-msg` git hook (opt-in) | commits from a terminal, a script, an editor | `/ghostwriter:install` |
+| CLI | checking a message by hand or from CI | `scripts/ghostwriter-check.js` |
+
+The PreToolUse hook is always on once the plugin is installed. The git hook is opt-in because it writes into the repository's hooks directory.
+
+## What gets blocked
+
+Five rules, applied in that order so the sharpest evidence wins:
+
+| Rule | Example |
+|---|---|
+| `aiCoAuthorTrailer` | `Co-Authored-By: <tool> <noreply@…>` |
+| `aiGeneratedPhrase` | `🤖 Generated with [<tool> Code](…)` |
+| `aiAttributionLink` | a product attribution URL in the body |
+| `aiSessionTrailer` | `<Tool>-Session: https://…` |
+| `aiIdentity` | `user.name`, `--author=`, `GIT_AUTHOR_NAME` naming a tool |
+
+## The five passes
+
+A command that authors a git object is inspected five ways, and the first finding blocks:
+
+1. **message arguments** — `-m` / `--message` values
+2. **message files** — `-F` / `--file` contents
+3. **identity literals** — `--author`, `GIT_AUTHOR_NAME=…`, `git config user.*`
+4. **the raw command** — heredoc bodies, unquoted `$(…)`, chained writes
+5. **the repo identity** — what `git config user.name/user.email` resolves to
+
+Pass 4 is why quoting tricks do not help: the same shape-specific rules run over the whole command text. Pass 5 is why setting the identity in an earlier session does not help either — a clean message committed as a tool is still attribution.
+
+Commands that author nothing are never inspected. `echo "Co-Authored-By: …"`, `git status` and `grep -r "git commit"` all fall straight through, and the repo identity is not even read.
+
+A block looks like this:
+
+```
+ghostwriter: this command would sign the work as an AI.
+
+  rule      aiCoAuthorTrailer
+  where     git commit message
+  problem   an authorship trailer credits an AI tool
+  evidence  Co-Authored-By: … <noreply@…>
+
+↳ Fix: Delete the trailer — the commit belongs to the person who ran the tool.
+
+The change belongs to the person who asked for it. Tools do not get a byline.
+```
+
+## Failure policy
+
+Two tiers, because the right answer differs by how much is at stake:
+
+- **fail-open** for anything that is not a git authorship command. A guard that bricks the shell when it has a bug is worse than the attribution it prevents.
+- **fail-closed** once the command is known to author a commit. Silently allowing an unchecked commit is the one outcome this plugin exists to prevent, so inspection errors there block with the reason on stderr.
+
+## The escape hatch
+
+`GHOSTWRITER_ALLOW_ATTRIBUTION=1` lifts every rule — but only from the hook's **own** environment. If the string appears inside the command being inspected, the override is refused and the block message says so. An override a command grants itself is not an override; it is the thing the guard exists to prevent, spelled differently.
+
+Export it from the shell that launches your session when you genuinely need it — quoting a trailer in a docs commit, or committing as a person whose real name collides with the vocabulary.
+
+## Commands
+
+```bash
+# check a message, a file, or the identity a commit would carry
+node scripts/ghostwriter-check.js --message "feat: add the guard (#12)"
+node scripts/ghostwriter-check.js .git/COMMIT_EDITMSG
+node scripts/ghostwriter-check.js --identity .
+
+# git-level enforcement
+node scripts/install-commit-msg-hook.js --status
+node scripts/install-commit-msg-hook.js
+node scripts/install-commit-msg-hook.js --uninstall
+```
+
+Exit codes: `0` clean, `1` attribution found, `2` usage error.
+
+Skills: `/ghostwriter:check` and `/ghostwriter:install`.
+
+## The vocabulary
+
+Tool names live in `lib/attribution.js`, assembled from string fragments so the file carries no contiguous tool-name literal — the rules run over sources, diffs and whole shell commands, and a blocklist that matches itself makes every audit a false positive. A test asserts that property holds.
+
+Names that collide with common words or common surnames are deliberately excluded. A guard that rejects a real person because of their surname is worse than the attribution it prevents; for the collisions that remain, the escape hatch is the answer.
+
+## Layout
+
+```
+ghostwriter/
+├── hooks/
+│   ├── hooks.json              PreToolUse registration (matcher: Bash)
+│   └── ghostwriter.js          the guard
+├── lib/
+│   ├── attribution.js          the rules — attribution vs identity
+│   ├── git-surfaces.js         quote-aware command reader
+│   ├── git-identity.js         effective git identity
+│   ├── guard.js                the five-pass decision
+│   ├── hookEntrypoint/         vendored from factories/ (do not edit)
+│   └── runtime/                vendored from factories/ (do not edit)
+├── scripts/
+│   ├── ghostwriter-check.js    the CLI
+│   └── install-commit-msg-hook.js
+└── skills/{check,install}/SKILL.md
+```
+
+## Tests
+
+```bash
+node --test plugins/ghostwriter/lib/__tests__/*.test.js
+node --test plugins/ghostwriter/hooks/__tests__/*.test.js
+node --test plugins/ghostwriter/scripts/__tests__/*.test.js
+```
+
+The hook and CLI tests spawn real processes and assert exit codes, and the installer test drives a real `git commit` through the installed hook — the exit code is the contract, so it is tested as one.
+
+## Relationship to the `work` plugin
+
+`work` enforces a whole commit contract (semantic format, ticket id, imperative mood, no attribution) but only along its own sanctioned commit path. ghostwriter enforces one rule, everywhere, with no workflow attached. Running both is fine: they agree on this rule, and ghostwriter also covers `--author`, environment identity overrides, `git config` writes, tags, merges and notes.

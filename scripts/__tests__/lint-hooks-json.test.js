@@ -2,7 +2,7 @@
  * Tests for scripts/lint-hooks-json.js (WP-01 — hooks.json hygiene + matcher batch)
  *
  * Proves:
- *   - the lint passes on all 4 real plugin hooks.json files
+ *   - the lint passes on all 5 real plugin hooks.json files
  *   - the WP-01 edit is EXACTLY: work loses the top-level `description` key +
  *     the enumerated matcher rewrites; heimdall `Task` → `Task|Agent`;
  *     synapsys/maestro untouched (JSON-parse snapshot vs checked-in baselines)
@@ -22,7 +22,7 @@ const path = require('path');
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const LINT_PATH = path.join(REPO_ROOT, 'scripts', 'lint-hooks-json.js');
 const FIXTURES_DIR = path.join(REPO_ROOT, 'tests', 'fixtures', 'hooks-json');
-const PLUGINS = ['heimdall', 'maestro', 'synapsys', 'work'];
+const PLUGINS = ['ghostwriter', 'heimdall', 'maestro', 'synapsys', 'work'];
 
 function hooksJsonPath(plugin) {
   return path.join(REPO_ROOT, 'plugins', plugin, 'hooks', 'hooks.json');
@@ -88,7 +88,7 @@ function applyWp01Transform(doc, matcherMap) {
 }
 
 describe('lint-hooks-json — real plugin files', () => {
-  it('passes on all 4 plugin hooks.json files', async () => {
+  it('passes on all 5 plugin hooks.json files', async () => {
     const { code, stdout, stderr } = await runLint();
     assert.strictEqual(code, 0, `stderr: ${stderr}`);
     for (const plugin of PLUGINS) {
