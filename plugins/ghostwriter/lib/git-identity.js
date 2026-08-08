@@ -61,28 +61,36 @@ function resolveGitUser(cwd, gitDir, configSources) {
 }
 
 /**
- * The author recorded on an existing commit.
+ * What an existing commit would hand to a command that reuses it.
  *
- * `git cherry-pick <ref>` and `git commit -C <ref>` copy that author onto the
- * new commit, so it — not the configured identity — is what lands. Returns an
- * empty identity when the ref cannot be resolved, which is the case where git
- * itself would fail.
+ * `git cherry-pick <ref>` and `git commit -C <ref>` copy BOTH the author and
+ * the message onto the new commit. Resolving only the author leaves the other
+ * half — an attribution trailer already sitting in that commit rides along
+ * untouched. Returns empty fields when the ref cannot be resolved, which is
+ * the case where git itself would fail.
  *
- * @returns {{name: string, email: string}}
+ * `%B` is the raw body and may span many lines, so it is everything after the
+ * first two.
+ *
+ * @returns {{name: string, email: string, message: string}}
  */
-function resolveCommitAuthor(cwd, gitDir, ref) {
+function resolveCommitInfo(cwd, gitDir, ref) {
   const args = ['-C', cwd || process.cwd()];
   if (gitDir) args.push('--git-dir', gitDir);
-  args.push('log', '-1', '--format=%an%n%ae', ref, '--');
+  args.push('log', '-1', '--format=%an%n%ae%n%B', ref, '--');
   try {
-    const [name = '', email = ''] = execFileSync('git', args, {
+    const lines = execFileSync('git', args, {
       encoding: 'utf8',
       timeout: GIT_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).split('\n');
-    return { name: name.trim(), email: email.trim() };
+    return {
+      name: (lines[0] || '').trim(),
+      email: (lines[1] || '').trim(),
+      message: lines.slice(2).join('\n'),
+    };
   } catch {
-    return { name: '', email: '' };
+    return { name: '', email: '', message: '' };
   }
 }
 
@@ -117,4 +125,4 @@ function resolveGhAccount(cwd) {
   }
 }
 
-module.exports = { resolveGitUser, resolveCommitAuthor, resolveGhAccount, gitConfig };
+module.exports = { resolveGitUser, resolveCommitInfo, resolveGhAccount, gitConfig };
