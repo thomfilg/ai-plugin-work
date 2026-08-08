@@ -202,6 +202,34 @@ describe('guard — bypasses that must stay closed', () => {
     assert.equal(verdict.blocked, true);
   });
 
+  it('resolves the effective identity against --git-dir / GIT_DIR', () => {
+    for (const command of [
+      'git --git-dir=/other/.git commit -m "feat: x"',
+      'GIT_DIR=/other/.git git commit -m "feat: x"',
+    ]) {
+      const asked = [];
+      const verdict = inspect(command, {
+        resolveIdentity: (cwd, gitDir) => {
+          asked.push([cwd, gitDir]);
+          return gitDir === '/other/.git' ? AI_USER : HUMAN;
+        },
+      });
+      assert.deepEqual(asked, [['/repo', '/other/.git']], command);
+      assert.equal(verdict.blocked, true, command);
+    }
+  });
+
+  it('resolves a relative --git-dir against the -C target', () => {
+    const asked = [];
+    inspect('git -C sub --git-dir=rel/.git commit -m "feat: x"', {
+      resolveIdentity: (cwd, gitDir) => {
+        asked.push([cwd, gitDir]);
+        return HUMAN;
+      },
+    });
+    assert.deepEqual(asked, [['/repo/sub', '/repo/sub/rel/.git']]);
+  });
+
   it('resolves a relative message file against the -C target', () => {
     const asked = [];
     inspect('git -C other/repo commit -F msg.txt', {

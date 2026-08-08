@@ -127,6 +127,27 @@ describe('ghostwriter hook — blocks', () => {
     }
   });
 
+  // Two real repositories: the shell sits in the clean one and commits into
+  // the other. Reading the identity from the cwd would clear this.
+  it('exits 2 when another repository is targeted and ITS identity is a tool', () => {
+    const aiRepo = makeRepo(TOOL, 'noreply@example.com');
+    const aiGitDir = path.join(aiRepo, '.git');
+    try {
+      for (const command of [
+        `git --git-dir=${aiGitDir} --work-tree=${aiRepo} commit -m "feat: x (#12)"`,
+        `GIT_DIR=${aiGitDir} git commit -m "feat: x (#12)"`,
+      ]) {
+        const result = runHook(command, { cwd: repoDir });
+        assert.equal(result.code, 2, command);
+        assert.match(result.stderr, /the configured git identity/);
+      }
+      // ...and the clean repo it is standing in still commits fine.
+      assert.equal(runHook('git commit -m "feat: x (#12)"', { cwd: repoDir }).code, 0);
+    } finally {
+      fs.rmSync(aiRepo, { recursive: true, force: true });
+    }
+  });
+
   it('never writes an empty stderr when it blocks', () => {
     const result = runHook(`git commit -m "feat: x\n\nCo-Authored-By: ${TOOL} <a@b>"`);
     assert.equal(result.code, 2);

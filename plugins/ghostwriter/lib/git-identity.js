@@ -19,10 +19,20 @@ const { execFileSync } = require('node:child_process');
 
 const GIT_TIMEOUT_MS = 5000;
 
-/** Read one git config key in `cwd`; '' on any failure. */
-function gitConfig(cwd, key) {
+/**
+ * Read one git config key; '' on any failure.
+ *
+ * `gitDir` matters because it selects WHICH repository's config is read.
+ * `git --git-dir=X commit` commits into X while the process still sits in the
+ * shell's directory, so asking the shell's repository would answer about the
+ * wrong one.
+ */
+function gitConfig(cwd, key, gitDir) {
+  const args = ['-C', cwd];
+  if (gitDir) args.push('--git-dir', gitDir);
+  args.push('config', '--get', key);
   try {
-    return execFileSync('git', ['-C', cwd, 'config', '--get', key], {
+    return execFileSync('git', args, {
       encoding: 'utf8',
       timeout: GIT_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -33,14 +43,18 @@ function gitConfig(cwd, key) {
 }
 
 /**
- * The identity a commit authored in `cwd` will carry.
+ * The identity a commit authored against this target will carry.
  *
  * @param {string} cwd - directory the command runs in.
+ * @param {string} [gitDir] - repository selected by `--git-dir` / `GIT_DIR`.
  * @returns {{name: string, email: string}}
  */
-function resolveGitUser(cwd) {
+function resolveGitUser(cwd, gitDir) {
   const dir = cwd || process.cwd();
-  return { name: gitConfig(dir, 'user.name'), email: gitConfig(dir, 'user.email') };
+  return {
+    name: gitConfig(dir, 'user.name', gitDir),
+    email: gitConfig(dir, 'user.email', gitDir),
+  };
 }
 
 module.exports = { resolveGitUser, gitConfig };
