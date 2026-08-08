@@ -1,13 +1,16 @@
 'use strict';
 
 /**
- * guard.js — the decision: may this command, or this tool call, run?
+ * guard.js — the decision: may this command, this tool call, or this write run?
  *
- * Two things get signed, and both are inspected: what a change SAYS, and who
- * it says wrote it. Each is checked at every place it can be written.
+ * Three things get signed, and all three are inspected: what a change SAYS,
+ * what it CARRIES, and who it says wrote it. Each is checked at every place it
+ * can be written. The rules live in attribution.js, identity-rules.js and
+ * file-content.js; the passes live in git-guard.js and forge-guard.js; this
+ * file owns only which passes run, and in what order.
  *
- * A shell command is inspected in passes, most specific first, stopping at the
- * first finding so the operator sees the sharpest possible evidence:
+ * A shell command is inspected most-specific first, stopping at the first
+ * finding so the operator sees the sharpest possible evidence:
  *
  *   1. message arguments  — `-m` / `--message` values
  *   2. message files      — `-F` / `--file` contents, and `<` redirects
@@ -17,17 +20,22 @@
  *                           heredoc bodies, unquoted `$(…)`, chained writes
  *   5. published prose    — `gh pr/issue/release` bodies, titles and api fields
  *   6. the posting account— the account `gh` would publish as
- *   7. the repo identity  — what git would stamp, in the repository targeted
+ *   7. copied commits     — the author AND message a reuse brings along
+ *   8. imported patches   — the `From:` header and body of a `git am`
+ *   9. the repo identity  — what git would stamp, in the repository targeted
+ *  10. the backstop       — whether the command switches the hooks off
  *
- * A forge MCP call skips the parsing — its text arrives as named fields — and
- * is checked by the same rules. Its ACCOUNT cannot be checked at all: the
- * credential lives in the MCP server, not in the call.
+ * A forge MCP call skips the parsing — its text and its files arrive as named
+ * fields — and is checked by the same rules. Its ACCOUNT cannot be checked at
+ * all: the credential lives in the MCP server, not in the call.
  *
- * Pass 4 is why quoting tricks do not help. Pass 7 is why setting the identity
+ * A write tool is simpler still: it names a file and the text going into it.
+ *
+ * Pass 4 is why quoting tricks do not help. Pass 9 is why setting the identity
  * in an earlier session, or committing into another repository, does not
  * help. Anything the guard cannot read — an oversized file, an identity behind
- * an unreadable variable, an account replaced by a token — is reported as
- * unverifiable and refused, never assumed clean.
+ * an unreadable variable, a patch on a pipe, an account replaced by a token —
+ * is reported as unverifiable and refused, never assumed clean.
  *
  * All I/O is injectable. The hook supplies real readers; tests supply fakes,
  * so the decision logic is exercised without a git repository.
@@ -67,21 +75,20 @@ const { finding, MAX_MESSAGE_FILE_BYTES } = require('./finding');
 const { OVERRIDE_ENV, isOverridden } = require('./policy');
 const { renderBlock } = require('./report');
 
-/**
- * A `-F` target can be any file the caller names, so the read has to be
- * bounded — but a PARTIAL read is not a safe bound. Sampling the head, the
- * tail, or any other window leaves a region git will happily commit and the
- * guard never saw. So: read the whole file up to this limit (far past any real
- * commit message), and treat anything larger as UNVERIFIABLE rather than
- * clean. Blocking a 32 MiB commit message is not a cost worth optimising.
- */
 const ALLOW = Object.freeze({ blocked: false });
 
 /**
- * Read a message file in full.
+ * Read a message file IN FULL.
  *
- * @returns {{text: string, truncated: boolean}} `truncated` means the file was
- *   too large to inspect — never that part of it was checked and passed.
+ * A `-F` target can be any file the caller names, so the read has to be
+ * bounded — but a PARTIAL read is not a safe bound. Sampling the head, the
+ * tail, or any other window leaves a region git will happily commit and the
+ * guard never saw. So: the whole file up to MAX_MESSAGE_FILE_BYTES, and
+ * anything larger reported as unverifiable rather than clean. Blocking a
+ * 32 MiB commit message is not a cost worth optimising.
+ *
+ * @returns {{text: string, truncated: boolean, unreadable?: boolean}} neither
+ *   flag ever means "part of it was checked and passed".
  */
 function readTextFile(filePath, cwd) {
   let fd;

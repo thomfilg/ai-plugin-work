@@ -73,7 +73,7 @@ function handleToolCall(rt, evt) {
     blockOnError(rt, err, 'forge tool call');
     return;
   }
-  if (verdict.blocked) rt.emit.block(renderBlock(verdict));
+  if (verdict.blocked) rt.emit.block(renderBlock(verdict, 'this tool call'));
 }
 
 /**
