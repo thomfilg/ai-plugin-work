@@ -22,7 +22,11 @@
  * to ask.
  */
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+
+const { COMMIT_MSG_MARKER } = require('./policy');
 
 const GIT_TIMEOUT_MS = 5000;
 
@@ -158,4 +162,39 @@ function resolveGhAccount(cwd) {
   }
 }
 
-module.exports = { resolveGitUser, resolveCommitInfo, resolveGhAccount, gitConfig, isRepository };
+/**
+ * Is ghostwriter's own commit-msg hook installed in this repository?
+ *
+ * Asked only when a command would skip the hooks, to tell "removing the layer
+ * that reads expanded messages" apart from "skipping somebody else's linter".
+ * `--git-path hooks` is the only correct way to locate them: `core.hooksPath`
+ * moves the directory, and a repository that has moved it is exactly the one a
+ * guess would answer wrongly about.
+ *
+ * @returns {boolean} false on any failure — an unanswerable question here
+ *   removes a rule rather than adding one, and every other pass still applies.
+ */
+function resolveInstalledHook(cwd, gitDir) {
+  const args = ['-C', cwd || process.cwd()];
+  if (gitDir) args.push('--git-dir', gitDir);
+  args.push('rev-parse', '--path-format=absolute', '--git-path', 'hooks');
+  try {
+    const dir = execFileSync('git', args, {
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return fs.readFileSync(path.join(dir, 'commit-msg'), 'utf8').includes(COMMIT_MSG_MARKER);
+  } catch {
+    return false;
+  }
+}
+
+module.exports = {
+  resolveGitUser,
+  resolveCommitInfo,
+  resolveGhAccount,
+  resolveInstalledHook,
+  gitConfig,
+  isRepository,
+};

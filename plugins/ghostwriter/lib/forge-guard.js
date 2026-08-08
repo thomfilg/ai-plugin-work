@@ -17,7 +17,7 @@
 
 const { checkText } = require('./attribution');
 const { checkIdentity, checkExpectedIdentity } = require('./identity-rules');
-const { finding, normalizeRead, UNVERIFIABLE } = require('./finding');
+const { finding, normalizeRead, UNVERIFIABLE, UNREADABLE } = require('./finding');
 
 /** An identity that is unknown is not an identity that has been cleared. */
 function unverifiableAccount(reason) {
@@ -46,6 +46,7 @@ function checkPostFiles(post, io) {
     const result = checkText(read.text, { prose: true });
     if (!result.ok) return finding(result, entry.where);
     if (read.truncated) return finding(UNVERIFIABLE, entry.where);
+    if (read.unreadable) return finding(UNREADABLE, entry.where);
   }
   return null;
 }

@@ -145,3 +145,62 @@ describe('isForgeTool', () => {
     assert.equal(isForgeTool(undefined), false);
   });
 });
+
+describe('scanForgeCommand — the short body-file flag', () => {
+  it('reads `-F` as the body file it is on every posting command', () => {
+    // The long form was read and the short one was not, so the idiomatic
+    // invocation published a file nobody opened.
+    for (const command of ['gh pr create -F body.md', 'gh issue comment 5 -F body.md']) {
+      assert.deepEqual(
+        onlyPost(command).textFiles.map((entry) => entry.file),
+        ['body.md'],
+        command
+      );
+    }
+  });
+
+  it('still reads `-F` under `gh api` as a raw field', () => {
+    // Same letter, different meaning: there it names a field, not a file.
+    const post = onlyPost('gh api repos/o/r/issues/1/comments -F body=hello');
+    assert.deepEqual(post.textFiles, []);
+    assert.deepEqual(
+      post.texts.map((entry) => entry.text),
+      ['hello']
+    );
+  });
+});
+
+describe('scanToolFiles — files committed through the API', () => {
+  const { scanToolFiles } = require('../forge-surfaces');
+
+  it('reads the content of a single-file write', () => {
+    assert.deepEqual(
+      scanToolFiles('mcp__github__create_or_update_file', {
+        path: 'src/a.js',
+        content: 'const a = 1;',
+        message: 'feat: add a',
+      }),
+      [{ path: 'src/a.js', text: 'const a = 1;' }]
+    );
+  });
+
+  it('reads every file of a multi-file push', () => {
+    assert.deepEqual(
+      scanToolFiles('mcp__github__push_files', {
+        files: [
+          { path: 'a.js', content: 'a' },
+          { path: 'b.js', content: 'b' },
+        ],
+      }),
+      [
+        { path: 'a.js', text: 'a' },
+        { path: 'b.js', text: 'b' },
+      ]
+    );
+  });
+
+  it('reads nothing from a call that carries no file', () => {
+    assert.deepEqual(scanToolFiles('mcp__github__add_issue_comment', { body: 'hi' }), []);
+    assert.deepEqual(scanToolFiles('Write', { path: 'a.js', content: 'a' }), []);
+  });
+});

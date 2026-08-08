@@ -37,6 +37,7 @@ function inspect(command, overrides = {}) {
     readMessageFile: () => '',
     resolveIdentity: () => HUMAN,
     resolveAccount: () => 'a-human-login',
+    resolveInstalledHook: () => false,
     resolveCommitInfo: () => ({ ...HUMAN, message: 'feat: clean' }),
     expected: { emails: [], logins: [], configured: false },
     ...overrides,
@@ -466,12 +467,25 @@ describe('guard — message files are read in full', () => {
     assert.equal(verdict.rule, 'unverifiableMessage');
   });
 
-  it('treats an unreadable file as empty, not as a block', () => {
+  it('lets a MISSING file through — git refuses that command itself', () => {
     assert.deepEqual(readTextFile(path.join(dir, 'missing.txt'), dir), {
       text: '',
       truncated: false,
+      unreadable: false,
     });
     assert.deepEqual(withRealReader('git commit -F missing.txt'), { blocked: false });
+  });
+
+  it('refuses a file that exists and will not open', () => {
+    // A directory, a permission the guard lacks, a device that reads short:
+    // git may read these fine while the guard read none of them, and an empty
+    // string reads as clean. Distinct from missing, which is not a file.
+    const asDir = path.join(dir, 'a-directory');
+    fs.mkdirSync(asDir, { recursive: true });
+    assert.equal(readTextFile(asDir, dir).unreadable, true);
+    const verdict = withRealReader('git commit -F a-directory');
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiableMessage');
   });
 
   it('accepts a plain string from an injected reader', () => {
@@ -484,6 +498,111 @@ describe('guard — message files are read in full', () => {
 
 // A commit is not the only thing that gets signed. These cover the prose an
 // agent publishes to GitHub, and the account it publishes under.
+// `git am` does not use the configured identity for the AUTHOR — it takes it
+// from the patch, along with the message. A clean repository could import a
+// commit signed by a tool and every other pass would clear it.
+describe('guard — imported patches', () => {
+  const patch = (from) =>
+    `From ${'0'.repeat(40)} Mon Sep 17 00:00:00 2001\nFrom: ${from}\nSubject: [PATCH] feat: x\n\n---\n`;
+
+  it('blocks a patch whose author is a tool', () => {
+    const verdict = inspect('git am fix.patch', {
+      readMessageFile: () => patch(`${TOOL} <noreply@example.com>`),
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'aiIdentity');
+    assert.equal(verdict.where, 'the author imported from fix.patch');
+  });
+
+  it('blocks a trailer riding along in the patch body', () => {
+    const verdict = inspect('git am fix.patch', {
+      readMessageFile: () => `${patch('Ada <ada@example.com>')}Co-Authored-By: ${TOOL} <a@b>\n`,
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'aiCoAuthorTrailer');
+  });
+
+  it('allows a patch from a person', () => {
+    assert.deepEqual(
+      inspect('git am fix.patch', { readMessageFile: () => patch('Ada <ada@example.com>') }),
+      { blocked: false }
+    );
+  });
+
+  it('reads a patch fed by a redirect', () => {
+    const asked = [];
+    inspect('git am < fix.patch', {
+      readMessageFile: (file) => {
+        asked.push(file);
+        return '';
+      },
+    });
+    assert.deepEqual(asked, ['fix.patch'], 'the redirect target is the patch');
+  });
+
+  it('refuses a patch arriving on stdin, whose author nobody can read', () => {
+    const verdict = inspect('cat p.eml | git am');
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiablePatch');
+  });
+
+  it('reads the diff with the FILE rules, not the message ones', () => {
+    // A patch is mostly a diff, and a diff is file content: `author:` is an
+    // object key there, not a trailer.
+    const body = `${patch('Ada <ada@example.com>')}+  author: '${['cur', 'sor'].join('')}[bot]',\n`;
+    assert.deepEqual(inspect('git am fix.patch', { readMessageFile: () => body }), {
+      blocked: false,
+    });
+  });
+});
+
+// The one documented hole in static inspection — a message that exists only
+// after the shell expands it — is closed by the commit-msg hook. Which makes
+// turning that hook off the way to reopen it.
+describe('guard — turning the backstop off', () => {
+  it('blocks --no-verify when our commit-msg hook is installed', () => {
+    const verdict = inspect('git commit --no-verify -m "feat: x"', {
+      resolveInstalledHook: () => true,
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'hookBypass');
+    assert.equal(verdict.evidence, '--no-verify');
+  });
+
+  it('blocks the short form and a relocated hooks directory', () => {
+    for (const [command, evidence] of [
+      ['git commit -n -m "feat: x"', '-n'],
+      ['git -c core.hooksPath=/dev/null commit -m "feat: x"', '-c core.hooksPath=/dev/null'],
+      ['GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath git commit -m "x"', null],
+    ]) {
+      const verdict = inspect(command, { resolveInstalledHook: () => true });
+      assert.equal(verdict.blocked, true, command);
+      assert.equal(verdict.rule, 'hookBypass', command);
+      if (evidence) assert.equal(verdict.evidence, evidence, command);
+    }
+  });
+
+  it('allows it when there is no backstop to remove', () => {
+    // Skipping somebody else's slow pre-commit linter is ordinary work. A rule
+    // that punished it is a rule people learn to route around.
+    assert.deepEqual(
+      inspect('git commit --no-verify -m "feat: x"', { resolveInstalledHook: () => false }),
+      { blocked: false }
+    );
+  });
+
+  it('never asks about a command that authors nothing', () => {
+    let asked = 0;
+    inspect('git status', {
+      resolveInstalledHook: () => {
+        asked += 1;
+        return true;
+      },
+    });
+    assert.equal(asked, 0);
+  });
+});
+
 describe('guard — pull requests, issues and comments', () => {
   const FOOTER = `Looks good.\n\n_Generated by [${TOOL} Code](https://${TOOL.toLowerCase()}.ai/code)_`;
 
