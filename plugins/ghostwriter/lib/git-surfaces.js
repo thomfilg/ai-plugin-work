@@ -69,6 +69,23 @@ const REUSE_SHORT = new Set(['-C', '-c']);
  */
 const PATCH_SUBCOMMANDS = new Set(['am']);
 
+/**
+ * `git am` flags that RESUME or end an import already under way. They carry no
+ * patch — the patch is the one sitting in `.git/rebase-apply` from the failed
+ * hunk five minutes ago — so demanding one would refuse the most ordinary
+ * command in the whole conflict-resolution loop. The commit they produce is
+ * still checked by every other pass.
+ */
+const PATCH_CONTROL_FLAGS = new Set([
+  '--continue',
+  '-r',
+  '--resolved',
+  '--skip',
+  '--abort',
+  '--quit',
+  '--show-current-patch',
+]);
+
 /** Subcommands that stamp a new object with the current committer identity. */
 const IDENTITY_SUBCOMMANDS = new Set([
   'commit',
@@ -243,6 +260,7 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     messages: [],
     messageFiles: [],
     patchFiles: [],
+    resumesPatch: false,
     identities: [],
     authorRefs: [],
     bypassesHooks: null,
@@ -258,6 +276,10 @@ function newSurface(kind, writesMessage, writesCommit, target) {
  * arriving another way, and `readMessageArgs` has already collected it.
  */
 function readPatchArgs(argv, start, out) {
+  if (argv.slice(start).some((token) => PATCH_CONTROL_FLAGS.has(token))) {
+    out.resumesPatch = true;
+    return;
+  }
   for (let i = start; i < argv.length; i++) {
     const token = argv[i];
     if (token.startsWith('-')) continue;
