@@ -119,9 +119,33 @@ describe('scanCommand — wrappers', () => {
     }
   });
 
-  it('keeps an identity env prefix across the wrapper', () => {
+  it('keeps an identity env prefix that precedes the wrapper', () => {
     const surface = onlySurface(`GIT_AUTHOR_NAME=${TOOL} env git commit -m x`);
     assert.deepEqual(surface.identities, [{ source: 'GIT_AUTHOR_NAME', name: TOOL, email: '' }]);
+  });
+
+  // The idiomatic `env` form puts the assignment AFTER the wrapper word, where
+  // a naive "slice from the git token" peel would drop it.
+  it('keeps an identity assignment that sits between the wrapper and git', () => {
+    const surface = onlySurface(`env GIT_AUTHOR_NAME=${TOOL} git commit -m "feat: x"`);
+    assert.deepEqual(surface.identities, [{ source: 'GIT_AUTHOR_NAME', name: TOOL, email: '' }]);
+  });
+
+  it('keeps GIT_CONFIG_* pairs that sit between the wrapper and git', () => {
+    const surface = onlySurface(
+      `env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=${TOOL} git commit -m x`
+    );
+    assert.deepEqual(surface.identities, [{ source: 'GIT_CONFIG_KEY_0', name: TOOL, email: '' }]);
+  });
+
+  it('keeps assignments on both sides of the wrapper word', () => {
+    const surface = onlySurface(
+      `GIT_COMMITTER_NAME=${TOOL} env GIT_AUTHOR_NAME=${TOOL} git commit -m x`
+    );
+    assert.deepEqual(surface.identities.map((entry) => entry.source).sort(), [
+      'GIT_AUTHOR_NAME',
+      'GIT_COMMITTER_NAME',
+    ]);
   });
 
   it('sees through an eval payload', () => {

@@ -124,6 +124,10 @@ function baseName(token) {
   return at === -1 ? token : token.slice(at + 1);
 }
 
+function hasEmbeddedGit(token) {
+  return EMBEDDED_GIT_RE.test(token);
+}
+
 /** Split leading `VAR=value` assignments off a segment's tokens. */
 function splitEnvPrefix(tokens) {
   const env = [];
@@ -317,9 +321,14 @@ function unwrapSegment(tokens) {
   if (!argv.length || !WRAPPER_BINARIES.has(baseName(argv[0]))) return null;
   const rest = argv.slice(1);
   const gitAt = rest.findIndex((token) => GIT_BINARY_RE.test(token));
+  if (gitAt === -1) return { argv: null, scripts: rest.filter(hasEmbeddedGit) };
+  // `env VAR=value git …` — the idiomatic form — puts the assignment AFTER the
+  // wrapper word. It still reaches git, so it has to survive the peel; dropping
+  // it here would hand `env GIT_AUTHOR_NAME=<tool> git commit` a free pass.
+  const carried = rest.slice(0, gitAt).filter((token) => ENV_ASSIGNMENT_RE.test(token));
   return {
-    argv: gitAt === -1 ? null : [...prefix, ...rest.slice(gitAt)],
-    scripts: rest.filter((token) => EMBEDDED_GIT_RE.test(token)),
+    argv: [...prefix, ...carried, ...rest.slice(gitAt)],
+    scripts: rest.filter(hasEmbeddedGit),
   };
 }
 

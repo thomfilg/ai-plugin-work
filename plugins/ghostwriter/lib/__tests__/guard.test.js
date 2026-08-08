@@ -10,10 +10,19 @@
  * Run with: node --test plugins/ghostwriter/lib/__tests__/guard.test.js
  */
 
-const { describe, it } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const { inspectCommand, renderBlock, OVERRIDE_ENV } = require('../guard');
+const {
+  inspectCommand,
+  renderBlock,
+  readTextFile,
+  OVERRIDE_ENV,
+  MAX_MESSAGE_FILE_BYTES,
+} = require('../guard');
 
 const TOOL = ['Cl', 'aude'].join('');
 const HUMAN = { name: 'Ada Lovelace', email: 'ada@example.com' };
@@ -140,6 +149,12 @@ describe('guard — bypasses that must stay closed', () => {
     }
   });
 
+  it('blocks an identity assignment carried by the wrapper itself', () => {
+    const verdict = inspect(`env GIT_AUTHOR_NAME=${TOOL} git commit -m "feat: x"`);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'GIT_AUTHOR_NAME on git commit');
+  });
+
   it('blocks a GIT_CONFIG_KEY_n identity injection', () => {
     const command =
       `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=${TOOL} ` +
@@ -188,6 +203,71 @@ describe('guard — bypasses that must stay closed', () => {
     ]) {
       assert.deepEqual(inspect(command), { blocked: false }, command);
     }
+  });
+});
+
+// These run against the REAL reader and real files: the whole question is
+// whether bytes on disk reach the rules, which a fake reader cannot answer.
+describe('guard — message files are read in full', () => {
+  let dir;
+
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghostwriter-files-'));
+  });
+
+  after(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function withRealReader(command) {
+    return inspectCommand(command, {
+      cwd: dir,
+      env: {},
+      readMessageFile: readTextFile,
+      resolveIdentity: () => HUMAN,
+    });
+  }
+
+  it('finds attribution buried in the middle of a large message', () => {
+    const file = path.join(dir, 'big.txt');
+    const filler = `${'x'.repeat(99)}\n`.repeat(6000); // ~600 KB either side
+    fs.writeFileSync(file, `feat: x\n\n${filler}Co-Authored-By: ${TOOL} <a@b>\n${filler}`);
+    assert.ok(fs.statSync(file).size > 1024 * 1024, 'fixture must exceed any sampling window');
+    const verdict = withRealReader(`git commit -F ${file}`);
+    assert.equal(verdict.blocked, true, 'a sampled read would have missed this');
+    assert.equal(verdict.rule, 'aiCoAuthorTrailer');
+  });
+
+  it('clears a large clean message', () => {
+    const file = path.join(dir, 'big-clean.txt');
+    fs.writeFileSync(file, `feat: x\n\n${`${'x'.repeat(99)}\n`.repeat(20000)}`);
+    assert.deepEqual(withRealReader(`git commit -F ${file}`), { blocked: false });
+  });
+
+  it('blocks a file too large to inspect rather than assuming it is clean', () => {
+    const file = path.join(dir, 'huge.txt');
+    fs.writeFileSync(file, 'feat: x\n');
+    fs.truncateSync(file, MAX_MESSAGE_FILE_BYTES + 1); // sparse — no bytes written
+    const read = readTextFile(file, dir);
+    assert.equal(read.truncated, true);
+    const verdict = withRealReader(`git commit -F ${file}`);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiableMessage');
+  });
+
+  it('treats an unreadable file as empty, not as a block', () => {
+    assert.deepEqual(readTextFile(path.join(dir, 'missing.txt'), dir), {
+      text: '',
+      truncated: false,
+    });
+    assert.deepEqual(withRealReader('git commit -F missing.txt'), { blocked: false });
+  });
+
+  it('accepts a plain string from an injected reader', () => {
+    const verdict = inspect('git commit -F msg.txt', {
+      readMessageFile: () => `feat: x\n\nCo-Authored-By: ${TOOL} <a@b>`,
+    });
+    assert.equal(verdict.blocked, true);
   });
 });
 
