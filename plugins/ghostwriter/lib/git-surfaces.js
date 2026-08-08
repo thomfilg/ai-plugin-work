@@ -4,26 +4,25 @@
  * git-surfaces.js — pure analysis of a shell command: which parts of it write
  * git authorship, and what text would they write?
  *
- * This is deliberately NOT a shell. It is a quote-aware tokenizer plus a git
- * argument reader, and it exists to answer two narrow questions:
+ * Two narrow questions, answered on top of the quote-aware tokenizer:
  *
  *   1. Does this command author a git object (a commit, an annotated tag, a
  *      merge, a note) or set the identity such an object will carry?
  *   2. If so, which strings become the message, and which become the author?
  *
- * Precision here buys precision in the guard: `echo "git commit -m x"` is not
- * a commit, so it is never inspected, and `feat: add <vendor> adapter` is not
- * an attribution, so it is never blocked. Everything the tokenizer cannot see
- * through — a heredoc body, an unquoted `$(...)` — is still covered because
- * the guard also scans the raw command text with the same shape-specific
- * attribution rules (see guard.js).
+ * Precision buys precision downstream: `echo "git commit -m x"` is not a
+ * commit, so it is never inspected, and `git config --get user.name` reads
+ * rather than writes, so it never blocks. What the parser cannot see through —
+ * a heredoc body, an unquoted `$(…)` — is still covered, because the guard
+ * also scans the raw command text with the same attribution rules.
+ *
+ * WRAPPERS. A git command reached through `bash -c`, `env`, `sudo`, `xargs` or
+ * a `-c` script payload is still a git command. Segments whose first word is a
+ * known wrapper are peeled and re-classified (bounded by MAX_UNWRAP_DEPTH), so
+ * `bash -c "git commit -m …"` is a surface exactly like the bare form.
  */
 
-/** Characters that end a command segment when they appear outside quotes. */
-const SEGMENT_BREAKS = new Set(['&', '|', ';', '\n', '(', ')']);
-
-/** Characters that end a word without ending the segment. */
-const WORD_BREAKS = new Set([' ', '\t', '\r']);
+const { tokenize, asText } = require('./shell-tokenize');
 
 /** `git` global flags that consume the following token as their value. */
 const GIT_GLOBAL_VALUE_FLAGS = new Set([
@@ -49,12 +48,69 @@ const IDENTITY_SUBCOMMANDS = new Set([
   'notes',
 ]);
 
+/**
+ * Commands that run another command. The git invocation is either further
+ * along the same argv (`env`, `sudo`, `timeout`, `xargs`) or inside a string
+ * argument (`bash -c "…"`, `eval "…"`); both shapes are handled.
+ */
+const WRAPPER_BINARIES = new Set([
+  'env',
+  'command',
+  'exec',
+  'eval',
+  'nice',
+  'nohup',
+  'sudo',
+  'doas',
+  'time',
+  'timeout',
+  'stdbuf',
+  'xargs',
+  'setsid',
+  'bash',
+  'sh',
+  'zsh',
+  'dash',
+  'ksh',
+  'busybox',
+]);
+
+/**
+ * `git config` actions that READ or REMOVE. None of them can introduce an AI
+ * identity, and `--get <name> <value-pattern>` in particular would otherwise
+ * read as a write of the pattern.
+ */
+const CONFIG_READ_FLAGS = new Set([
+  '--get',
+  '--get-all',
+  '--get-regexp',
+  '--get-urlmatch',
+  '--get-color',
+  '--get-colorbool',
+  '--list',
+  '-l',
+  '--edit',
+  '-e',
+  '--unset',
+  '--unset-all',
+  '--remove-section',
+  '--rename-section',
+]);
+
+const MAX_UNWRAP_DEPTH = 3;
+
 const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const GIT_BINARY_RE = /(?:^|\/)git$/;
 const IDENTITY_ENV_RE = /^GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)$/;
+const GIT_CONFIG_KEY_RE = /^GIT_CONFIG_KEY_(\d+)$/;
+const GIT_CONFIG_VALUE_RE = /^GIT_CONFIG_VALUE_(\d+)$/;
 const CONFIG_IDENTITY_KEY_RE = /^user\.(?:name|email)$/i;
 const INLINE_CONFIG_IDENTITY_RE = /^(user\.(?:name|email))=([\s\S]*)$/i;
 const AUTHOR_SPEC_RE = /^\s*(.*?)\s*<([^>]*)>\s*$/;
+/** A token that itself contains a git invocation — a `-c` script payload. */
+const EMBEDDED_GIT_RE = /(?:^|[\s;&|(])git(?:\s|$)/;
+/** `< file` / `<file` — git reads the message from there under `-F -`. */
+const REDIRECT_RE = /^<(.*)$/;
 
 /**
  * The two value-bearing flags read the same way: `--long value`, `--long=value`
@@ -63,87 +119,9 @@ const AUTHOR_SPEC_RE = /^\s*(.*?)\s*<([^>]*)>\s*$/;
 const MESSAGE_FLAG = { long: '--message', short: /^-[a-zA-Z]*m$/ };
 const FILE_FLAG = { long: '--file', short: /^-[a-zA-Z]*F$/ };
 
-function asText(value) {
-  return value == null ? '' : String(value);
-}
-
-/** Flush the in-progress word onto the current segment. */
-function pushWord(state) {
-  if (!state.open) return;
-  state.tokens.push(state.word);
-  state.word = '';
-  state.open = false;
-}
-
-/** Flush the current segment onto the result. */
-function pushSegment(state) {
-  pushWord(state);
-  if (state.tokens.length) state.segments.push(state.tokens);
-  state.tokens = [];
-}
-
-/**
- * Copy a quoted run verbatim into the current word and return the index just
- * past the closing quote. Newlines are kept — a `"$(cat <<'EOF' … EOF)"`
- * message arrives as one token with its whole body intact. An unterminated
- * quote consumes the rest of the command rather than throwing.
- */
-function consumeQuoted(state, text, start) {
-  const quote = text[start];
-  state.open = true;
-  let i = start + 1;
-  while (i < text.length) {
-    const ch = text[i];
-    if (quote === '"' && ch === '\\' && i + 1 < text.length) {
-      state.word += text[i + 1];
-      i += 2;
-      continue;
-    }
-    if (ch === quote) return i + 1;
-    state.word += ch;
-    i += 1;
-  }
-  return i;
-}
-
-/**
- * Split a command into segments of tokens, honouring quotes and backslash
- * escapes. Control operators (`&&`, `||`, `;`, `|`, newline, subshell parens)
- * separate segments so `echo "…" && git commit …` yields two of them.
- *
- * @param {string} command
- * @returns {string[][]}
- */
-function tokenize(command) {
-  const text = asText(command);
-  const state = { segments: [], tokens: [], word: '', open: false };
-  let i = 0;
-  while (i < text.length) i = consumeChar(state, text, i);
-  pushSegment(state);
-  return state.segments;
-}
-
-/** Apply one character to the tokenizer state; returns the next index. */
-function consumeChar(state, text, i) {
-  const ch = text[i];
-  if (ch === '\\' && i + 1 < text.length) {
-    state.word += text[i + 1];
-    state.open = true;
-    return i + 2;
-  }
-  if (ch === "'" || ch === '"') return consumeQuoted(state, text, i);
-  if (WORD_BREAKS.has(ch)) {
-    pushWord(state);
-    return i + 1;
-  }
-  if (SEGMENT_BREAKS.has(ch)) {
-    pushSegment(state);
-    // `&&` and `||` are two characters; `;`, `|`, `&` and a newline are one.
-    return i + (text[i + 1] === ch ? 2 : 1);
-  }
-  state.word += ch;
-  state.open = true;
-  return i + 1;
+function baseName(token) {
+  const at = token.lastIndexOf('/');
+  return at === -1 ? token : token.slice(at + 1);
 }
 
 /** Split leading `VAR=value` assignments off a segment's tokens. */
@@ -155,19 +133,25 @@ function splitEnvPrefix(tokens) {
     env.push({ name: tokens[i].slice(0, eq), value: tokens[i].slice(eq + 1) });
     i += 1;
   }
-  return { env, argv: tokens.slice(i) };
+  return { env, argv: tokens.slice(i), prefix: tokens.slice(0, i) };
 }
 
 /**
- * Locate the git subcommand in `argv`, skipping git's own global flags.
- * @returns {{subcommand: string, index: number}|null}
+ * Locate the git subcommand in `argv`, skipping git's own global flags and
+ * capturing the `-C` target so downstream checks run against the repository
+ * git will actually touch. Repeated `-C` values compound in git; the last one
+ * is kept, which is the common single-flag case.
+ *
+ * @returns {{subcommand: string, index: number, dir: string|null}|null}
  */
 function findSubcommand(argv) {
   if (!argv.length || !GIT_BINARY_RE.test(argv[0])) return null;
+  let dir = null;
   let i = 1;
   while (i < argv.length) {
     const token = argv[i];
-    if (!token.startsWith('-')) return { subcommand: token, index: i };
+    if (!token.startsWith('-')) return { subcommand: token, index: i, dir };
+    if (token === '-C' && argv[i + 1] !== undefined) dir = argv[i + 1];
     i += GIT_GLOBAL_VALUE_FLAGS.has(token) ? 2 : 1;
   }
   return null;
@@ -198,11 +182,23 @@ function collectFlagValue(argv, i, spec, target) {
   if (spec.short.test(argv[i]) && i + 1 < argv.length) target.push(argv[i + 1]);
 }
 
-/** Collect `-m` / `--message` / `-F` / `--file` / `--author` from git args. */
+/**
+ * A `< file` redirect feeds git's stdin, which is where `-F -` reads the
+ * message from — so the redirect target is a message file like any other.
+ */
+function collectRedirect(argv, i, target) {
+  const match = REDIRECT_RE.exec(argv[i]);
+  if (!match) return;
+  const file = match[1] || argv[i + 1];
+  if (file && !file.startsWith('-')) target.push(file);
+}
+
+/** Collect `-m` / `--message` / `-F` / `--file` / `<` / `--author` from args. */
 function readMessageArgs(argv, start, out) {
   for (let i = start; i < argv.length; i++) {
     collectFlagValue(argv, i, MESSAGE_FLAG, out.messages);
     collectFlagValue(argv, i, FILE_FLAG, out.messageFiles);
+    collectRedirect(argv, i, out.messageFiles);
     const author = longFlagValue(argv, i, '--author');
     if (author !== null) out.identities.push({ source: '--author', ...parseAuthorSpec(author) });
   }
@@ -222,6 +218,27 @@ function readEnvIdentities(env, out) {
   }
 }
 
+/**
+ * Collect `GIT_CONFIG_KEY_n=user.name GIT_CONFIG_VALUE_n=…` pairs — a config
+ * override that never touches a config file, so neither the `git config`
+ * surface nor the effective-identity pass would ever see it.
+ */
+function readGitConfigEnvIdentities(env, out) {
+  const keys = new Map();
+  const values = new Map();
+  for (const entry of env) {
+    const key = GIT_CONFIG_KEY_RE.exec(entry.name);
+    if (key) keys.set(key[1], entry.value);
+    const value = GIT_CONFIG_VALUE_RE.exec(entry.name);
+    if (value) values.set(value[1], entry.value);
+  }
+  for (const [index, key] of keys) {
+    const value = values.get(index);
+    if (value === undefined || !CONFIG_IDENTITY_KEY_RE.test(key)) continue;
+    out.identities.push(identityEntry(`GIT_CONFIG_KEY_${index}`, key, value));
+  }
+}
+
 /** Collect the value of a `git config user.name|user.email <value>` write. */
 function readConfigIdentity(argv, start, out) {
   for (let i = start; i < argv.length; i++) {
@@ -234,8 +251,7 @@ function readConfigIdentity(argv, start, out) {
 
 /**
  * Collect `git -c user.name=… commit …` overrides — a per-invocation identity
- * that never touches the stored config, so neither the `git config` surface
- * nor the effective-identity pass would ever see it.
+ * that never touches the stored config.
  */
 function readInlineConfigIdentity(argv, end, out) {
   for (let i = 0; i < end; i++) {
@@ -245,29 +261,40 @@ function readInlineConfigIdentity(argv, end, out) {
   }
 }
 
-function newSurface(kind, writesMessage, writesCommit) {
-  return { kind, writesMessage, writesCommit, messages: [], messageFiles: [], identities: [] };
+function newSurface(kind, writesMessage, writesCommit, dir) {
+  return {
+    kind,
+    writesMessage,
+    writesCommit,
+    dir: dir || null,
+    messages: [],
+    messageFiles: [],
+    identities: [],
+  };
 }
 
 /**
- * `git config` is a surface only when it writes `user.name` / `user.email` —
- * every other key is somebody's editor preference, not an authorship claim.
+ * `git config` is a surface only when it WRITES `user.name` / `user.email`.
+ * Read and remove actions author nothing, and `--get <name> <value-pattern>`
+ * would otherwise read as a write of the pattern.
  */
-function configSurface(argv, index) {
-  const surface = newSurface('config', false, false);
-  readConfigIdentity(argv, index + 1, surface);
+function configSurface(argv, found) {
+  if (argv.some((token) => CONFIG_READ_FLAGS.has(token))) return null;
+  const surface = newSurface('config', false, false, found.dir);
+  readConfigIdentity(argv, found.index + 1, surface);
   return surface.identities.length ? surface : null;
 }
 
 /** commit / tag / merge / notes / revert / cherry-pick / am. */
-function authoringSurface(subcommand, argv, index, env) {
-  const writesMessage = MESSAGE_SUBCOMMANDS.has(subcommand);
-  const writesCommit = IDENTITY_SUBCOMMANDS.has(subcommand);
+function authoringSurface(argv, found, env) {
+  const writesMessage = MESSAGE_SUBCOMMANDS.has(found.subcommand);
+  const writesCommit = IDENTITY_SUBCOMMANDS.has(found.subcommand);
   if (!writesMessage && !writesCommit) return null;
-  const surface = newSurface(subcommand, writesMessage, writesCommit);
-  readMessageArgs(argv, index + 1, surface);
+  const surface = newSurface(found.subcommand, writesMessage, writesCommit, found.dir);
+  readMessageArgs(argv, found.index + 1, surface);
   readEnvIdentities(env, surface);
-  readInlineConfigIdentity(argv, index, surface);
+  readGitConfigEnvIdentities(env, surface);
+  readInlineConfigIdentity(argv, found.index, surface);
   return surface;
 }
 
@@ -276,9 +303,40 @@ function classifySegment(tokens) {
   const { env, argv } = splitEnvPrefix(tokens);
   const found = findSubcommand(argv);
   if (!found) return null;
-  const { subcommand, index } = found;
-  if (subcommand === 'config') return configSurface(argv, index);
-  return authoringSurface(subcommand, argv, index, env);
+  if (found.subcommand === 'config') return configSurface(argv, found);
+  return authoringSurface(argv, found, env);
+}
+
+/**
+ * Peel one wrapper off a segment. Returns the inner argv to re-classify (the
+ * env prefix rides along, so `GIT_AUTHOR_NAME=… env git commit` still works)
+ * plus any script payloads to re-scan whole. Null when not a wrapper.
+ */
+function unwrapSegment(tokens) {
+  const { argv, prefix } = splitEnvPrefix(tokens);
+  if (!argv.length || !WRAPPER_BINARIES.has(baseName(argv[0]))) return null;
+  const rest = argv.slice(1);
+  const gitAt = rest.findIndex((token) => GIT_BINARY_RE.test(token));
+  return {
+    argv: gitAt === -1 ? null : [...prefix, ...rest.slice(gitAt)],
+    scripts: rest.filter((token) => EMBEDDED_GIT_RE.test(token)),
+  };
+}
+
+/** Classify one segment, peeling wrappers until a surface appears. */
+function collectSurfaces(tokens, out, depth) {
+  const surface = classifySegment(tokens);
+  if (surface) {
+    out.push(surface);
+    return;
+  }
+  if (depth >= MAX_UNWRAP_DEPTH) return;
+  const inner = unwrapSegment(tokens);
+  if (!inner) return;
+  if (inner.argv) collectSurfaces(inner.argv, out, depth + 1);
+  for (const script of inner.scripts) {
+    for (const segment of tokenize(script)) collectSurfaces(segment, out, depth + 1);
+  }
 }
 
 /**
@@ -289,10 +347,7 @@ function classifySegment(tokens) {
  */
 function scanCommand(command) {
   const surfaces = [];
-  for (const tokens of tokenize(command)) {
-    const surface = classifySegment(tokens);
-    if (surface) surfaces.push(surface);
-  }
+  for (const tokens of tokenize(command)) collectSurfaces(tokens, surfaces, 0);
   return { surfaces };
 }
 
@@ -308,4 +363,6 @@ module.exports = {
   parseAuthorSpec,
   MESSAGE_SUBCOMMANDS,
   IDENTITY_SUBCOMMANDS,
+  WRAPPER_BINARIES,
+  CONFIG_READ_FLAGS,
 };

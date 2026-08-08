@@ -31,22 +31,42 @@ const { resolveGitUser } = require('./git-identity');
 /** Operator override, honoured ONLY from the hook's own environment. */
 const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
 
-const MAX_MESSAGE_FILE_BYTES = 64 * 1024;
+/**
+ * Message files are read whole up to this size. Past it only the head and the
+ * tail are read — a bounded read is necessary (a `-F` target can be any file
+ * the caller names), but reading only the HEAD would be the wrong bound:
+ * trailers and tool footers live at the END of a message.
+ */
+const MAX_MESSAGE_FILE_BYTES = 1024 * 1024;
+const EDGE_BYTES = 128 * 1024;
 const ALLOW = Object.freeze({ blocked: false });
 
+/** Read `count` bytes of an open file starting at `position`. */
+function readChunk(fd, position, count) {
+  const buffer = Buffer.alloc(count);
+  const read = fs.readSync(fd, buffer, 0, count, position);
+  return buffer.toString('utf8', 0, read);
+}
+
 function readTextFile(filePath, cwd) {
+  let fd;
   try {
-    const resolved = path.resolve(cwd || process.cwd(), filePath);
-    const fd = fs.openSync(resolved, 'r');
-    try {
-      const buffer = Buffer.alloc(MAX_MESSAGE_FILE_BYTES);
-      const read = fs.readSync(fd, buffer, 0, MAX_MESSAGE_FILE_BYTES, 0);
-      return buffer.toString('utf8', 0, read);
-    } finally {
-      fs.closeSync(fd);
-    }
+    fd = fs.openSync(path.resolve(cwd || process.cwd(), filePath), 'r');
+    const { size } = fs.fstatSync(fd);
+    if (size <= MAX_MESSAGE_FILE_BYTES) return readChunk(fd, 0, size);
+    // Head and tail, joined by a newline so neither edge can splice a false
+    // match across the gap.
+    return `${readChunk(fd, 0, EDGE_BYTES)}\n${readChunk(fd, size - EDGE_BYTES, EDGE_BYTES)}`;
   } catch {
     return '';
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* the descriptor is going away with the process anyway */
+      }
+    }
   }
 }
 
@@ -82,12 +102,21 @@ function checkMessageArgs(surfaces) {
   return null;
 }
 
-/** Pass 2 — every `-F` / `--file` message body we can read. */
+/**
+ * The directory this surface actually operates on. `git -C <dir> commit` reads
+ * its config — and resolves a relative `-F` path — from there, not from the
+ * shell's cwd, so both later passes have to follow it.
+ */
+function surfaceCwd(surface, io) {
+  return surface.dir ? path.resolve(io.cwd, surface.dir) : io.cwd;
+}
+
+/** Pass 2 — every `-F` / `--file` / redirected message body we can read. */
 function checkMessageFiles(surfaces, io) {
   for (const surface of surfaces) {
     for (const file of surface.messageFiles) {
       if (!file || file.startsWith('-')) continue;
-      const result = checkText(io.readMessageFile(file, io.cwd));
+      const result = checkText(io.readMessageFile(file, surfaceCwd(surface, io)));
       if (!result.ok) return finding(result, `git ${surface.kind} message file ${file}`);
     }
   }
@@ -114,9 +143,16 @@ function checkRawCommand(command, surfaces) {
 
 /** Pass 5 — the identity git would stamp on the object being written. */
 function checkEffectiveIdentity(surfaces, io) {
-  if (!surfaces.some((surface) => surface.writesCommit)) return null;
-  const result = checkIdentity(io.resolveIdentity(io.cwd));
-  return result.ok ? null : finding(result, 'the configured git identity');
+  const seen = new Set();
+  for (const surface of surfaces) {
+    if (!surface.writesCommit) continue;
+    const cwd = surfaceCwd(surface, io);
+    if (seen.has(cwd)) continue;
+    seen.add(cwd);
+    const result = checkIdentity(io.resolveIdentity(cwd));
+    if (!result.ok) return finding(result, 'the configured git identity');
+  }
+  return null;
 }
 
 /**
