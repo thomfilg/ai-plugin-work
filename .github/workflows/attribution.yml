@@ -10,6 +10,11 @@ name: Attribution
 on:
   pull_request:
     branches: [main]
+    # `edited` is not in the default set, and this job reads the title and the
+    # body — without it, a description that gains a footer after the pull
+    # request was opened is never checked again, and one that is corrected
+    # stays red. Both happened on the run that introduced this file.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
