@@ -14,7 +14,12 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { checkText, checkIdentity, AI_TOOL_NAMES } = require('../attribution');
+const {
+  checkText,
+  checkIdentity,
+  checkIdentityComplete,
+  AI_TOOL_NAMES,
+} = require('../attribution');
 
 const TOOL = ['Cl', 'aude'].join('');
 const TOOL_ALT = ['Co', 'dex'].join('');
@@ -144,5 +149,56 @@ describe('checkIdentity — a bare token is the offence', () => {
   it('quotes the rendered identity as evidence', () => {
     const result = checkIdentity({ name: TOOL, email: 'a@example.com' });
     assert.equal(result.evidence, `${TOOL} <a@example.com>`);
+  });
+});
+
+// A commit with no configured identity does not fail — git invents
+// `user@hostname` and stamps the machine. `checkIdentity` cannot see that: a
+// blank field names no tool and looks like no bot, so it needs its own rule.
+describe('checkIdentityComplete — a byline nobody signed', () => {
+  it('accepts a complete human identity', () => {
+    assert.deepEqual(
+      checkIdentityComplete({ name: 'Ada Lovelace', email: 'ada@example.com' }),
+      { ok: true }
+    );
+  });
+
+  it('rejects a missing email', () => {
+    const result = checkIdentityComplete({ name: 'Ada Lovelace', email: '' });
+    assertBlocked(result, 'missingIdentity');
+    assert.ok(result.evidence.includes('user.email'));
+    assert.ok(!result.evidence.includes('user.name'), 'must name only what is missing');
+  });
+
+  it('rejects a missing name', () => {
+    assertBlocked(checkIdentityComplete({ name: '   ', email: 'ada@example.com' }), 'missingIdentity');
+  });
+
+  it('names both halves when neither is set', () => {
+    const result = checkIdentityComplete({ name: '', email: '' });
+    assertBlocked(result, 'missingIdentity');
+    assert.ok(result.evidence.includes('user.name') && result.evidence.includes('user.email'));
+  });
+
+  it('stays silent when the target could not be interrogated at all', () => {
+    // resolved:false is "there was nobody to ask" — no git, no repository.
+    // git refuses such a command itself; an empty pair there is not a byline.
+    assert.deepEqual(checkIdentityComplete({ name: '', email: '', resolved: false }), { ok: true });
+  });
+});
+
+describe('aiAttributionLink — host boundary', () => {
+  it('blocks the product footer link', () => {
+    assertBlocked(checkText(`Generated with [x](https://${VENDOR}.com/${TOOL_ALT})`), 'aiGeneratedPhrase');
+    assertBlocked(checkText(`See https://${VENDOR}.com/${TOOL_ALT} for details`), 'aiAttributionLink');
+  });
+
+  it('allows a documentation host that merely contains it', () => {
+    // `developers.<vendor>.com/<tool>/plugins` is where the docs live. Citing
+    // docs is describing the work; a substring match cannot tell the two apart.
+    assert.deepEqual(
+      checkText(`- Plugins overview: https://developers.${VENDOR}.com/${TOOL_ALT}/plugins`),
+      { ok: true }
+    );
   });
 });

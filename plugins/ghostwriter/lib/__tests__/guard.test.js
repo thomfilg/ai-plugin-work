@@ -127,6 +127,32 @@ describe('guard — the five passes', () => {
     assert.equal(verdict.where, 'the configured git identity');
   });
 
+  it('pass 5: blocks a commit whose repository configures no identity', () => {
+    const verdict = inspect('git commit -m "feat: x"', {
+      resolveIdentity: () => ({ name: 'Ada Lovelace', email: '', resolved: true }),
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'missingIdentity');
+    assert.equal(verdict.where, 'the configured git identity');
+  });
+
+  it('allows the same commit when the target could not be interrogated', () => {
+    const verdict = inspect('git commit -m "feat: x"', {
+      resolveIdentity: () => ({ name: '', email: '', resolved: false }),
+    });
+    assert.deepEqual(verdict, { blocked: false });
+  });
+
+  it('reports the missing identity rather than the expected-human one', () => {
+    // Both would fire. `unexpectedIdentity` renders "(no identity resolved)",
+    // which tells the operator nothing they can act on.
+    const verdict = inspect('git commit -m "feat: x"', {
+      resolveIdentity: () => ({ name: '', email: '', resolved: true }),
+      expected: { emails: ['me@example.com'], logins: [], configured: true },
+    });
+    assert.equal(verdict.rule, 'missingIdentity');
+  });
+
   it('prefers the sharpest evidence when several passes would fire', () => {
     const verdict = inspect(`git commit -m "feat: x\n\nCo-Authored-By: ${TOOL} <a@b>"`, {
       resolveIdentity: () => AI_USER,

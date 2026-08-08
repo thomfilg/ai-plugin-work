@@ -21,7 +21,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { checkText, checkIdentity } = require(path.join(__dirname, '..', 'lib', 'attribution'));
+const { checkText, checkIdentity, checkIdentityComplete } = require(
+  path.join(__dirname, '..', 'lib', 'attribution')
+);
 const { resolveGitUser } = require(path.join(__dirname, '..', 'lib', 'git-identity'));
 const { OVERRIDE_ENV } = require(path.join(__dirname, '..', 'lib', 'guard'));
 
@@ -88,8 +90,9 @@ function main(argv) {
   if (process.env[OVERRIDE_ENV] === '1') return EXIT_OK;
 
   if (args.mode === 'identity') {
-    const result = checkIdentity(resolveGitUser(args.value));
-    if (result.ok) return EXIT_OK;
+    const user = resolveGitUser(args.value);
+    const result = [checkIdentity(user), checkIdentityComplete(user)].find((r) => !r.ok);
+    if (!result) return EXIT_OK;
     report(result, 'the configured git identity');
     return EXIT_FOUND;
   }
