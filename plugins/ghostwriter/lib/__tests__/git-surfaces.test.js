@@ -290,6 +290,31 @@ describe('scanCommand — identity surfaces', () => {
     assert.deepEqual(onlySurface('git -c core.editor=vim commit -m x').identities, []);
   });
 
+  // These point git at DIFFERENT config FILES. The identity in them is the one
+  // git uses, so the guard has to read the same files.
+  it('records GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM redirects', () => {
+    assert.deepEqual(onlySurface('GIT_CONFIG_GLOBAL=/tmp/a.cfg git commit -m x').configSources, {
+      GIT_CONFIG_GLOBAL: '/tmp/a.cfg',
+    });
+    assert.deepEqual(onlySurface('GIT_CONFIG_SYSTEM=/tmp/b.cfg git commit -m x').configSources, {
+      GIT_CONFIG_SYSTEM: '/tmp/b.cfg',
+    });
+    assert.deepEqual(onlySurface('git commit -m x').configSources, {});
+  });
+
+  // cherry-pick and `commit -C` copy the SOURCE commit's author, so the
+  // configured identity is not the one that lands.
+  it('records the commits an author is copied from', () => {
+    assert.deepEqual(onlySurface('git cherry-pick abc123').authorRefs, ['abc123']);
+    assert.deepEqual(onlySurface('git commit -C abc123').authorRefs, ['abc123']);
+    assert.deepEqual(onlySurface('git commit --reuse-message=abc123').authorRefs, ['abc123']);
+  });
+
+  it('does not treat a revert as copying an author, because git does not', () => {
+    assert.deepEqual(onlySurface('git revert abc123').authorRefs, []);
+    assert.deepEqual(onlySurface('git commit -m x').authorRefs, []);
+  });
+
   it('reads a GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n identity pair', () => {
     const surface = onlySurface(
       `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=${TOOL} git commit -m x`

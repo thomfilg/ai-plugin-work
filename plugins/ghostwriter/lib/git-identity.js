@@ -27,7 +27,7 @@ const GIT_TIMEOUT_MS = 5000;
  * shell's directory, so asking the shell's repository would answer about the
  * wrong one.
  */
-function gitConfig(cwd, key, gitDir) {
+function gitConfig(cwd, key, gitDir, configSources) {
   const args = ['-C', cwd];
   if (gitDir) args.push('--git-dir', gitDir);
   args.push('config', '--get', key);
@@ -36,6 +36,9 @@ function gitConfig(cwd, key, gitDir) {
       encoding: 'utf8',
       timeout: GIT_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'ignore'],
+      // GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM point git at different config
+      // FILES. Reading without them answers about a config git will not use.
+      env: { ...process.env, ...(configSources || {}) },
     }).trim();
   } catch {
     return '';
@@ -49,12 +52,38 @@ function gitConfig(cwd, key, gitDir) {
  * @param {string} [gitDir] - repository selected by `--git-dir` / `GIT_DIR`.
  * @returns {{name: string, email: string}}
  */
-function resolveGitUser(cwd, gitDir) {
+function resolveGitUser(cwd, gitDir, configSources) {
   const dir = cwd || process.cwd();
   return {
-    name: gitConfig(dir, 'user.name', gitDir),
-    email: gitConfig(dir, 'user.email', gitDir),
+    name: gitConfig(dir, 'user.name', gitDir, configSources),
+    email: gitConfig(dir, 'user.email', gitDir, configSources),
   };
+}
+
+/**
+ * The author recorded on an existing commit.
+ *
+ * `git cherry-pick <ref>` and `git commit -C <ref>` copy that author onto the
+ * new commit, so it — not the configured identity — is what lands. Returns an
+ * empty identity when the ref cannot be resolved, which is the case where git
+ * itself would fail.
+ *
+ * @returns {{name: string, email: string}}
+ */
+function resolveCommitAuthor(cwd, gitDir, ref) {
+  const args = ['-C', cwd || process.cwd()];
+  if (gitDir) args.push('--git-dir', gitDir);
+  args.push('log', '-1', '--format=%an%n%ae', ref, '--');
+  try {
+    const [name = '', email = ''] = execFileSync('git', args, {
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).split('\n');
+    return { name: name.trim(), email: email.trim() };
+  } catch {
+    return { name: '', email: '' };
+  }
 }
 
 /**
@@ -88,4 +117,4 @@ function resolveGhAccount(cwd) {
   }
 }
 
-module.exports = { resolveGitUser, resolveGhAccount, gitConfig };
+module.exports = { resolveGitUser, resolveCommitAuthor, resolveGhAccount, gitConfig };

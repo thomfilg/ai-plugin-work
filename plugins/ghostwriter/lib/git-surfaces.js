@@ -29,6 +29,7 @@ const {
   parseAuthorSpec,
   readIdentities,
   readConfigIdentity,
+  readConfigSources,
 } = require('./git-identity-args');
 
 /** `git` global flags that consume the following token as their value. */
@@ -44,6 +45,20 @@ const GIT_GLOBAL_VALUE_FLAGS = new Set([
 
 /** Subcommands whose invocation writes a message the caller authored. */
 const MESSAGE_SUBCOMMANDS = new Set(['commit', 'tag', 'merge', 'notes']);
+
+/**
+ * Subcommands that COPY an author from an existing commit rather than using
+ * the configured identity. Cherry-picking a bot's commit puts that bot's
+ * byline on a new commit in your branch — the configured identity pass would
+ * see a perfectly clean human and clear it.
+ *
+ * `revert` is deliberately absent: git authors a revert as the person doing
+ * the reverting, not as the author of what is being reverted.
+ */
+const AUTHOR_COPY_SUBCOMMANDS = new Set(['cherry-pick']);
+/** `git commit` flags that reuse another commit's author and message. */
+const REUSE_FLAGS = ['--reuse-message', '--reedit-message'];
+const REUSE_SHORT = new Set(['-C', '-c']);
 
 /** Subcommands that stamp a new object with the current committer identity. */
 const IDENTITY_SUBCOMMANDS = new Set([
@@ -174,6 +189,27 @@ function collectRedirect(argv, i, target) {
   if (file && !file.startsWith('-')) target.push(file);
 }
 
+/**
+ * Collect the commits an authoring command copies its author from: the refs of
+ * a `cherry-pick`, or the `-C` / `--reuse-message` target of a commit.
+ */
+function readReuseRefs(argv, i, out) {
+  for (const flag of REUSE_FLAGS) {
+    const value = longFlagValue(argv, i, flag);
+    if (value !== null) out.authorRefs.push(value);
+  }
+  if (REUSE_SHORT.has(argv[i]) && i + 1 < argv.length) out.authorRefs.push(argv[i + 1]);
+}
+
+function readAuthorRefs(subcommand, argv, start, out) {
+  const reuses = subcommand === 'commit';
+  if (!reuses && !AUTHOR_COPY_SUBCOMMANDS.has(subcommand)) return;
+  for (let i = start; i < argv.length; i++) {
+    if (reuses) readReuseRefs(argv, i, out);
+    else if (!argv[i].startsWith('-')) out.authorRefs.push(argv[i]);
+  }
+}
+
 /** Collect `-m` / `--message` / `-F` / `--file` / `<` / `--author` from args. */
 function readMessageArgs(argv, start, out) {
   for (let i = start; i < argv.length; i++) {
@@ -192,9 +228,11 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     writesCommit,
     dirs: target.dirs || [],
     gitDir: target.gitDir || null,
+    configSources: target.configSources || {},
     messages: [],
     messageFiles: [],
     identities: [],
+    authorRefs: [],
   };
 }
 
@@ -215,9 +253,14 @@ function authoringSurface(argv, found, env) {
   const writesMessage = MESSAGE_SUBCOMMANDS.has(found.subcommand);
   const writesCommit = IDENTITY_SUBCOMMANDS.has(found.subcommand);
   if (!writesMessage && !writesCommit) return null;
-  const target = { dirs: found.dirs, gitDir: found.gitDir || envGitDir(env) };
+  const target = {
+    dirs: found.dirs,
+    gitDir: found.gitDir || envGitDir(env),
+    configSources: readConfigSources(env),
+  };
   const surface = newSurface(found.subcommand, writesMessage, writesCommit, target);
   readMessageArgs(argv, found.index + 1, surface);
+  readAuthorRefs(found.subcommand, argv, found.index + 1, surface);
   readIdentities(argv, found.index, env, surface);
   return surface;
 }
