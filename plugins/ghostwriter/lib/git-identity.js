@@ -15,7 +15,11 @@
  * relies on its other rules.
  */
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+
+const { COMMIT_MSG_MARKER } = require('./policy');
 
 const GIT_TIMEOUT_MS = 5000;
 
@@ -125,33 +129,98 @@ function resolveCommitInfo(cwd, gitDir, ref) {
 }
 
 /**
- * The GitHub account `gh` would post as.
- *
- * Best effort by design: `gh auth status` is the only place the active login
- * is written down, its wording has moved between versions, and it prints to
- * stderr on some. An unresolvable account returns '' — the guard decides what
- * that means, and the answer differs depending on whether an expected identity
- * is configured.
- *
- * @param {string} cwd
- * @returns {string} the login, or '' when it cannot be read.
+ * `gh auth status` has said this two ways across versions: the current
+ * `account <login>` and the older `Logged in to github.com as <login>`.
  */
-function resolveGhAccount(cwd) {
+const GH_ACCOUNT_RES = [/account\s+(\S+)/i, /logged in to \S+ as (\S+)/i];
+
+function firstLogin(text) {
+  for (const re of GH_ACCOUNT_RES) {
+    const match = re.exec(text || '');
+    if (match) return match[1];
+  }
+  return '';
+}
+
+function readAuthStatus(cwd) {
   try {
-    const output = execFileSync('gh', ['auth', 'status'], {
-      cwd: cwd || process.cwd(),
-      encoding: 'utf8',
-      timeout: GIT_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const match = /account\s+(\S+)/i.exec(output);
-    return match ? match[1] : '';
+    return firstLogin(
+      execFileSync('gh', ['auth', 'status'], {
+        cwd,
+        encoding: 'utf8',
+        timeout: GIT_TIMEOUT_MS,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    );
   } catch (err) {
+    if (err && err.code === 'ENOENT') return null;
     // gh writes the status to stderr on older versions, and exits non-zero
     // when any host is logged out — the login we want may still be in there.
-    const text = (err && (err.stdout || '') + (err.stderr || '')) || '';
-    const match = /account\s+(\S+)/i.exec(text);
-    return match ? match[1] : '';
+    return firstLogin(`${(err && err.stdout) || ''}${(err && err.stderr) || ''}`);
+  }
+}
+
+/** The API answers for a logged-in `gh` whatever its status text says. */
+function readApiLogin(cwd) {
+  try {
+    return execFileSync('gh', ['api', 'user', '--jq', '.login'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The GitHub account `gh` would post as.
+ *
+ * An unresolvable account returns '' — and the guard treats that as a post
+ * whose author cannot be named, which is the thing it is looking for. Hence
+ * the two probes: a wording change in a status message must not be able to
+ * turn into a refusal.
+ *
+ * No `gh` on the machine is a different answer again, and returns null. That
+ * command posts nothing, fails on its own, and says why far better than a
+ * guard would.
+ *
+ * @param {string} cwd
+ * @returns {string|null} the login, '' when unreadable, null when gh is absent.
+ */
+function resolveGhAccount(cwd) {
+  const dir = cwd || process.cwd();
+  const status = readAuthStatus(dir);
+  if (status === null) return null;
+  return status || readApiLogin(dir);
+}
+
+/**
+ * Is ghostwriter's own commit-msg hook installed in this repository?
+ *
+ * Asked only when a command would skip the hooks, to tell "removing the layer
+ * that reads expanded messages" apart from "skipping somebody else's linter".
+ * `--git-path hooks` is the only correct way to locate them: `core.hooksPath`
+ * moves the directory, and a repository that has moved it is exactly the one a
+ * guess would answer wrongly about.
+ *
+ * @returns {boolean} false on any failure — an unanswerable question here
+ *   removes a rule rather than adding one, and every other pass still applies.
+ */
+function resolveInstalledHook(cwd, gitDir) {
+  const args = ['-C', cwd || process.cwd()];
+  if (gitDir) args.push('--git-dir', gitDir);
+  args.push('rev-parse', '--path-format=absolute', '--git-path', 'hooks');
+  try {
+    const dir = execFileSync('git', args, {
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return fs.readFileSync(path.join(dir, 'commit-msg'), 'utf8').includes(COMMIT_MSG_MARKER);
+  } catch {
+    return false;
   }
 }
 
@@ -159,6 +228,7 @@ module.exports = {
   resolveGitUser,
   resolveCommitInfo,
   resolveGhAccount,
+  resolveInstalledHook,
   gitConfig,
   isRepository,
 };
