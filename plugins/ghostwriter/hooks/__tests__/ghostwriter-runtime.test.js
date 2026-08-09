@@ -23,6 +23,7 @@ const HOOK_PATH = path.resolve(__dirname, '..', 'ghostwriter.js');
 const TOOL = ['Cl', 'aude'].join('');
 
 let repoDir;
+let humanGhBin;
 
 /** A git repo whose LOCAL identity is a human, so pass 5 stays quiet. */
 function makeRepo(name, email) {
@@ -33,8 +34,33 @@ function makeRepo(name, email) {
   return dir;
 }
 
-function runHook(command, { cwd = repoDir, env = {}, payload } = {}) {
-  const merged = { ...process.env, ...env };
+/**
+ * A `gh` on PATH that answers with a fixed account.
+ *
+ * These tests spawn the real hook, which runs the real account resolver, which
+ * runs whatever `gh` the machine happens to have. That made the result depend
+ * on the developer's login state: no `gh` locally said one thing, and a CI
+ * runner's installed-but-logged-out `gh` said another — which is how a green
+ * suite here turned red there. The shim removes the machine from the question.
+ */
+function fakeGh(dir, name, body) {
+  // Each shim gets its own directory: they are all called `gh`, so sharing one
+  // means the last writer decides what every test sees.
+  const bin = path.join(dir, 'bin', name);
+  fs.mkdirSync(bin, { recursive: true });
+  const file = path.join(bin, 'gh');
+  fs.writeFileSync(file, `#!/usr/bin/env sh\n${body}\n`, { mode: 0o755 });
+  fs.chmodSync(file, 0o755);
+  return bin;
+}
+
+/** Prints a human login, the way a logged-in `gh` does. */
+const GH_HUMAN = 'echo "  ✓ Logged in to github.com account ada (keyring)"';
+/** Exits like a `gh` that is installed and logged out. */
+const GH_LOGGED_OUT = 'echo "You are not logged into any GitHub hosts." >&2\nexit 1';
+
+function runHook(command, { cwd = repoDir, env = {}, payload, ghBin = humanGhBin } = {}) {
+  const merged = { ...process.env, ...env, PATH: `${ghBin}:${process.env.PATH}` };
   if (!('GHOSTWRITER_ALLOW_ATTRIBUTION' in env)) delete merged.GHOSTWRITER_ALLOW_ATTRIBUTION;
   const body = payload || {
     session_id: 'gw-1',
@@ -54,6 +80,7 @@ function runHook(command, { cwd = repoDir, env = {}, payload } = {}) {
 
 before(() => {
   repoDir = makeRepo('Ada Lovelace', 'ada@example.com');
+  humanGhBin = fakeGh(repoDir, 'human', GH_HUMAN);
 });
 
 after(() => {
@@ -245,6 +272,41 @@ describe('ghostwriter hook — pull requests and comments', () => {
 // diff, shows up in the pull request, and stays in the tree after the message
 // and the description are both forgotten. Nothing in the message passes sees
 // it, because it is not a message.
+// Who a post is published as, end to end, with `gh` itself standing in for the
+// machine's login state. The rule reads: name a person and it ships, name a
+// machine and it does not, name nobody and the guard steps aside because a
+// `gh` that cannot name an account cannot post either.
+describe('ghostwriter hook — the posting account', () => {
+  it('blocks a clean comment published as a bot account', () => {
+    const botBin = fakeGh(repoDir, 'bot', 'echo "  ✓ Logged in to github.com account release-bot"');
+    const result = runHook('gh pr comment 1 --body "Looks good."', { ghBin: botBin });
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /botIdentity/);
+  });
+
+  it('allows the same comment published as a person', () => {
+    assert.equal(runHook('gh pr comment 1 --body "Looks good."').code, 0);
+  });
+
+  it('steps aside when gh is installed but logged out', () => {
+    // A CI runner looks exactly like this. Nothing posts, `gh` says why far
+    // better than a guard would, and a block here would be noise on a command
+    // that was never going to publish.
+    const loggedOut = fakeGh(repoDir, 'logged-out', GH_LOGGED_OUT);
+    assert.equal(runHook('gh pr comment 1 --body "Looks good."', { ghBin: loggedOut }).code, 0);
+  });
+
+  it('refuses the unnameable account once a human is pinned', () => {
+    const loggedOut = fakeGh(repoDir, 'logged-out', GH_LOGGED_OUT);
+    const result = runHook('gh pr comment 1 --body "Looks good."', {
+      ghBin: loggedOut,
+      env: { GHOSTWRITER_HUMAN_LOGIN: 'ada' },
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /unverifiableAccount/);
+  });
+});
+
 describe('ghostwriter hook — file content', () => {
   function runWrite(toolName, toolInput, cwd = repoDir) {
     return runHook(null, {

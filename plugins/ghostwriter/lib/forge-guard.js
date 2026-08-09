@@ -84,15 +84,19 @@ function checkPostAccount(posts, io) {
     );
   }
   const login = io.resolveAccount(io.cwd);
-  // null is "there is no `gh` here" — that command posts nothing and explains
-  // itself better than a guard would.
-  if (login === null) return null;
+  // Two ways to name nobody, and neither is a post going out unchecked. null
+  // is "there is no `gh` here"; '' is a `gh` that will not name an account,
+  // which in practice means it is logged out. Both describe a command that
+  // posts nothing and reports the real problem better than a guard would, so
+  // both are left alone — unless a human is pinned, where "cannot tell" is a
+  // refusal by design.
+  //
+  // The case worth worrying about — a `gh` that IS logged in but whose status
+  // wording the guard cannot parse — is not either of these: the account
+  // resolver asks the API when the status text does not parse, and the API
+  // answers for a logged-in `gh` and fails for a logged-out one.
   if (!login) {
-    // Not conditional on a pinned human. A post published under an account
-    // nobody can name is the anonymous half of the same rule: the identity
-    // checks below cannot run on '' any more than they can on a tool name,
-    // and `gh` itself refuses to post when it has no account — so a refusal
-    // here costs a working command nothing.
+    if (login === null || !io.expected.configured) return null;
     return finding(
       unverifiableAccount('the posting account could not be read'),
       `gh ${posts[0].kind}`
