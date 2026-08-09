@@ -31,6 +31,12 @@
  *   ghostwriter-scan.js --commits <base> [--repo <dir>] the commits it adds
  *   ghostwriter-scan.js --files <path...>               whole files, as they are
  *
+ * `--ignore-from <dir>` reads `.ghostwriterignore` from another tree while
+ * still judging this one. CI points it at the base revision, so a change
+ * cannot add an attribution-bearing file and the line exempting it in the same
+ * breath. Every exemption applied is printed either way: an exemption nobody
+ * sees is indistinguishable from a rule that does not work.
+ *
  * Exit codes: 0 clean, 1 attribution found, 2 usage error.
  */
 
@@ -60,6 +66,10 @@ const USAGE = [
   '  ghostwriter-scan.js --diff <base> [--repo <dir>]     this branch against <base>',
   '  ghostwriter-scan.js --commits <base> [--repo <dir>]  the commits it adds',
   '  ghostwriter-scan.js --files <path...>                whole files, as they are',
+  '',
+  'Options:',
+  '  --repo <dir>          the repository to inspect (default: cwd)',
+  '  --ignore-from <dir>   read .ghostwriterignore from there, not from --repo',
 ].join('\n');
 
 /** What each flag does, and what it needs after it. */
@@ -78,11 +88,17 @@ const READERS = {
   '--repo': (args, value) => {
     args.repo = value;
   },
+  // CI reads exemptions from the base revision, so a change cannot add an
+  // attribution-bearing file and the line exempting it in one breath.
+  '--ignore-from': (args, value) => {
+    args.ignoreFrom = value;
+  },
 };
 const NEEDS = {
   '--diff': 'a base revision',
   '--commits': 'a base revision',
   '--repo': 'a directory',
+  '--ignore-from': 'a directory',
 };
 
 function validate(args) {
@@ -92,7 +108,7 @@ function validate(args) {
 }
 
 function parseArgs(argv) {
-  const args = { mode: null, base: null, repo: process.cwd(), files: [] };
+  const args = { mode: null, base: null, repo: process.cwd(), files: [], ignoreFrom: null };
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
     // Everything after `--files` is a path, including one that looks like a
@@ -185,6 +201,19 @@ function inspectCommits(args) {
   return { blocked: false };
 }
 
+/**
+ * Name every path an exemption let through.
+ *
+ * The scanner reads `.ghostwriterignore` from the tree it is checking, so a
+ * change can exempt its own file — deliberately, because an exemption belongs
+ * in the diff beside the thing it covers, where it is reviewed. That argument
+ * only holds if the exemption is visible in the CHECK as well as the diff, so
+ * every skip is printed. A silent skip and a passing rule look identical.
+ */
+function reportExempt(filePath) {
+  process.stderr.write(`ghostwriter-scan: exempt by .ghostwriterignore — ${filePath}\n`);
+}
+
 function collect(args) {
   if (args.mode === 'files') return readFiles(args);
   return unifiedAdditions(readDiff(args));
@@ -203,7 +232,11 @@ function main(argv) {
     verdict =
       args.mode === 'commits'
         ? inspectCommits(args)
-        : inspectFileWrites(collect(args), { cwd: args.repo });
+        : inspectFileWrites(collect(args), {
+            cwd: args.repo,
+            ignoreFrom: args.ignoreFrom,
+            onExempt: reportExempt,
+          });
   } catch (err) {
     process.stderr.write(`ghostwriter-scan: cannot read the change (${err.message})\n`);
     return EXIT_USAGE;

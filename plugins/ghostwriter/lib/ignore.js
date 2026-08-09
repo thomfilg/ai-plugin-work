@@ -103,17 +103,30 @@ function resetIgnoreCache() {
   cache.clear();
 }
 
-/** Is this path exempt from the FILE rules? Never throws. */
-function isIgnored(filePath, cwd) {
+/**
+ * Is this path exempt from the FILE rules? Never throws.
+ *
+ * `ignoreFrom` takes the LIST from another tree while still judging paths in
+ * this one. CI uses it to read exemptions from the base revision: a change
+ * that adds an attribution-bearing file and adds its path to the list in the
+ * same breath would otherwise clear itself, which is the one thing a final
+ * gate must not allow. Locally the parameter is unused — there the list is
+ * the working tree's own, which is what makes it editable at all.
+ */
+function isIgnored(filePath, cwd, ignoreFrom) {
   if (!filePath || typeof filePath !== 'string') return false;
-  const rules = loadIgnore(cwd);
+  const rules = loadIgnore(ignoreFrom || cwd);
   if (!rules.patterns.length) return false;
   // A relative path is relative to where the work is happening, not to where
   // the ignore file was found — the patterns are repository-rooted, the path
   // is not, and resolving both against the same directory silently mismatches
   // every path given from a subdirectory.
   const absolute = path.resolve(cwd || process.cwd(), filePath);
-  const relative = path.relative(rules.root, absolute).split(path.sep).join('/');
+  // Patterns are repository-relative. When the list came from another tree the
+  // paths being judged still belong to THIS one, so they are made relative to
+  // its root rather than to wherever the list was found.
+  const matchRoot = ignoreFrom ? path.resolve(cwd || process.cwd()) : rules.root;
+  const relative = path.relative(matchRoot, absolute).split(path.sep).join('/');
   // Outside the repository the patterns describe: nothing to match against.
   if (relative.startsWith('../')) return false;
   const base = path.posix.basename(relative);

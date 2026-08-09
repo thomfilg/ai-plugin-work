@@ -100,6 +100,11 @@ vendor/**
 
 That exempts a path from the FILE rules only. No path excuses a commit message, a pull request body, or a committing identity.
 
+Two properties keep the list from becoming the hole in the guard:
+
+- **Every exemption applied is announced.** The scanner names each path it skipped, so an exemption is visible in the check output, not only in the diff. A silent skip and a working rule look identical.
+- **CI reads the list from the base revision** (`--ignore-from`), so a change cannot add an attribution-bearing file and the line exempting it in the same breath. A new exemption takes effect once it is merged — reviewing the permission separately from the file it covers is how an allowlist is supposed to work. Locally the list is the working tree's own, which is what makes it editable at all.
+
 Commands that author nothing are never inspected. `echo "Co-Authored-By: …"`, `git status` and `grep -r "git commit"` all fall straight through, and the repo identity is not even read.
 
 A block looks like this:
