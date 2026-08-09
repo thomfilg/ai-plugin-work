@@ -273,21 +273,32 @@ function readMessageArgs(argv, start, out) {
  * and clearing the command. The resume and abort forms legitimately name
  * nothing, which is what AM_CONTROL_FLAGS is for.
  */
-function classifyPatchArg(token) {
-  if (AM_CONTROL_FLAGS.has(token)) return { control: true };
+function classifyPatchArg(token, literal) {
   if (PROC_SUBST_RE.test(token)) return { stream: true };
   // `git am < p` splits into two tokens, so the name arrives on the next pass
-  // of the loop; `git am <p` carries it in this one.
+  // of the loop; `git am <p` carries it in this one. A redirect is the SHELL's,
+  // so it never reaches git's argv and `--` has no bearing on it.
   const redirect = REDIRECT_RE.exec(token);
   if (redirect) return { file: redirect[1] };
+  if (literal) return { file: token };
+  if (AM_CONTROL_FLAGS.has(token)) return { control: true };
   if (AM_VALUE_FLAGS.has(token)) return { skip: true };
   return token.startsWith('-') ? {} : { file: token };
 }
 
 function readPatchArgs(argv, start, out) {
   const seen = { control: false, stream: false };
+  // `--` ends option parsing in git, so everything after it is a filename
+  // however much it looks like a flag. Without that, `git am -- --continue`
+  // applies a patch named `--continue` while reading here as a resume, and
+  // neither imported-authorship check ever runs.
+  let literal = false;
   for (let i = start; i < argv.length; i++) {
-    const arg = classifyPatchArg(argv[i]);
+    if (!literal && argv[i] === '--') {
+      literal = true;
+      continue;
+    }
+    const arg = classifyPatchArg(argv[i], literal);
     seen.control = seen.control || Boolean(arg.control);
     seen.stream = seen.stream || Boolean(arg.stream);
     if (arg.file) out.patchFiles.push(arg.file);

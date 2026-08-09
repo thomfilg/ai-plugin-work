@@ -454,6 +454,14 @@ describe('guard — bypasses that must stay closed', () => {
     }
   });
 
+  it('inspects a patch whose name looks like a resume flag', () => {
+    const verdict = inspect('git am -- --continue', {
+      readMessageFile: () => patch({ from: `${TOOL} <a@b>` }),
+    });
+    assert.equal(verdict.blocked, true, 'a file named --continue is still a patch');
+    assert.equal(verdict.where, 'the author in --continue');
+  });
+
   it('blocks a patch it cannot read, and allows one that is not there', () => {
     const verdict = inspect('git am locked.patch', {
       readMessageFile: () => ({ text: '', unreadable: 'EACCES' }),

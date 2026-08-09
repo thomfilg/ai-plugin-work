@@ -357,6 +357,17 @@ describe('scanCommand — identity surfaces', () => {
     }
   });
 
+  // `--` ends option parsing in git. Without honouring it, a patch named
+  // `--continue` applies while reading here as a resume, and nothing is checked.
+  it('treats everything after `--` as a filename, as git does', () => {
+    const named = onlySurface('git am -- --continue');
+    assert.deepEqual(named.patchFiles, ['--continue']);
+    assert.equal(named.patchStdin, false);
+    assert.deepEqual(onlySurface('git am -- p.mbox').patchFiles, ['p.mbox']);
+    // A bare `--` still names nothing, so the patch is on stdin.
+    assert.equal(onlySurface('git am --').patchStdin, true);
+  });
+
   it('reads a GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n identity pair', () => {
     const surface = onlySurface(
       `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=${TOOL} git commit -m x`
