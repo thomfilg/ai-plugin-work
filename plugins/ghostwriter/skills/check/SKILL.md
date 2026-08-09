@@ -1,6 +1,6 @@
 ---
 name: check
-description: Check a commit message or a repository's git identity for AI self-attribution. Use when the user asks to check a commit message, asks whether some text credits an AI tool, asks if a message is clean before committing, or asks to check the git identity a commit would carry. Reports the rule that fired, the offending line, and the fix.
+description: Check a commit message, a repository's git identity, or the changes a branch adds for AI self-attribution. Use when the user asks to check a commit message, asks whether some text credits an AI tool, asks if a message is clean before committing, asks to check the git identity a commit would carry, or asks whether a branch or pull request adds attribution to any file. Reports the rule that fired, the offending line, and the fix.
 argument-hint: "[message text or file path]"
 user-invocable: true
 allowed-tools: Bash
@@ -53,8 +53,23 @@ Run the ghostwriter rules over a commit message (or over the git identity a comm
 3. Read the exit code — `0` clean, `1` attribution found, `2` bad usage.
 4. Report the result. On a `1`, quote the `rule`, the `evidence` line and the `Fix` line back to the user, then offer a rewritten message with the attribution removed.
 
+Add `--prose` when the text is a pull request description, an issue comment or a release note. That blanks code blocks first: quoting a footer as an example is not signing the document.
+
+## Checking a CHANGE rather than a message
+
+When the question is about files — "does this branch add attribution anywhere?", "is this pull request clean?" — use the scanner instead. It reads only what the change ADDS, so a commit that REMOVES a footer always passes.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/ghostwriter-scan.js" --staged            # what this commit would add
+node "${CLAUDE_PLUGIN_ROOT}/scripts/ghostwriter-scan.js" --diff main         # what this branch adds
+node "${CLAUDE_PLUGIN_ROOT}/scripts/ghostwriter-scan.js" --commits main      # who signed each commit, and what each says
+node "${CLAUDE_PLUGIN_ROOT}/scripts/ghostwriter-scan.js" --files src/a.js    # whole files, as they stand
+```
+
+Same exit codes.
+
 ## What counts
 
-Blocked: authorship trailers that name a tool, "generated with <tool>" footers, product attribution links, tool-named session trailers, and a committer identity that names a tool.
+Blocked: authorship trailers that name a tool, "generated with <tool>" footers, product attribution links, tool-named session trailers, a committer identity that names a tool, and a commit whose repository configures no `user.name` or `user.email` at all — git invents one from the hostname, and the change lands under a machine's byline.
 
-Allowed: naming the product as subject matter. `feat: add <vendor> adapter` is ordinary work and must never be reported as a problem.
+Allowed: naming the product as subject matter. `feat: add <vendor> adapter` is ordinary work and must never be reported as a problem. In a file, `author: '<some-bot>'` as a property name is data, not a signature.
