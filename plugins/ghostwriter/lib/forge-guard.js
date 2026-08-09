@@ -15,7 +15,8 @@
  * see at all. Both are reported as unverifiable rather than waved through.
  */
 
-const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
+const { checkText } = require('./attribution');
+const { checkIdentity, checkExpectedIdentity } = require('./identity-rules');
 const { finding, normalizeRead, UNVERIFIABLE } = require('./finding');
 
 /** An identity that is unknown is not an identity that has been cleared. */

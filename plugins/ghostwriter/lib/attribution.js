@@ -49,19 +49,47 @@ const AI_TOOL_NAMES = Object.freeze([
 
 const AI_NAME_ALT = AI_TOOL_NAMES.join('|');
 
-/** Trailer keys whose value asserts who wrote the change. */
-const ATTRIBUTION_TRAILER_KEYS = [
+/**
+ * Trailer keys whose value asserts who wrote the change, in two tiers.
+ *
+ * The compound keys mean one thing wherever they appear: nothing but a trailer
+ * is spelled `Co-Authored-By:`. The bare ones do not. `author:` and
+ * `committer:` are ordinary keys in ordinary code — a JS object literal, a
+ * YAML front-matter block, a fixture describing a review left by a bot — and
+ * there `author: 'some-bot'` is DATA about who reviewed something, not a
+ * commit signed by it. Six files in this repository alone.
+ *
+ * So the bare keys apply where a line CAN only be a trailer (a commit message,
+ * a tag message, a published body) and are dropped for file content, where the
+ * compound keys carry the rule on their own.
+ */
+const COMPOUND_TRAILER_KEYS = [
   'co-?authored-?by',
   'signed-?off-?by',
   'authored-?by',
-  'author',
-  'committer',
   'generated-?by',
   'created-?by',
   'written-?by',
   'assisted-?by',
   'on-?behalf-?of',
-].join('|');
+];
+const BARE_TRAILER_KEYS = ['author', 'committer'];
+
+const ATTRIBUTION_TRAILER_KEYS = [...COMPOUND_TRAILER_KEYS, ...BARE_TRAILER_KEYS].join('|');
+const FILE_TRAILER_KEYS = COMPOUND_TRAILER_KEYS.join('|');
+
+/**
+ * The punctuation a trailer can hide behind at the start of its line.
+ *
+ * A trailer in a commit message stands on its own, but the same line written
+ * into a FILE wears the local comment syntax: `// Signed-off-by: <tool>`,
+ * `# Generated-by: <tool>`, ` * Authored-by: <tool>` in a header block. Those
+ * are the same signature, and a rule anchored to column zero misses every one
+ * of them. `-` covers the markdown bullet form; a document that needs to quote
+ * a raw trailer puts it in a code span, which prose mode blanks, or names the
+ * file in `.ghostwriterignore`.
+ */
+const COMMENT_LEADER = '(?:[#/*;%!<-]{1,4}[ \\t]*)?';
 
 /** Verbs that claim production of the change, and the agency prepositions. */
 const AUTHORSHIP_VERBS =
@@ -69,9 +97,25 @@ const AUTHORSHIP_VERBS =
 const AGENCY_PREPOSITIONS = 'with|by|using|via';
 
 /**
+ * The filler between verb, preposition and tool name — bounded, and stopped at
+ * a sentence end. Without that stop the rule reads across a full stop and
+ * joins two unrelated sentences: "…(created by WP-02). <Tool> payloads…" is a
+ * note about a work package followed by a note about a runtime, and matching
+ * it credits a tool the text never names as an author.
+ */
+function gap(limit) {
+  return `(?:(?!\\.[\\s)])[^\\n]){0,${limit}}?`;
+}
+
+/**
  * Product-attribution links only — the URLs a tool stamps into a footer to
  * credit itself. Vendor documentation hosts are deliberately NOT here: a
  * commit that links an API doc page is describing work, not signing it.
+ *
+ * Matched on a HOST boundary (see ATTRIBUTION_URL_RE): `<vendor>.com/<tool>`
+ * is the footer link, `developers.<vendor>.com/<tool>/plugins` is the docs
+ * site, and a substring match cannot tell them apart. Prose citing the docs is
+ * describing the work, which is the distinction this file is built on.
  */
 const ATTRIBUTION_URLS = [
   'cl' + 'aude.ai/code',
@@ -88,6 +132,9 @@ function escapeRegExp(text) {
 
 const ATTRIBUTION_URL_ALT = ATTRIBUTION_URLS.map(escapeRegExp).join('|');
 
+/** The alternation, anchored so a longer host cannot contain a listed one. */
+const ATTRIBUTION_URL_RE = new RegExp(`(?<![\\w.-])(?:${ATTRIBUTION_URL_ALT})`, 'i');
+
 /**
  * The ordered attribution rule set.
  *
@@ -96,63 +143,49 @@ const ATTRIBUTION_URL_ALT = ATTRIBUTION_URLS.map(escapeRegExp).join('|');
  * is prose, not a signature — so the value must also look like a URL or an
  * opaque session id.
  */
-const ATTRIBUTION_RULES = Object.freeze([
-  {
-    name: 'aiCoAuthorTrailer',
-    re: new RegExp(
-      `^[ \\t]*(?:${ATTRIBUTION_TRAILER_KEYS})[ \\t]*:[^\\n]*\\b(?:${AI_NAME_ALT})\\b`,
-      'im'
-    ),
-    reason: 'an authorship trailer credits an AI tool',
-    hint: 'Delete the trailer — the commit belongs to the person who ran the tool.',
-  },
-  {
-    name: 'aiGeneratedPhrase',
-    re: new RegExp(
-      `\\b(?:${AUTHORSHIP_VERBS})\\b[^\\n]{0,60}?\\b(?:${AGENCY_PREPOSITIONS})\\b[^\\n]{0,40}?\\b(?:${AI_NAME_ALT})\\b`,
-      'i'
-    ),
-    reason: 'the text credits an AI tool for producing the change',
-    hint: 'Describe what changed, not what wrote it. Drop the "generated with ..." line.',
-  },
-  {
-    name: 'aiAttributionLink',
-    re: new RegExp(`(?:${ATTRIBUTION_URL_ALT})`, 'i'),
-    reason: 'the text carries an AI product attribution link',
-    hint: 'Remove the tool footer link. A commit cites its ticket, not its editor.',
-  },
-  {
-    name: 'aiSessionTrailer',
-    re: new RegExp(
-      `^[ \\t]*[A-Za-z0-9]*(?:${AI_NAME_ALT})[A-Za-z0-9]*(?:-[A-Za-z0-9]+)+[ \\t]*:` +
-        '[ \\t]*(?:https?://\\S|[A-Za-z0-9_-]{12,})',
-      'im'
-    ),
-    reason: 'a tool-named session trailer stamps the commit with a tool run',
-    hint: 'Remove the session/run trailer — it attributes the commit to a tool session.',
-  },
-]);
+function buildRules(trailerKeys) {
+  return Object.freeze([
+    {
+      name: 'aiCoAuthorTrailer',
+      re: new RegExp(
+        `^[ \\t]*${COMMENT_LEADER}(?:${trailerKeys})[ \\t]*:[^\\n]*\\b(?:${AI_NAME_ALT})\\b`,
+        'im'
+      ),
+      reason: 'an authorship trailer credits an AI tool',
+      hint: 'Delete the trailer — the commit belongs to the person who ran the tool.',
+    },
+    {
+      name: 'aiGeneratedPhrase',
+      re: new RegExp(
+        `\\b(?:${AUTHORSHIP_VERBS})\\b${gap(60)}\\b(?:${AGENCY_PREPOSITIONS})\\b${gap(40)}\\b(?:${AI_NAME_ALT})\\b`,
+        'i'
+      ),
+      reason: 'the text credits an AI tool for producing the change',
+      hint: 'Describe what changed, not what wrote it. Drop the "generated with ..." line.',
+    },
+    {
+      name: 'aiAttributionLink',
+      re: ATTRIBUTION_URL_RE,
+      reason: 'the text carries an AI product attribution link',
+      hint: 'Remove the tool footer link. A commit cites its ticket, not its editor.',
+    },
+    {
+      name: 'aiSessionTrailer',
+      re: new RegExp(
+        `^[ \\t]*${COMMENT_LEADER}[A-Za-z0-9]*(?:${AI_NAME_ALT})[A-Za-z0-9]*(?:-[A-Za-z0-9]+)+[ \\t]*:` +
+          '[ \\t]*(?:https?://\\S|[A-Za-z0-9_-]{12,})',
+        'im'
+      ),
+      reason: 'a tool-named session trailer stamps the commit with a tool run',
+      hint: 'Remove the session/run trailer — it attributes the commit to a tool session.',
+    },
+  ]);
+}
 
-/** A bare tool token in a name/email is authorship by itself. */
-const AI_IDENTITY_RE = new RegExp(`\\b(?:${AI_NAME_ALT})\\b`, 'i');
-
-/**
- * Identities that are a machine rather than a person, whatever they are named.
- * A generically-named app account (`some-project-botApp[bot]`) carries no tool
- * token, so the vocabulary above never sees it — but a commit or comment made
- * under it is still not the work of the person who asked for it.
- *
- * Deliberately boundary-anchored: `Abbot` and `Robot` are not bots, `my-bot`
- * and `ci_bot@example.com` are.
- */
-const BOT_IDENTITY_RES = [
-  /\[bot\]/i,
-  /(?:^|[\s\-_.])bots?$/i,
-  /(?:^|[\s\-_.])(?:app|service|machine)$/i,
-  /(?:^|[-_.+])bots?@/i,
-  /\bgithub-actions\b/i,
-  /\bdependabot\b/i,
-];
+/** Text that is ANNOUNCING a change: a message, a body, a whole command. */
+const ATTRIBUTION_RULES = buildRules(ATTRIBUTION_TRAILER_KEYS);
+/** Text that IS the change: source, configuration, documentation. */
+const FILE_ATTRIBUTION_RULES = buildRules(FILE_TRAILER_KEYS);
 
 const PASS = Object.freeze({ ok: true });
 const MAX_EVIDENCE_LEN = 120;
@@ -206,17 +239,19 @@ function stripCode(text) {
  * ordinary shell syntax cannot trip one.
  *
  * @param {string} text
- * @param {{prose?: boolean}} [opts] - `prose` blanks code blocks first, for
- *   surfaces where quoting an example is normal (PR bodies, comments, issues).
- *   Commit messages stay strict: an attribution hidden in a fenced block there
- *   is far more likely to be evasion than documentation.
+ * @param {{prose?: boolean, file?: boolean}} [opts] - `prose` blanks code
+ *   blocks first, for surfaces where quoting an example is normal (PR bodies,
+ *   comments, issues); commit messages stay strict, where an attribution
+ *   hidden in a fence is far likelier to be evasion than documentation.
+ *   `file` reads the text as file CONTENT, which drops the bare `author:` /
+ *   `committer:` trailer keys — ordinary code is full of them.
  * @returns {{ok: true}|{ok: false, rule: string, reason: string, hint: string, evidence: string}}
  */
 function checkText(text, opts) {
   const raw = asText(text);
   if (!raw) return PASS;
   const subject = opts && opts.prose ? stripCode(raw) : raw;
-  for (const rule of ATTRIBUTION_RULES) {
+  for (const rule of opts && opts.file ? FILE_ATTRIBUTION_RULES : ATTRIBUTION_RULES) {
     const match = rule.re.exec(subject);
     if (match) return violation(rule, raw, match);
   }
@@ -230,82 +265,14 @@ function checkText(text, opts) {
  * @param {{name?: string, email?: string}} user
  * @returns {{ok: true}|{ok: false, rule: string, reason: string, hint: string, evidence: string}}
  */
-function checkIdentity(user) {
-  const name = asText(user && user.name).trim();
-  const email = asText(user && user.email).trim();
-  const rendered = email ? `${name} <${email}>` : name;
-  if (!rendered.trim()) return PASS;
-  const evidence =
-    rendered.length > MAX_EVIDENCE_LEN ? rendered.slice(0, MAX_EVIDENCE_LEN) : rendered;
-  if (AI_IDENTITY_RE.test(rendered)) {
-    return {
-      ok: false,
-      rule: 'aiIdentity',
-      reason: 'the identity names an AI tool',
-      hint: 'Use a real person’s name and email — the work is theirs, not the tool’s.',
-      evidence,
-    };
-  }
-  if (BOT_IDENTITY_RES.some((re) => re.test(name) || re.test(email))) {
-    return {
-      ok: false,
-      rule: 'botIdentity',
-      reason: 'the identity is a bot or app account, not a person',
-      hint: 'Author under the human account. A bot byline hides who actually did the work.',
-      evidence,
-    };
-  }
-  return PASS;
-}
-
-/**
- * Whether an identity is the human this repository expects.
- *
- * Blocklists answer "is this obviously a machine?"; they cannot answer "is
- * this the right person?". When an expected identity is configured, that
- * stricter question is the one asked — anything else is refused, including a
- * perfectly human-looking account that simply is not the one that should be
- * signing. An unresolvable identity is refused too: unknown is not approved.
- *
- * @param {{name?: string, email?: string}} user
- * @param {{emails?: string[], logins?: string[]}} expected
- */
-/** Emails and logins collapse to one list — no login is ever an email. */
-function expectedList(expected) {
-  const source = expected || {};
-  return [...(source.emails || []), ...(source.logins || [])];
-}
-
-function isAllowed(allowed, value) {
-  if (!value) return false;
-  const needle = value.toLowerCase();
-  return allowed.some((entry) => entry.toLowerCase() === needle);
-}
-
-function checkExpectedIdentity(user, expected) {
-  const allowed = expectedList(expected);
-  if (!allowed.length) return PASS;
-  const name = asText(user && user.name).trim();
-  const email = asText(user && user.email).trim();
-  if (isAllowed(allowed, email) || isAllowed(allowed, name)) return PASS;
-  const rendered = email ? `${name} <${email}>` : name;
-  return {
-    ok: false,
-    rule: 'unexpectedIdentity',
-    reason: 'the identity is not the human this repository expects',
-    hint: `Expected one of: ${allowed.join(', ')}.`,
-    evidence: rendered || '(no identity resolved)',
-  };
-}
-
 module.exports = {
   AI_TOOL_NAMES,
+  AI_NAME_ALT,
   ATTRIBUTION_RULES,
-  AI_IDENTITY_RE,
-  BOT_IDENTITY_RES,
+  FILE_ATTRIBUTION_RULES,
   PASS,
+  MAX_EVIDENCE_LEN,
+  asText,
   checkText,
-  checkIdentity,
-  checkExpectedIdentity,
   stripCode,
 };

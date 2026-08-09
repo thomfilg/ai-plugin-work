@@ -46,18 +46,48 @@ function gitConfig(cwd, key, gitDir, configSources) {
 }
 
 /**
+ * Whether this target is a repository git can answer about at all.
+ *
+ * Asked only when a field came back empty, so the common case — both set —
+ * costs no extra process. `rev-parse` is the cheapest question that fails for
+ * every reason a config read fails: no git, no repository, no permission.
+ */
+function isRepository(cwd, gitDir, configSources) {
+  const args = ['-C', cwd];
+  if (gitDir) args.push('--git-dir', gitDir);
+  args.push('rev-parse', '--absolute-git-dir');
+  try {
+    execFileSync('git', args, {
+      encoding: 'utf8',
+      timeout: GIT_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, ...(configSources || {}) },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The identity a commit authored against this target will carry.
+ *
+ * `resolved` separates "this repository configures nobody" from "there was
+ * nothing here to ask". The first is a commit that would land under an
+ * invented `account@hostname` byline; the second is a command git refuses on
+ * its own, and reporting it as a missing identity would blame the operator for
+ * running in the wrong directory.
  *
  * @param {string} cwd - directory the command runs in.
  * @param {string} [gitDir] - repository selected by `--git-dir` / `GIT_DIR`.
- * @returns {{name: string, email: string}}
+ * @returns {{name: string, email: string, resolved: boolean}}
  */
 function resolveGitUser(cwd, gitDir, configSources) {
   const dir = cwd || process.cwd();
-  return {
-    name: gitConfig(dir, 'user.name', gitDir, configSources),
-    email: gitConfig(dir, 'user.email', gitDir, configSources),
-  };
+  const name = gitConfig(dir, 'user.name', gitDir, configSources);
+  const email = gitConfig(dir, 'user.email', gitDir, configSources);
+  const resolved = name && email ? true : isRepository(dir, gitDir, configSources);
+  return { name, email, resolved };
 }
 
 /**
@@ -125,4 +155,10 @@ function resolveGhAccount(cwd) {
   }
 }
 
-module.exports = { resolveGitUser, resolveCommitInfo, resolveGhAccount, gitConfig };
+module.exports = {
+  resolveGitUser,
+  resolveCommitInfo,
+  resolveGhAccount,
+  gitConfig,
+  isRepository,
+};

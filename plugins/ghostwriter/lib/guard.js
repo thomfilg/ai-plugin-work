@@ -38,7 +38,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
+const { checkText } = require('./attribution');
+const { checkIdentity, checkIdentityComplete, checkExpectedIdentity } = require('./identity-rules');
 const { scanCommand, identityEntry } = require('./git-surfaces');
 const { resolveGitUser, resolveCommitInfo, resolveGhAccount } = require('./git-identity');
 const { scanForgeCommand, scanToolCall } = require('./forge-surfaces');
@@ -240,6 +241,11 @@ function checkEffectiveIdentity(surfaces, io) {
     const user = io.resolveIdentity(cwd, gitDir, surface.configSources);
     const result = checkIdentity(user);
     if (!result.ok) return finding(result, 'the configured git identity');
+    // An identity that names NOBODY is the one this pass used to clear: a
+    // blank field matches no tool and looks like no bot, and git fills the
+    // gap itself with `account@hostname`.
+    const complete = checkIdentityComplete(user);
+    if (!complete.ok) return finding(complete, 'the configured git identity');
     const expected = checkExpectedIdentity(user, io.expected);
     if (!expected.ok) return finding(expected, 'the configured git identity');
   }
