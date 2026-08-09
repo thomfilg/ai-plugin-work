@@ -24,6 +24,7 @@
 
 const { longFlagValue } = require('./shell-tokenize');
 const { scanSegments, splitEnvPrefix } = require('./command-scan');
+const { readHookBypass } = require('./git-bypass');
 const {
   identityEntry,
   parseAuthorSpec,
@@ -321,6 +322,7 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     patchStdin: false,
     identities: [],
     authorRefs: [],
+    bypassesHooks: null,
   };
 }
 
@@ -353,6 +355,7 @@ function authoringSurface(argv, found, env) {
   else readMessageArgs(argv, found.index + 1, surface);
   readAuthorRefs(found.subcommand, argv, found.index + 1, surface);
   readIdentities(argv, found.index, env, surface);
+  surface.bypassesHooks = readHookBypass(argv, found.index, env, found.subcommand);
   return surface;
 }
 

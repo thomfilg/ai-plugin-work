@@ -4,10 +4,11 @@
 
 A standalone plugin with exactly one job, applied everywhere an agent can sign something: an AI tool may not credit itself for the work, and may not do the work under a machine's account.
 
-That covers two questions at every surface:
+That covers three questions at every surface:
 
 - **What it says** — no co-author trailers, no "Generated with …" footers, no product links, no session stamps. In commit messages, and in pull requests, issues and comments.
-- **Who it says wrote it** — no committing or commenting as a tool-named or bot account instead of the person's own.
+- **What it carries** — none of the above written into the files themselves, where a footer ships in the diff, shows up in the pull request, and stays in the tree after both are forgotten.
+- **Who it says wrote it** — no committing or commenting as a tool-named or bot account instead of the person's own, and no committing under no identity at all.
 
 Naming a product is not attribution. `feat: add <vendor> adapter` is ordinary engineering and always ships.
 
@@ -16,11 +17,16 @@ Naming a product is not attribution. `feat: add <vendor> adapter` is ordinary en
 | Layer | Covers | Where |
 |---|---|---|
 | `PreToolUse` on `Bash` | git authorship, and `gh` posts to PRs and issues | `hooks/ghostwriter.js` |
-| `PreToolUse` on `mcp__github__*` | PR, issue and comment text posted through MCP | same hook |
-| `commit-msg` git hook (opt-in) | commits from a terminal, a script, an editor | `/ghostwriter:install` |
-| CLI | checking a message by hand or from CI | `scripts/ghostwriter-check.js` |
+| `PreToolUse` on write tools | attribution written into a file | same hook |
+| `PreToolUse` on `mcp__github__*` | PR, issue and comment text, and files committed through the API | same hook |
+| `commit-msg` git hook (opt-in) | the final message, after the shell expanded it | `/ghostwriter:install` |
+| `pre-commit` git hook (opt-in) | what a commit adds to the files, whoever wrote the lines | `/ghostwriter:install` |
 
-The PreToolUse hooks are always on once the plugin is installed. The git hook is opt-in because it writes into the repository's hooks directory.
+The PreToolUse hooks are always on once the plugin is installed. The git hooks are opt-in because they write into the repository's hooks directory.
+
+There is deliberately no CI job, and the plugin ships no workflow to add one. Enforcement belongs where the text is written, not in a pipeline that reports it afterwards: a check that fails on a pull request tells someone a footer already reached a branch, while a hook that refuses the write means it never existed. The layers below are for text that reaches a repository without passing a tool at all.
+
+Each layer exists because the one above it cannot see something. The tool hooks see everything an agent writes through its own tools — a command, a file, a pull request body — and refuse it at the point of writing. The git hooks see what reaches the repository by any other route: a terminal, a script, an editor, a second agent.
 
 ## Pinning the human (optional)
 
@@ -33,6 +39,16 @@ export GHOSTWRITER_HUMAN_LOGIN=my-github-login
 
 With a human pinned, anything else is refused, including an identity the guard simply cannot read.
 
+### Who a post is published as
+
+Independently of pinning, a `gh` post is refused when the account cannot be named: a `GH_TOKEN` supplied by the command (which replaces the logged-in account), or a `gh` that answers without a login. Both are the anonymous form of the same rule — the identity checks cannot run on nothing.
+
+A command that NAMES an account (`gh --account …`) is judged on that one, not on the login `gh` would otherwise use. The named account has answered the question the resolver was about to go and ask, and answering it with the default would clear a human while the post went out as somebody else.
+
+The account is read from `gh auth status`, falling back to `gh api user` when the wording of that status has moved between versions. A machine with no `gh` at all is left alone: the command posts nothing and explains itself better than a guard would.
+
+**A forge MCP call is the one place this cannot be answered.** The credential lives in the MCP server, so no reading of the call reveals who it will post as. That gap is refused only when a human is pinned — the strong mode is opt-in on purpose, because refusing every MCP post by default would make the plugin something people uninstall, and a guard nobody keeps enabled prevents nothing.
+
 ## What gets blocked
 
 Five rules, applied in that order so the sharpest evidence wins:
@@ -44,18 +60,55 @@ Five rules, applied in that order so the sharpest evidence wins:
 | `aiAttributionLink` | a product attribution URL in the body |
 | `aiSessionTrailer` | `<Tool>-Session: https://…` |
 | `aiIdentity` | `user.name`, `--author=`, `GIT_AUTHOR_NAME` naming a tool |
+| `botIdentity` | committing or posting as `…[bot]`, `release-bot`, `github-actions` |
+| `missingIdentity` | a repository with no `user.name` / `user.email` — git invents `user@hostname` and the commit lands under a machine |
+| `hookBypass` | `--no-verify` or `-c core.hooksPath=` while our `commit-msg` hook is installed |
 
-## The five passes
+An `unverifiable*` rule is not a sixth kind of offence — it is the guard reporting that it could not read something, and refusing rather than assuming. An oversized or unreadable message file, an identity behind a variable nobody can see, a patch arriving on a pipe, an account replaced by a token.
 
-A command that authors a git object is inspected five ways, and the first finding blocks:
+## The passes
+
+A command that authors a git object is inspected in order, and the first finding blocks:
 
 1. **message arguments** — `-m` / `--message` values
-2. **message files** — `-F` / `--file` contents
+2. **message files** — `-F` / `--file` contents, read in full
 3. **identity literals** — `--author`, `GIT_AUTHOR_NAME=…`, `git config user.*`
 4. **the raw command** — heredoc bodies, unquoted `$(…)`, chained writes
-5. **the repo identity** — what `git config user.name/user.email` resolves to
+5. **published prose** — `gh` bodies, titles, notes, `gh api -f body=` fields
+6. **the posting account** — the account `gh` would publish as
+7. **copied commits** — the author AND message a `cherry-pick` or `commit -C` brings along
+8. **imported patches** — the `From:` header and body of a `git am`
+9. **the repo identity** — what git would stamp, in the repository actually targeted
+10. **the backstop** — whether the command switches the repository's hooks off
 
-Pass 4 is why quoting tricks do not help: the same shape-specific rules run over the whole command text. Pass 5 is why setting the identity in an earlier session does not help either — a clean message committed as a tool is still attribution.
+Pass 4 is why quoting tricks do not help: the same shape-specific rules run over the whole command text. Pass 9 is why setting the identity in an earlier session does not help either — a clean message committed as a tool is still attribution — and it resolves against `-C`, `--git-dir` and `GIT_DIR`, so committing into another repository does not help.
+
+## Reading a file is not reading a message
+
+The file rules are the same rules with two adjustments, because the same sentence means different things in different places:
+
+- **Documentation is read as prose**, source strictly. A file explaining a tool footer quotes it in a fence; a comment is not a fence.
+- **`author:` and `committer:` are dropped** for file content. They are trailer keys in a message and ordinary property names everywhere else — `author: '<some-bot>'` in a fixture is data about who reviewed something, not a commit signed by it.
+- **A trailer in a file wears the local comment syntax.** `// Signed-off-by:`, `# Generated-by:`, ` * Authored-by:` are all the same signature.
+
+Run over this repository's own 2084 files, that ruleset flags exactly one: the `work` plugin's commit-message rules, whose comments quote the footer they reject. It is listed in `.ghostwriterignore`.
+
+A file that must carry an attribution string — a policy document, a fixture, a changelog quoting what it removed — goes in `.ghostwriterignore` at the repository root, one path or glob per line:
+
+```
+docs/attribution-policy.md
+vendor/**
+*.snap
+```
+
+That exempts a path from the FILE rules only. No path excuses a commit message, a pull request body, or a committing identity.
+
+Two properties keep the list from becoming the hole in the guard:
+
+- **Every exemption applied is announced.** The scanner names each path it skipped, so an exemption is visible in the check output, not only in the diff. A silent skip and a working rule look identical.
+- **`--ignore-from` reads the list from another tree**, so a checker can judge this working tree against exemptions reviewed elsewhere. Without it the list is the working tree's own, which is what makes it editable at all.
+
+Locating a `gh` command group depends on knowing which of that tool's options consume the token after them, and an enumeration of another tool's flags goes stale every time it grows one — three review rounds found three. So the TEXT check does not depend on that knowledge: any invocation of `gh` is enough to read the command for attribution, whatever its options do. The precise classification still drives the account and per-argument checks, where a false positive would cost something; the text net cannot cost more than refusing a command whose own text credits a tool.
 
 Commands that author nothing are never inspected. `echo "Co-Authored-By: …"`, `git status` and `grep -r "git commit"` all fall straight through, and the repo identity is not even read.
 
@@ -90,23 +143,23 @@ This is not a gap that can be closed by better parsing — evaluating those woul
 
 **The `commit-msg` hook is the layer that closes this.** Git hands it the final message, after every expansion, so it sees exactly what would be committed. If you want the guarantee to hold against evasion rather than accident, run `/ghostwriter:install` — the PreToolUse hook gives fast feedback at the point of the mistake, and the git hook is the backstop that cannot be talked around.
 
-Identity is treated more strictly than message text, because there are fewer ways to write it: `--config-env=user.name=VAR` is resolved from the command's own assignments or the guard's environment, and a value the guard genuinely cannot read blocks as `unverifiableIdentity` rather than passing. Message files too large to read in full — or that exist and cannot be read at all — block as `unverifiableMessage`. A file that is simply *missing* is allowed, because git fails on it too and nothing gets authored. A partial check is never reported as a pass.
+Which is why `--no-verify` and `-c core.hooksPath=` are refused **when that hook is installed**, and only then: skipping somebody else's slow pre-commit linter is ordinary work, and a rule that punished it is a rule people learn to route around.
 
-### Bylines that arrive from somewhere else
+Identity is treated more strictly than message text, because there are fewer ways to write it: `--config-env=user.name=VAR` is resolved from the command's own assignments or the guard's environment, and a value the guard genuinely cannot read blocks as `unverifiableIdentity` rather than passing.
 
-Two commands take their author and message from an object that already exists, so nothing incriminating appears in the command at all:
+A partial check is never reported as a pass, and the reader draws the lines carefully:
 
-```bash
-git cherry-pick <ref>      # copies the source commit's author AND message
-git commit -C <ref>        # same
-git am bot.patch           # takes both from the mail headers in the file
-```
+| Situation | Verdict |
+|---|---|
+| the file is missing (`ENOENT`, `ENOTDIR`, `EISDIR`) | allowed — git fails on it too, so nothing gets authored |
+| the file exists and will not open (`EACCES`, …) | `unverifiableMessage` — something is there that nobody read |
+| the file is larger than 32 MiB | `unverifiableMessage` |
+| the path is not a regular file (a FIFO, a process substitution) | `unverifiableMessage` — reading it would consume the bytes git needs |
+| `git am` names no patch (`cat p \| git am`, `git am -`) | `unverifiablePatch` |
 
-Both are read and checked. For a patch, only the headers and the message region are inspected — everything below the `---` separator is the diff, and reading it would block any patch that merely touches a file discussing these rules. An in-body `From:` overrides the header, as it does in git.
+Reads loop until the buffer is full or the file ends, because one `read` may return a prefix, and the open is non-blocking, because opening a FIFO otherwise waits for a writer that may never come.
 
-`git am` with no file named — `cat bot.patch | git am`, `git am -`, `git am <(gen)` — blocks as `unverifiablePatch`. The bytes are in a pipe the guard does not own, and consuming them would take them away from git. This is stricter than the equivalent `git commit -F -`, deliberately: a commit has the `commit-msg` backstop below it, and `git am` does not run that hook at all, so refusing here is the only place the byline can be caught.
-
-The expected-human policy is not applied to a patch author. A mailed patch is somebody else's work by definition — preserving a contributor's authorship is the point of `git am` — so requiring a match with the operator would block the command's normal use. A tool or bot byline is still refused.
+`git am` is refused harder than the equivalent `git commit -F -`, deliberately: a commit has the `commit-msg` backstop below it, and git does not run that hook for an `am` at all — so refusing at this layer is the only place that byline can be caught.
 
 ## Failure policy
 
@@ -128,11 +181,18 @@ Export it from the shell that launches your session when you genuinely need it �
 node scripts/ghostwriter-check.js --message "feat: add the guard (#12)"
 node scripts/ghostwriter-check.js .git/COMMIT_EDITMSG
 node scripts/ghostwriter-check.js --identity .
+node scripts/ghostwriter-check.js --prose -      # a PR body, on stdin
+
+# check what a CHANGE adds — additions only, so removing a footer always passes
+node scripts/ghostwriter-scan.js --staged        # what this commit would add
+node scripts/ghostwriter-scan.js --diff main     # what this branch adds
+node scripts/ghostwriter-scan.js --commits main  # who signed each commit, and what each says
+node scripts/ghostwriter-scan.js --files src/a.js
 
 # git-level enforcement
-node scripts/install-commit-msg-hook.js --status
-node scripts/install-commit-msg-hook.js
-node scripts/install-commit-msg-hook.js --uninstall
+node scripts/install-git-hooks.js --status
+node scripts/install-git-hooks.js
+node scripts/install-git-hooks.js --uninstall
 ```
 
 Exit codes: `0` clean, `1` attribution found, `2` usage error.
@@ -150,21 +210,32 @@ Names that collide with common words or common surnames are deliberately exclude
 ```
 ghostwriter/
 ├── hooks/
-│   ├── hooks.json              PreToolUse registration (matcher: Bash)
+│   ├── hooks.json              PreToolUse registration (Bash, write tools, forge MCP)
 │   └── ghostwriter.js          the guard
 ├── lib/
-│   ├── attribution.js          the rules — attribution vs identity
+│   ├── attribution.js          the text rules — what a change says
+│   ├── identity-rules.js       the identity rules — who it says wrote it
+│   ├── file-content.js         the file rules — what a change carries
+│   ├── ignore.js               .ghostwriterignore
 │   ├── git-surfaces.js         quote-aware command reader
-│   ├── git-identity.js         effective git identity
+│   ├── git-identity-args.js    every way a command can name its author
+│   ├── git-bypass.js           every way a command can skip the hooks
+│   ├── git-identity.js         effective git identity, and the installed hook
+│   ├── git-guard.js            the passes that judge a git command
 │   ├── imported-authorship.js  bylines copied from a commit or a patch
 │   ├── patch.js                mbox headers and message region
 │   ├── surface-target.js       which directory / repository a surface targets
-│   ├── guard.js                the five-pass decision
+│   ├── forge-surfaces.js       where prose and files reach GitHub
+│   ├── forge-guard.js          the passes that judge a post
+│   ├── guard.js                the decision — which passes, in what order
+│   ├── report.js               how a refusal reads
+│   ├── policy.js               the override, and the hook marker
 │   ├── hookEntrypoint/         vendored from factories/ (do not edit)
 │   └── runtime/                vendored from factories/ (do not edit)
 ├── scripts/
-│   ├── ghostwriter-check.js    the CLI
-│   └── install-commit-msg-hook.js
+│   ├── ghostwriter-check.js    check a message or an identity
+│   ├── ghostwriter-scan.js     check what a change adds
+│   └── install-git-hooks.js
 └── skills/{check,install}/SKILL.md
 ```
 
@@ -176,7 +247,7 @@ node --test plugins/ghostwriter/hooks/__tests__/*.test.js
 node --test plugins/ghostwriter/scripts/__tests__/*.test.js
 ```
 
-The hook and CLI tests spawn real processes and assert exit codes, and the installer test drives a real `git commit` through the installed hook — the exit code is the contract, so it is tested as one.
+The hook and CLI tests spawn real processes and assert exit codes; the installer test drives a real `git commit` through the installed hooks; the scanner tests run against real repositories and real `git diff` output. The exit code is the contract, so it is tested as one — and whether bytes and config reach the rules is not a question a stubbed reader can answer.
 
 ## Relationship to the `work` plugin
 

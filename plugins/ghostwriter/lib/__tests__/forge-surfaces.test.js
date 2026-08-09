@@ -145,3 +145,116 @@ describe('isForgeTool', () => {
     assert.equal(isForgeTool(undefined), false);
   });
 });
+
+describe('scanForgeCommand — the short body-file flag', () => {
+  it('reads `-F` as the body file it is on every posting command', () => {
+    // The long form was read and the short one was not, so the idiomatic
+    // invocation published a file nobody opened.
+    for (const command of ['gh pr create -F body.md', 'gh issue comment 5 -F body.md']) {
+      assert.deepEqual(
+        onlyPost(command).textFiles.map((entry) => entry.file),
+        ['body.md'],
+        command
+      );
+    }
+  });
+
+  it('still reads `-F` under `gh api` as a raw field', () => {
+    // Same letter, different meaning: there it names a field, not a file.
+    const post = onlyPost('gh api repos/o/r/issues/1/comments -F body=hello');
+    assert.deepEqual(post.textFiles, []);
+    assert.deepEqual(
+      post.texts.map((entry) => entry.text),
+      ['hello']
+    );
+  });
+});
+
+describe('scanToolFiles — files committed through the API', () => {
+  const { scanToolFiles } = require('../forge-surfaces');
+
+  it('reads the content of a single-file write', () => {
+    assert.deepEqual(
+      scanToolFiles('mcp__github__create_or_update_file', {
+        path: 'src/a.js',
+        content: 'const a = 1;',
+        message: 'feat: add a',
+      }),
+      [{ path: 'src/a.js', text: 'const a = 1;' }]
+    );
+  });
+
+  it('reads every file of a multi-file push', () => {
+    assert.deepEqual(
+      scanToolFiles('mcp__github__push_files', {
+        files: [
+          { path: 'a.js', content: 'a' },
+          { path: 'b.js', content: 'b' },
+        ],
+      }),
+      [
+        { path: 'a.js', text: 'a' },
+        { path: 'b.js', text: 'b' },
+      ]
+    );
+  });
+
+  it('reads nothing from a call that carries no file', () => {
+    assert.deepEqual(scanToolFiles('mcp__github__add_issue_comment', { body: 'hi' }), []);
+    assert.deepEqual(scanToolFiles('Write', { path: 'a.js', content: 'a' }), []);
+  });
+});
+
+// A missed command group is not a weaker check — it is no check. The group and
+// action are found positionally, so anything that puts a VALUE where a word was
+// expected takes the whole command out of the guard's sight.
+describe('scanForgeCommand — options in front of the command group', () => {
+  it('finds the group behind a value-bearing global option', () => {
+    for (const command of [
+      'gh -R o/r pr comment 1 --body hello',
+      'gh --repo o/r issue comment 1 --body hello',
+      'gh --hostname h.example pr create --title x --body hello',
+    ]) {
+      assert.deepEqual(texts(command).slice(-1), ['hello'], command);
+    }
+  });
+
+  it('finds `api` behind one too', () => {
+    assert.equal(onlyPost('gh -R o/r api repos/o/r/issues/1/comments -f body=x').kind, 'api');
+  });
+
+  it('does not read a flag VALUE as the action', () => {
+    // The positional rule is what keeps this from matching: `create` here is
+    // a search term, and treating it as the action would inspect — and could
+    // refuse — a read-only command.
+    assert.deepEqual(scanForgeCommand('gh pr list --search create').surfaces, []);
+    assert.deepEqual(scanForgeCommand('gh pr view 784').surfaces, []);
+  });
+});
+
+describe('invokesGh — the net that needs no flag knowledge', () => {
+  const { invokesGh } = require('../forge-surfaces');
+
+  it('sees a gh invocation whatever its options do', () => {
+    for (const command of [
+      'gh pr comment 1 --body hello',
+      'gh --account someone pr comment 1 --body hello',
+      'gh --a-flag-added-next-year x pr comment 1 --body hello',
+      'bash -c "gh pr create --body hello"',
+      '/usr/local/bin/gh pr view 1',
+    ]) {
+      assert.equal(invokesGh(command), true, command);
+    }
+  });
+
+  it('does not see gh where gh is not the command', () => {
+    for (const command of [
+      'echo gh pr comment',
+      'git commit -m "use gh pr create"',
+      'grep -r "gh pr comment" .',
+      'ghost --help',
+    ]) {
+      assert.equal(invokesGh(command), false, command);
+    }
+  });
+});

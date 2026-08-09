@@ -1,6 +1,6 @@
 ---
 name: install
-description: Install or remove the ghostwriter git commit-msg hook in a repository. Use when the user asks to install ghostwriter, asks to block AI attribution for every commit in a repo, asks to enforce the rule outside of agent sessions, or asks to remove the ghostwriter git hook. The plugin's own PreToolUse guard already covers agent commits, so this is only for commits made from a terminal, a script, or an editor.
+description: Install or remove ghostwriter's git hooks (commit-msg and pre-commit) in a repository. Use when the user asks to install ghostwriter, asks to block AI attribution for every commit in a repo, asks to enforce the rule outside of agent sessions, or asks to remove the ghostwriter git hooks. The plugin's own PreToolUse guards already cover what an agent does through its tools, so this is for commits made from a terminal, a script, or an editor.
 argument-hint: ""
 user-invocable: true
 allowed-tools: Bash
@@ -32,33 +32,42 @@ allowed-tools: Bash
 
 # Install
 
-Add ghostwriter's rules to git itself, as a `commit-msg` hook. The plugin's PreToolUse hook already blocks attributed commits made through the Bash tool; this extends the same check to every other way a commit reaches this repository.
+Add ghostwriter's rules to git itself. The plugin's PreToolUse hooks already cover what an agent does through its tools; these extend the same checks to every other way a change reaches this repository — a terminal, a script, an editor, a second agent.
+
+Two hooks, answering different questions:
+
+| Hook | Reads |
+|---|---|
+| `commit-msg` | the final message, **after** the shell expanded it — the one thing static inspection of a command can never see |
+| `pre-commit` | what the commit ADDS to the files, whoever wrote the lines |
 
 ## Steps
 
 1. Check what is already there:
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/install-commit-msg-hook.js" --status
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/install-git-hooks.js" --status
    ```
-2. Install:
+2. Install both:
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/install-commit-msg-hook.js"
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/install-git-hooks.js"
    ```
-3. Report the path it wrote and what it now rejects.
+3. Report the paths it wrote and what they now reject.
 
-To remove it later, run the same script with `--uninstall`.
+To remove them later, run the same script with `--uninstall`.
 
 ## When it refuses
 
-If the repository already has a `commit-msg` hook that ghostwriter did not write, the installer stops with exit 1 and leaves the existing hook untouched. Do not reach for `--force` on your own — tell the user what is already installed and offer both options:
+If the repository already has a hook of that name which ghostwriter did not write, the installer stops with exit 1 and leaves the existing hook untouched. Do not reach for `--force` on your own — tell the user what is already installed and offer both options:
 
 - replace it with `--force`, or
-- keep theirs and chain the check from it by adding this line to their hook:
+- keep theirs and chain the check from it by adding the matching line to their hook:
   ```sh
-  node "<plugin root>/scripts/ghostwriter-check.js" "$1" || exit 1
+  node "<plugin root>/scripts/ghostwriter-check.js" "$1" || exit 1   # commit-msg
+  node "<plugin root>/scripts/ghostwriter-scan.js" --staged || exit 1  # pre-commit
   ```
 
 ## Notes
 
-- The installed hook stores an absolute path to this plugin. If the plugin moves, re-run the installer.
-- The hook honours `GHOSTWRITER_ALLOW_ATTRIBUTION=1` in the committer's environment, the same escape hatch the PreToolUse guard uses.
+- The installed hooks store an absolute path to this plugin. If the plugin moves, re-run the installer.
+- Both honour `GHOSTWRITER_ALLOW_ATTRIBUTION=1` in the committer's environment, the same escape hatch the PreToolUse guards use.
+- A file that must legitimately carry an attribution string — a policy document, a fixture — goes in `.ghostwriterignore` at the repository root, one path or glob per line. That exempts it from the FILE rules only; messages and identities are never covered by it.

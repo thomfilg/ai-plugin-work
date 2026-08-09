@@ -2,13 +2,17 @@
 'use strict';
 
 /**
- * ghostwriter — the PreToolUse guard that keeps AI attribution out of git.
+ * ghostwriter — the PreToolUse guard that keeps AI attribution out of the work.
  *
- * Every Bash call is inspected. Commands that do not author a git object fall
- * straight through; commands that do are checked for self-attribution — an
- * authorship trailer, a "generated with <tool>" footer, a product link, a
- * tool-named session trailer, or a committer identity that names a tool — and
- * blocked with the offending line quoted back.
+ * Three kinds of call are inspected, because a tool can sign the work in three
+ * places: the shell (git authorship and `gh` posts), a forge MCP call (pull
+ * request and comment text, and files committed through the API), and a file
+ * write (a footer in a source comment, which ships in the diff and outlives
+ * both the message and the description). Calls that author nothing fall
+ * straight through; the rest are checked for self-attribution — an authorship
+ * trailer, a "generated with <tool>" footer, a product link, a tool-named
+ * session trailer, or a committer identity that names a tool or nobody at all
+ * — and blocked with the offending line quoted back.
  *
  * TWO-TIER FAILURE POLICY. A guard that bricks the shell when it has a bug is
  * worse than the attribution it prevents, so the outer entry protocol is
@@ -24,9 +28,12 @@ const path = require('node:path');
 const LIB_DIR = path.join(__dirname, '..', 'lib');
 const runtime = require(path.join(LIB_DIR, 'runtime'));
 const { logHookError } = require(path.join(LIB_DIR, 'hookEntrypoint'));
-const { inspectCommand, inspectToolCall, renderBlock } = require(path.join(LIB_DIR, 'guard'));
+const { inspectCommand, inspectToolCall, inspectWrite, renderBlock } = require(
+  path.join(LIB_DIR, 'guard')
+);
 const { hasAuthorshipSurface } = require(path.join(LIB_DIR, 'git-surfaces'));
 const { isForgeTool } = require(path.join(LIB_DIR, 'forge-surfaces'));
+const { writeFiles } = require(path.join(LIB_DIR, 'file-content'));
 
 /** Is anything actually at stake in this command? Never throws. */
 function authorsGitObject(command) {
@@ -66,7 +73,24 @@ function handleToolCall(rt, evt) {
     blockOnError(rt, err, 'forge tool call');
     return;
   }
-  if (verdict.blocked) rt.emit.block(renderBlock(verdict));
+  if (verdict.blocked) rt.emit.block(renderBlock(verdict, 'this tool call'));
+}
+
+/**
+ * A file write — the text a change carries, rather than the text about it.
+ *
+ * Fails CLOSED like the authoring commands: once the call is known to write a
+ * file, an inspection that throws is a file whose content nobody checked.
+ */
+function handleWrite(rt, evt) {
+  let verdict;
+  try {
+    verdict = inspectWrite(writeFiles(evt.rawToolName, evt.toolInput), { cwd: evt.cwd });
+  } catch (err) {
+    blockOnError(rt, err, 'file write');
+    return;
+  }
+  if (verdict.blocked) rt.emit.block(renderBlock(verdict, 'this file'));
 }
 
 function handle({ rt, evt }) {
@@ -75,7 +99,14 @@ function handle({ rt, evt }) {
     handleCommand(rt, evt, command);
     return;
   }
-  if (isForgeTool(evt.rawToolName)) handleToolCall(rt, evt);
+  if (isForgeTool(evt.rawToolName)) {
+    handleToolCall(rt, evt);
+    return;
+  }
+  // toolKind is the runtime's own classification, so codex `apply_patch`
+  // arrives here as a write without the matcher having to name it (which it
+  // must not: naming it churns trust hashes, and Write/Edit already alias).
+  if (evt.toolKind === 'write') handleWrite(rt, evt);
 }
 
 runtime.runHook(handle, {

@@ -14,7 +14,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { checkText, checkIdentity, AI_TOOL_NAMES } = require('../attribution');
+const { checkText, AI_TOOL_NAMES } = require('../attribution');
 
 const TOOL = ['Cl', 'aude'].join('');
 const TOOL_ALT = ['Co', 'dex'].join('');
@@ -120,29 +120,67 @@ describe('checkText — attribution is blocked', () => {
   });
 });
 
-describe('checkIdentity — a bare token is the offence', () => {
-  it('passes a human identity', () => {
-    assert.deepEqual(checkIdentity({ name: 'Ada Lovelace', email: 'ada@example.com' }), {
-      ok: true,
-    });
+// A trailer written into a FILE wears the local comment syntax. A rule
+// anchored to column zero saw none of these, which is most of what a
+// self-attributing tool actually leaves behind in a tree.
+describe('checkText — a trailer behind a comment leader', () => {
+  it('finds a trailer commented out in every common syntax', () => {
+    for (const leader of ['//', '#', ' *', '--', '<!--', ';', '%', '-']) {
+      const text = `${leader} Co-Authored-By: ${TOOL} <a@b>`;
+      assertBlocked(checkText(text, { file: true }), 'aiCoAuthorTrailer');
+    }
   });
 
-  it('passes an empty identity (unknown, not AI)', () => {
-    assert.deepEqual(checkIdentity({ name: '', email: '' }), { ok: true });
-    assert.deepEqual(checkIdentity(null), { ok: true });
+  it('finds a commented session trailer', () => {
+    assertBlocked(
+      checkText(`// ${TOOL_ALT}-Session: 01J3b151ex3GGxmmS8BsFZua`, { file: true }),
+      'aiSessionTrailer'
+    );
+  });
+});
+
+// File mode is not a weaker mode — it is a mode that knows what a file is.
+describe('checkText — file mode', () => {
+  it('allows a bare author: key, which is ordinary data in ordinary code', () => {
+    for (const text of [
+      `const review = { author: '${TOOL.toLowerCase()}-bot', body: 'lgtm' };`,
+      `author: ${TOOL.toLowerCase()}[bot]`,
+      `committer: ${TOOL}`,
+    ]) {
+      assert.deepEqual(checkText(text, { file: true }), { ok: true }, text);
+    }
   });
 
-  it('rejects a tool name in user.name', () => {
-    assertBlocked(checkIdentity({ name: TOOL, email: 'a@example.com' }), 'aiIdentity');
+  it('still rejects the same key in a commit message, where it can only be a trailer', () => {
+    assertBlocked(checkText(`feat: x\n\nAuthor: ${TOOL}`), 'aiCoAuthorTrailer');
   });
 
-  it('rejects a vendor domain in user.email', () => {
-    const email = `noreply@${['anthro', 'pic'].join('')}.com`;
-    assertBlocked(checkIdentity({ name: 'Someone', email }), 'aiIdentity');
+  it('keeps every compound trailer key in file mode', () => {
+    for (const key of ['Co-Authored-By', 'Signed-off-by', 'Generated-by', 'Assisted-by']) {
+      assertBlocked(checkText(`${key}: ${TOOL} <a@b>`, { file: true }), 'aiCoAuthorTrailer');
+    }
+  });
+});
+
+// Both of these were real false positives found by running the rules over
+// this repository's own 2084 files.
+describe('checkText — matches that were reading too far', () => {
+  it('does not join two sentences across a full stop', () => {
+    const text = `The ticket (created by WP-02). ${TOOL} payloads arrive as JSON.`;
+    assert.deepEqual(checkText(text, { file: true }), { ok: true });
   });
 
-  it('quotes the rendered identity as evidence', () => {
-    const result = checkIdentity({ name: TOOL, email: 'a@example.com' });
-    assert.equal(result.evidence, `${TOOL} <a@example.com>`);
+  it('still fires within one sentence', () => {
+    assertBlocked(checkText(`This file was generated with ${TOOL} Code`), 'aiGeneratedPhrase');
+  });
+
+  it('does not read a documentation host as an attribution link', () => {
+    const docs = `https://developers.${['open', 'ai'].join('')}.com/${TOOL_ALT.toLowerCase()}/plugins`;
+    assert.deepEqual(checkText(`See ${docs} for the API.`, { file: true }), { ok: true });
+  });
+
+  it('still fires on the footer link itself', () => {
+    const footer = `https://${['open', 'ai'].join('')}.com/${TOOL_ALT.toLowerCase()}`;
+    assertBlocked(checkText(`feat: x\n\n${footer}`), 'aiAttributionLink');
   });
 });

@@ -15,8 +15,9 @@
  * see at all. Both are reported as unverifiable rather than waved through.
  */
 
-const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
-const { finding, normalizeRead, UNVERIFIABLE } = require('./finding');
+const { checkText } = require('./attribution');
+const { checkIdentity, checkExpectedIdentity } = require('./identity-rules');
+const { finding, normalizeRead, readFailure } = require('./finding');
 
 /** An identity that is unknown is not an identity that has been cleared. */
 function unverifiableAccount(reason) {
@@ -44,7 +45,8 @@ function checkPostFiles(post, io) {
     const read = normalizeRead(io.readMessageFile(entry.file, io.cwd));
     const result = checkText(read.text, { prose: true });
     if (!result.ok) return finding(result, entry.where);
-    if (read.truncated) return finding(UNVERIFIABLE, entry.where);
+    const failed = readFailure(read, entry.where);
+    if (failed) return failed;
   }
   return null;
 }
@@ -58,9 +60,19 @@ function checkPostText(posts, io) {
   return null;
 }
 
-/** The raw command, in prose mode, for post bodies built by a heredoc. */
-function checkRawPost(command, posts) {
-  if (!posts.length) return null;
+/**
+ * The raw command, in prose mode — for bodies built by a heredoc, and for
+ * every `gh` invocation the classifier did not recognise as a post.
+ *
+ * The second is the important one. Locating the command group depends on
+ * knowing which of `gh`'s options consume the token after them, and that
+ * knowledge goes stale every time `gh` grows a flag. This pass is deliberately
+ * free of it: if the command runs `gh` and its text credits a tool, that is
+ * enough. The only thing a false positive can cost here is a command whose own
+ * text carries an attribution footer, which is not a command worth protecting.
+ */
+function checkRawPost(command, posts, reachesForge) {
+  if (!posts.length && !reachesForge) return null;
   const result = checkText(command, { prose: true });
   return result.ok ? null : finding(result, 'the command text');
 }
@@ -81,19 +93,42 @@ function checkPostAccount(posts, io) {
       `gh ${override.kind}`
     );
   }
+  // An account the command NAMES is the account it posts as, and it is a
+  // better answer than the resolver's: the resolver reports the default login,
+  // which is the one this command has just declined to use.
+  const selected = posts.find((post) => post.account);
+  if (selected)
+    return checkAccountIdentity(selected.account, `gh --account ${selected.account}`, io);
+
   const login = io.resolveAccount(io.cwd);
+  // Two ways to name nobody, and neither is a post going out unchecked. null
+  // is "there is no `gh` here"; '' is a `gh` that will not name an account,
+  // which in practice means it is logged out. Both describe a command that
+  // posts nothing and reports the real problem better than a guard would, so
+  // both are left alone — unless a human is pinned, where "cannot tell" is a
+  // refusal by design.
+  //
+  // The case worth worrying about — a `gh` that IS logged in but whose status
+  // wording the guard cannot parse — is not either of these: the account
+  // resolver asks the API when the status text does not parse, and the API
+  // answers for a logged-in `gh` and fails for a logged-out one.
   if (!login) {
-    if (!io.expected.configured) return null;
+    if (login === null || !io.expected.configured) return null;
     return finding(
       unverifiableAccount('the posting account could not be read'),
       `gh ${posts[0].kind}`
     );
   }
+  return checkAccountIdentity(login, `the account gh would post as (${login})`, io);
+}
+
+/** Is this login a person, and the right one? Shared by both ways of naming it. */
+function checkAccountIdentity(login, where, io) {
   const identity = { name: login, email: '' };
   const result = checkIdentity(identity);
-  if (!result.ok) return finding(result, `the account gh would post as (${login})`);
+  if (!result.ok) return finding(result, where);
   const expected = checkExpectedIdentity(identity, io.expected);
-  return expected.ok ? null : finding(expected, `the account gh would post as (${login})`);
+  return expected.ok ? null : finding(expected, where);
 }
 
 module.exports = { checkPostText, checkRawPost, checkPostAccount, unverifiableAccount };
