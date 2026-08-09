@@ -53,11 +53,41 @@ jobs:
           fi
           echo "sha=$BASE" >> "$GITHUB_OUTPUT"
 
+      # The checker must not be the thing being checked. Run from the
+      # pull-request tree, a change that weakens the scanner — or any module it
+      # loads — makes its own check pass, which is the one property a final
+      # gate cannot have. So the code comes from the BASE revision, applied to
+      # the pull request's content, which `--repo` already supports.
+      #
+      # The fallback is for exactly one pull request: the one that introduces
+      # the scanner, where the base has none to borrow. That case is visible in
+      # the log rather than silent.
+      - name: Take the checker from the base revision
+        id: checker
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          DIR="$GITHUB_WORKSPACE"
+          if git cat-file -e "$BASE:plugins/ghostwriter/scripts/ghostwriter-scan.js" 2>/dev/null; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$BASE" >/dev/null
+            DIR="$RUNNER_TEMP/base"
+            echo "Enforcing with the checker at $BASE."
+          else
+            echo "The base revision has no checker, so this one enforces itself."
+            echo "That is true only of the pull request that introduces it."
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
       - name: Files this pull request adds
-        run: node plugins/ghostwriter/scripts/ghostwriter-scan.js --diff "${{ steps.base.outputs.sha }}"
+        run: |
+          node "${{ steps.checker.outputs.dir }}/plugins/ghostwriter/scripts/ghostwriter-scan.js" \
+            --repo "$GITHUB_WORKSPACE" --diff "${{ steps.base.outputs.sha }}"
 
       - name: Commits this pull request adds — message and author
-        run: node plugins/ghostwriter/scripts/ghostwriter-scan.js --commits "${{ steps.base.outputs.sha }}"
+        run: |
+          node "${{ steps.checker.outputs.dir }}/plugins/ghostwriter/scripts/ghostwriter-scan.js" \
+            --repo "$GITHUB_WORKSPACE" --commits "${{ steps.base.outputs.sha }}"
 
       - name: The pull request's own title and description
         # Via env, never interpolated into the script: the title and body are
@@ -69,4 +99,4 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" |
-            node plugins/ghostwriter/scripts/ghostwriter-check.js --prose -
+            node "${{ steps.checker.outputs.dir }}/plugins/ghostwriter/scripts/ghostwriter-check.js" --prose -
