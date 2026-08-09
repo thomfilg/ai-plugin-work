@@ -20,8 +20,6 @@ const {
 } = require('../identity-rules');
 
 const TOOL = ['Cl', 'aude'].join('');
-const VENDOR = ['open', 'ai'].join('');
-
 /** Every refusal must carry a rule, a reason, a hint and printable evidence. */
 function assertBlocked(result, rule) {
   assert.equal(result.ok, false, 'expected the identity to be rejected');
