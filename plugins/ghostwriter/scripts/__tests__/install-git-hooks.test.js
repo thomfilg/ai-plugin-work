@@ -163,6 +163,26 @@ describe('install-git-hooks — other people’s hooks', () => {
     assert.match(result.stderr, /Nothing was left behind/);
   });
 
+  // A failed UPGRADE is the case a create-only rollback gets wrong twice:
+  // deleting the old hook leaves no guard, leaving the new one leaves whatever
+  // the failed write managed to put there. Restoring is neither.
+  it('restores a previous ghostwriter hook when the install fails', () => {
+    assert.equal(install().code, 0);
+    const old = '#!/usr/bin/env sh\n# ghostwriter-commit-msg v1\n# OLD VERSION\nexit 0\n';
+    fs.writeFileSync(hookPath('commit-msg'), old, { mode: 0o755 });
+    fs.rmSync(hookPath('pre-commit'));
+    fs.mkdirSync(hookPath('pre-commit'));
+
+    const result = install();
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Nothing was left behind/);
+    assert.equal(
+      fs.readFileSync(hookPath('commit-msg'), 'utf8'),
+      old,
+      'the hook that was already here must come back exactly as it was'
+    );
+  });
+
   it('never deletes a foreign hook', () => {
     fs.mkdirSync(path.dirname(hookPath()), { recursive: true });
     fs.writeFileSync(hookPath(), '#!/bin/sh\nexit 0\n', { mode: 0o755 });

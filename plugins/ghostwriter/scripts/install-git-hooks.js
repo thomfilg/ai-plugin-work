@@ -165,43 +165,72 @@ function message(err) {
   return (err && err.message) || String(err);
 }
 
-/** Undo what this run created; report what it could not. */
-function rollBack(created) {
-  const stuck = [];
-  for (const hookPath of created) {
+/**
+ * What a destination held before this run touched it, or null for absent.
+ *
+ * Taken BEFORE the write, because a destination that already held one of our
+ * hooks is the case a naive rollback gets wrong twice over: deleting it turns
+ * a failed upgrade into a repository with no guard, and leaving it turns one
+ * into a repository holding whatever the failed write managed to put there.
+ * Restoring is the only answer that is neither.
+ */
+function snapshot(hookPath) {
+  try {
+    return { data: fs.readFileSync(hookPath), mode: fs.statSync(hookPath).mode };
+  } catch {
+    return null;
+  }
+}
+
+/** Put one destination back the way it was found. */
+function restore(entry) {
+  if (entry.before) {
     try {
-      // `force` so a path that was claimed but never written is not reported
-      // as stuck: nothing there is exactly the state rollback wants.
-      fs.rmSync(hookPath, { force: true });
+      fs.writeFileSync(entry.path, entry.before.data, { mode: entry.before.mode });
+      return true;
     } catch {
-      stuck.push(hookPath);
+      return false;
     }
   }
-  return stuck;
+  try {
+    // `force` so a path that was claimed but never written is not reported as
+    // stuck: nothing there is exactly the state rollback wants.
+    fs.rmSync(entry.path, { force: true });
+    return true;
+  } catch {
+    // A destination we could not remove is only ours to answer for if it is a
+    // file. A directory sitting where a hook should go was there first.
+    const found = fs.statSync(entry.path, { throwIfNoEntry: false });
+    return !found || !found.isFile();
+  }
+}
+
+/** Undo what this run touched; report what it could not. */
+function rollBack(touched) {
+  return touched.filter((entry) => !restore(entry)).map((entry) => entry.path);
 }
 
 function installBoth(hooksDir) {
-  const created = [];
+  const touched = [];
   try {
     for (const name of Object.keys(HOOKS)) {
       const hookPath = path.join(hooksDir, name);
       // Recorded BEFORE the write, not after: `writeFileSync` can succeed and
-      // the `chmod` that follows it fail, and a hook noted only on success is
-      // a hook the rollback never hears about. Removal tolerates a file that
-      // was never created, so claiming one costs nothing.
-      if (!fs.existsSync(hookPath)) created.push(hookPath);
+      // the `chmod` that follows it fail, and a destination noted only on
+      // success is one the rollback never hears about.
+      touched.push({ path: hookPath, before: snapshot(hookPath) });
       writeHook(hookPath, name);
     }
   } catch (err) {
-    const stuck = rollBack(created);
+    const stuck = rollBack(touched);
     process.stderr.write(`ghostwriter: could not install the hooks (${message(err)}).\n`);
     // Claiming a clean rollback that did not happen is worse than the failure
     // itself: it sends the operator away believing the repository is untouched
     // while a hook they never agreed to is running in it.
     if (stuck.length) {
       process.stderr.write(
-        `ghostwriter: could NOT remove ${stuck.join(', ')} — a partial install remains.\n` +
-          'Delete that file by hand, or re-run once the directory is writable.\n'
+        `ghostwriter: could NOT restore ${stuck.join(', ')} — a partial install remains.\n` +
+          'Check that file by hand, or re-run once the directory is writable.\n'
       );
     } else {
       process.stderr.write('Nothing was left behind — both hooks go in together.\n');
