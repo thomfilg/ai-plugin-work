@@ -21,9 +21,9 @@ Naming a product is not attribution. `feat: add <vendor> adapter` is ordinary en
 | `PreToolUse` on `mcp__github__*` | PR, issue and comment text, and files committed through the API | same hook |
 | `commit-msg` git hook (opt-in) | the final message, after the shell expanded it | `/ghostwriter:install` |
 | `pre-commit` git hook (opt-in) | what a commit adds to the files, whoever wrote the lines | `/ghostwriter:install` |
-| CI | the whole branch, and the pull request's own description | `scripts/ghostwriter-scan.js` |
+| CI (opt-in) | the whole branch, and the pull request's own description | `templates/attribution.yml` |
 
-The PreToolUse hooks are always on once the plugin is installed. The git hooks are opt-in because they write into the repository's hooks directory.
+The PreToolUse hooks are always on once the plugin is installed. The git hooks are opt-in because they write into the repository's hooks directory, and the CI job is opt-in because it belongs to the repository being guarded, not to this plugin — see [Enforcing in CI](#enforcing-in-ci).
 
 Each layer exists because the one above it cannot see something. The tool hooks see only what the agent does through its own tools; the git hooks see anything committed on that machine; CI sees what actually arrived, from wherever it came.
 
@@ -204,6 +204,25 @@ Tool names live in `lib/attribution.js`, assembled from string fragments so the 
 
 Names that collide with common words or common surnames are deliberately excluded. A guard that rejects a real person because of their surname is worse than the attribution it prevents; for the collisions that remain, the escape hatch is the answer.
 
+## Enforcing in CI
+
+The hooks run where the agent runs and where they are installed. Neither covers a branch pushed from a machine that has neither, and neither covers the pull request's own description, which is written on github.com after every other layer has finished.
+
+`templates/attribution.yml` is a workflow for that. Copy it into your repository and pin the ref:
+
+```bash
+mkdir -p .github/workflows
+cp "${CLAUDE_PLUGIN_ROOT}/templates/attribution.yml" .github/workflows/attribution.yml
+# then edit PLUGIN_REF to a tag or commit
+```
+
+It checks three things against the base: the files the branch adds, every commit's message and author, and the pull request's title and body. It needs no secrets and no permissions beyond reading the code.
+
+Two properties worth keeping if you adapt it:
+
+- **The checker comes from the plugin repository at a pinned ref**, not from the pull request's own tree. Run from the branch it is judging, a change could weaken the scanner and make its own check pass — the one property a final gate cannot have. Your `.ghostwriterignore` still comes from your repository, because that is where exemptions are reviewed.
+- **`edited` is in the trigger set.** The job reads the title and body, and some tools append an attribution footer to a description at creation time, after every earlier layer has had its say. Without `edited`, a description that gains one later is never re-checked and one that is corrected stays red.
+
 ## Layout
 
 ```
@@ -235,6 +254,8 @@ ghostwriter/
 │   ├── ghostwriter-check.js    check a message or an identity
 │   ├── ghostwriter-scan.js     check what a change adds
 │   └── install-git-hooks.js
+├── templates/
+│   └── attribution.yml         a CI workflow to copy into your repository
 └── skills/{check,install}/SKILL.md
 ```
 

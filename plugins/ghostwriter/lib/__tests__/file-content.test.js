@@ -288,6 +288,43 @@ describe('unifiedAdditions — every added line, headers told apart by position'
     assert.equal(file.text, '+ b/evil.c\nok');
   });
 
+  // Under `-U0` a deleted line starting `-- ` and an added line starting
+  // `++ ` land adjacent, encoded as `--- ` and `+++ `. Adjacency alone would
+  // read the second as a file header and swallow the addition whole.
+  it('does not let hunk content spoof a file header', () => {
+    const spoof = [
+      'diff --git a/x.md b/x.md',
+      '--- a/x.md',
+      '+++ b/x.md',
+      '@@ -1 +1 @@',
+      '--- old text',
+      `+++ Generated with ${TOOL} Code`,
+    ].join('\n');
+    const files = unifiedAdditions(spoof);
+    assert.equal(files.length, 1, 'the addition must not open a second file');
+    assert.equal(files[0].path, 'x.md');
+    assert.equal(checkFileText(files[0].path, files[0].text).blocked, true);
+  });
+
+  it('still reads the header of every real file in a multi-file diff', () => {
+    const two = [
+      'diff --git a/a.js b/a.js',
+      '--- a/a.js',
+      '+++ b/a.js',
+      '@@ -1 +1 @@',
+      '+const x = 1;',
+      'diff --git a/b.js b/b.js',
+      '--- a/b.js',
+      '+++ b/b.js',
+      '@@ -1 +1 @@',
+      '+const y = 2;',
+    ].join('\n');
+    assert.deepEqual(unifiedAdditions(two), [
+      { path: 'a.js', text: 'const x = 1;' },
+      { path: 'b.js', text: 'const y = 2;' },
+    ]);
+  });
+
   it('drops what a deletion adds, which is nothing', () => {
     const gone = ['diff --git a/x.c b/x.c', '--- a/x.c', '+++ /dev/null'].join('\n');
     assert.deepEqual(unifiedAdditions(gone), []);

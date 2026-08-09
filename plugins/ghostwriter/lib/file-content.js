@@ -96,6 +96,10 @@ const PATCH_MOVE_RE = /^\*\*\* Move to: (.+)$/;
 const DIFF_HEADER_RE = /^\+\+\+ (?:b\/)?(.+)$/;
 /** The line that always precedes it. A `+++` anywhere else is content. */
 const DIFF_OLD_FILE_RE = /^--- /;
+/** `diff --git a/x b/x` — opens a file's header block. */
+const DIFF_FILE_RE = /^diff --git /;
+/** `@@ -1 +1 @@` — closes it. Everything after is hunk content. */
+const DIFF_HUNK_RE = /^@@ /;
 
 /**
  * The lines each file GAINS, in either patch dialect.
@@ -114,33 +118,53 @@ const DIFF_OLD_FILE_RE = /^--- /;
  * EVERY added line counts, including one that begins with `+`. A source line
  * of `++i;` arrives in the diff as `+++i;`, and a reader that skips anything
  * starting with `+++` drops it — which is a way to write an attribution the
- * scanner never sees. Headers are told apart by POSITION rather than by shape:
- * `+++ b/path` is a header only directly after the `--- a/path` that always
- * precedes it, which is how git's own format defines it. Anywhere else those
- * characters are content, and are read as such.
+ * scanner never sees.
+ *
+ * So headers are told apart from content by WHERE THEY ARE, and position here
+ * means two things, because either alone can be forged:
+ *
+ *   - the header BLOCK: `diff --git` opens it, the first `@@` closes it.
+ *     Inside a hunk, `--- x` and `+++ y` are a deleted line and an added line
+ *     whose text happens to start with `--` and `++`. Under `-U0` those two
+ *     land adjacent with nothing between them.
+ *   - the PAIR: within that block, `+++ b/path` is a header only directly
+ *     after the `--- a/path` that always precedes it.
+ *
+ * This assumes git's own output, which always emits `diff --git` per file.
+ * A hand-rolled `diff -u` with several files concatenated and no such line
+ * would have only the second guard, which is the weaker one — nothing this
+ * plugin runs produces that, and every caller here shells out to git.
  *
  * @param {string} text
- * @param {(line: string, prev: string) => {path: string|null}|null} readHeader -
- *   the path a following block lands in; `null` when the line is not a header,
- *   and a null `path` for a header that names no destination (a deletion).
+ * @param {(line: string, at: {prev: string, inHunk: boolean}) =>
+ *   {path: string|null}|null} readHeader - the path a following block lands
+ *   in; `null` when the line is not a header, and a null `path` for a header
+ *   that names no destination (a deletion).
  * @returns {Array<{path: string, text: string}>}
  */
+/** Advance the header/hunk position past one line. */
+function advance(at, line) {
+  if (DIFF_FILE_RE.test(line)) at.inHunk = false;
+  else if (DIFF_HUNK_RE.test(line)) at.inHunk = true;
+  at.prev = line;
+}
+
 function additions(text, readHeader) {
   if (typeof text !== 'string') return [];
   const files = [];
   let current = null;
-  let prev = '';
+  const at = { prev: '', inHunk: false };
   for (const line of text.split('\n')) {
-    const header = readHeader(line, prev);
-    prev = line;
+    const header = readHeader(line, at);
+    advance(at, line);
     if (header) {
       current = header.path ? { path: header.path, lines: [] } : null;
       if (current) files.push(current);
-      continue;
+    } else if (current && line.startsWith('+')) {
+      // The leading `+` is the diff's, and only the first one: `+++i;` is the
+      // line `++i;`, not furniture.
+      current.lines.push(line.slice(1));
     }
-    // The leading `+` is the diff's, and only the first one: `+++i;` is the
-    // line `++i;`, not furniture.
-    if (current && line.startsWith('+')) current.lines.push(line.slice(1));
   }
   return files.map((file) => ({ path: file.path, text: file.lines.join('\n') }));
 }
@@ -155,8 +179,8 @@ function patchAdditions(patchText) {
 
 /** Unified diffs — `git diff`, `git diff --cached`, a mailed patch. */
 function unifiedAdditions(diffText) {
-  return additions(diffText, (line, prev) => {
-    if (!DIFF_OLD_FILE_RE.test(prev)) return null;
+  return additions(diffText, (line, at) => {
+    if (at.inHunk || !DIFF_OLD_FILE_RE.test(at.prev)) return null;
     const header = DIFF_HEADER_RE.exec(line);
     if (!header) return null;
     const name = header[1].trim();

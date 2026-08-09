@@ -1,0 +1,99 @@
+# ghostwriter — the enforcement layer that runs where nothing else can.
+#
+# Copy this file to `.github/workflows/attribution.yml` IN YOUR OWN REPOSITORY
+# and pin PLUGIN_REF below to a tag or commit. It is a template, not a live
+# workflow: the plugin ships it, your repository runs it.
+#
+# The plugin's PreToolUse hooks run where the agent runs, and the git hooks run
+# where they are installed. Neither covers a branch pushed from a laptop that
+# has neither, and neither covers the pull request's own description, which is
+# written on github.com after every other layer has had its say. This job asks
+# the same questions of what actually arrived.
+#
+# It needs no secrets and no permissions beyond reading the code.
+
+name: Attribution
+
+on:
+  pull_request:
+    # `edited` is not in the default set, and this job reads the title and the
+    # body — without it, a description that gains a footer after the pull
+    # request was opened is never checked again, and one that is corrected
+    # stays red. Both happen in practice: some tools append a footer to the
+    # description at creation time, after every earlier layer has finished.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+env:
+  # The plugin repository, and the ref to enforce with. PIN THIS. A moving ref
+  # means the rules your pull requests are judged by can change without a
+  # change in your repository.
+  PLUGIN_REPO: thomfilg/ai-plugin-work
+  PLUGIN_REF: v3.84.1
+
+jobs:
+  ghostwriter:
+    runs-on: ubuntu-latest
+    name: No AI self-attribution
+    steps:
+      - name: Checkout the pull request
+        uses: actions/checkout@v4
+        with:
+          # Full history: every check below is a range against the base.
+          fetch-depth: 0
+
+      # The checker must not be the thing being checked. Taken from the plugin
+      # repository at a pinned ref rather than from the pull request's own
+      # tree, a change cannot weaken the scanner — or any module it loads — and
+      # make its own check pass, which is the one property a final gate cannot
+      # have. Your `.ghostwriterignore` still comes from your repository,
+      # because that is where the exemptions are reviewed.
+      - name: Check out ghostwriter
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PLUGIN_REPO }}
+          ref: ${{ env.PLUGIN_REF }}
+          path: .ghostwriter-checker
+
+      # No setup-node step on purpose. The scanner is plain CommonJS over
+      # node:fs, node:path and node:child_process with no dependencies and no
+      # install, so the runner's preinstalled node runs it — and every action
+      # this job does not use is one whose code cannot change underneath it.
+
+      - name: Resolve the base
+        id: base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          BASE="$BASE_SHA"
+          if [ -z "$BASE" ]; then
+            git fetch --no-tags origin "$BASE_REF"
+            BASE="origin/$BASE_REF"
+          fi
+          echo "sha=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Files this pull request adds
+        run: |
+          node .ghostwriter-checker/plugins/ghostwriter/scripts/ghostwriter-scan.js \
+            --repo "$GITHUB_WORKSPACE" --diff "${{ steps.base.outputs.sha }}"
+
+      - name: Commits this pull request adds — message and author
+        run: |
+          node .ghostwriter-checker/plugins/ghostwriter/scripts/ghostwriter-scan.js \
+            --repo "$GITHUB_WORKSPACE" --commits "${{ steps.base.outputs.sha }}"
+
+      - name: The pull request's own title and description
+        # Via env, never interpolated into the script: the title and body are
+        # written by whoever opened the pull request, and a `run:` block that
+        # substitutes them at template time executes what they wrote.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" |
+            node .ghostwriter-checker/plugins/ghostwriter/scripts/ghostwriter-check.js --prose -
