@@ -143,12 +143,47 @@ function refusals(hooksDir, force) {
   );
 }
 
-function installOne(hookPath, name, force) {
-  if (statusOf(hookPath, name) === 'foreign' && !force) return refuseForeign(hookPath, name);
+function writeHook(hookPath, name) {
   fs.mkdirSync(path.dirname(hookPath), { recursive: true });
   fs.writeFileSync(hookPath, hookBody(name), { mode: 0o755 });
   fs.chmodSync(hookPath, 0o755);
   process.stdout.write(`ghostwriter: ${name} hook installed at ${hookPath}\n`);
+}
+
+/**
+ * Install both hooks, or leave the repository as it was found.
+ *
+ * The preflight catches the expected refusal — somebody else's hook already
+ * there — before anything is written. This catches the unexpected one: a full
+ * disk, a read-only hooks directory, a permission that changed between the two
+ * writes. Either way the outcome has to be both or neither, so anything
+ * created before the failure is removed again. A hook that was ALREADY ours is
+ * left alone: it was not created here, and deleting it would turn a failed
+ * upgrade into a repository with no guard at all.
+ */
+function installBoth(hooksDir) {
+  const created = [];
+  try {
+    for (const name of Object.keys(HOOKS)) {
+      const hookPath = path.join(hooksDir, name);
+      const existed = fs.existsSync(hookPath);
+      writeHook(hookPath, name);
+      if (!existed) created.push(hookPath);
+    }
+  } catch (err) {
+    for (const hookPath of created) {
+      try {
+        fs.rmSync(hookPath);
+      } catch {
+        /* nothing better to do, and the message below says what to check */
+      }
+    }
+    process.stderr.write(
+      `ghostwriter: could not install the hooks (${(err && err.message) || err}).\n` +
+        'Nothing was left behind — both hooks go in together.\n'
+    );
+    return EXIT_REFUSED;
+  }
   return EXIT_OK;
 }
 
@@ -205,7 +240,7 @@ function main(argv) {
     process.stderr.write('ghostwriter: nothing was installed — both hooks go in together.\n');
     return EXIT_REFUSED;
   }
-  return forEachHook(hooksDir, (hookPath, name) => installOne(hookPath, name, args.force));
+  return installBoth(hooksDir);
 }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

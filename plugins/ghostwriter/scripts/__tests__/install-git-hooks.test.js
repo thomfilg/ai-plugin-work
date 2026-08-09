@@ -131,6 +131,25 @@ describe('install-git-hooks — other people’s hooks', () => {
     assert.match(fs.readFileSync(hookPath('pre-commit'), 'utf8'), /exit 0/);
   });
 
+  // The preflight catches the expected refusal. This is the unexpected one —
+  // a directory that cannot be written partway through — where "both or
+  // neither" has to hold just as firmly.
+  it('leaves nothing behind when a write fails partway', () => {
+    const hooksDir = path.dirname(hookPath());
+    fs.mkdirSync(hooksDir, { recursive: true });
+    // A directory where the second hook's file must go: writing it throws
+    // EISDIR, after the first hook has already landed.
+    fs.mkdirSync(hookPath('pre-commit'), { recursive: true });
+    const result = install();
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Nothing was left behind/);
+    assert.equal(
+      fs.existsSync(hookPath('commit-msg')),
+      false,
+      'the first hook must be rolled back'
+    );
+  });
+
   it('never deletes a foreign hook', () => {
     fs.mkdirSync(path.dirname(hookPath()), { recursive: true });
     fs.writeFileSync(hookPath(), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
