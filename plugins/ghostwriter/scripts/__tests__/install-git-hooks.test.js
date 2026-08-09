@@ -150,6 +150,19 @@ describe('install-git-hooks — other people’s hooks', () => {
     );
   });
 
+  // `writeFileSync` can succeed and the `chmod` after it fail. A hook recorded
+  // only on success is a hook the rollback never hears about, and the command
+  // would report a clean restoration over a file still sitting on disk.
+  it('rolls back a hook whose write succeeded but whose chmod did not', () => {
+    const hooksDir = path.dirname(hookPath());
+    fs.mkdirSync(hooksDir, { recursive: true });
+    fs.mkdirSync(hookPath('pre-commit'), { recursive: true });
+    const result = install();
+    assert.equal(result.code, 1);
+    assert.equal(fs.existsSync(hookPath('commit-msg')), false);
+    assert.match(result.stderr, /Nothing was left behind/);
+  });
+
   it('never deletes a foreign hook', () => {
     fs.mkdirSync(path.dirname(hookPath()), { recursive: true });
     fs.writeFileSync(hookPath(), '#!/bin/sh\nexit 0\n', { mode: 0o755 });

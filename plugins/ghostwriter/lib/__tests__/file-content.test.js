@@ -416,6 +416,25 @@ describe('.ghostwriterignore — the repository boundary', () => {
     fs.rmSync(path.join(root, '.ghostwriterignore'));
   });
 
+  // A nested list is not a scoping convenience, it is a way to grant yourself
+  // an exemption: writing `sub/.ghostwriterignore` is not attribution, so
+  // nothing stops it, and every later write under `sub/` would be excused.
+  it('ignores a nested list and keeps the root one', () => {
+    const repo = path.join(outer, 'repo');
+    fs.mkdirSync(path.join(repo, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.ghostwriterignore'), 'sub/allowed.js\n');
+    fs.writeFileSync(path.join(repo, 'sub', '.ghostwriterignore'), '**\n');
+    const sub = path.join(repo, 'sub');
+
+    resetIgnoreCache();
+    assert.equal(isIgnored('x.js', sub), false, 'the nested ** must not apply');
+    resetIgnoreCache();
+    assert.equal(isIgnored('allowed.js', sub), true, 'the root list must still reach here');
+
+    fs.rmSync(path.join(repo, '.ghostwriterignore'));
+    fs.rmSync(path.join(repo, 'sub'), { recursive: true });
+  });
+
   it('applies normally where there is no repository at all', () => {
     resetIgnoreCache();
     assert.equal(isIgnored('anything.js', outer), true);

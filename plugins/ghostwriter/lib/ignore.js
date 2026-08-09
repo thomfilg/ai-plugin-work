@@ -63,27 +63,36 @@ function parse(text) {
 }
 
 /**
- * The nearest directory at or above `from` holding a `.ghostwriterignore`,
- * stopping at the repository root.
+ * The one `.ghostwriterignore` that applies to work happening in `from`.
  *
- * The boundary matters: a repository checked out below a directory that
- * happens to hold an ignore file would otherwise adopt rules written for
- * something else entirely, and exempt files nobody meant to exempt. An
- * exemption is only an exemption where it was reviewed, which is inside the
- * repository it ships with.
+ * Inside a repository that is the ROOT list and only the root list. A nested
+ * one is not a scoping convenience here, it is a way to grant yourself an
+ * exemption: writing `sub/.ghostwriterignore` is not itself attribution, so
+ * nothing stops it, and every later write under `sub/` would be excused by a
+ * line nobody reviewed. Same shape as an override set inside the command it is
+ * meant to override, and refused for the same reason. One list, at the root,
+ * in the diff with the files it covers.
+ *
+ * The repository boundary matters in the other direction too: a checkout below
+ * a directory that happens to hold an ignore file must not adopt rules written
+ * for something else. Outside a repository altogether — a bare directory, a
+ * test fixture — the nearest list is the only sensible answer, and is used.
  */
 function findIgnoreFile(from) {
   let dir = path.resolve(from || process.cwd());
+  let nearest = null;
   for (let depth = 0; depth < MAX_WALK_UP; depth++) {
     const candidate = path.join(dir, IGNORE_FILE);
-    if (fs.existsSync(candidate)) return { root: dir, file: candidate };
-    // Checked AFTER the candidate, so a list at the repository root counts.
-    if (fs.existsSync(path.join(dir, '.git'))) return null;
+    const found = fs.existsSync(candidate) ? { root: dir, file: candidate } : null;
+    if (found && !nearest) nearest = found;
+    // A repository root ends the search and answers it: whatever list lives
+    // here is the list, and one found lower down does not count.
+    if (fs.existsSync(path.join(dir, '.git'))) return found;
     const parent = path.dirname(dir);
-    if (parent === dir) return null;
+    if (parent === dir) break;
     dir = parent;
   }
-  return null;
+  return nearest;
 }
 
 /**

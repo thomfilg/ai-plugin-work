@@ -170,7 +170,9 @@ function rollBack(created) {
   const stuck = [];
   for (const hookPath of created) {
     try {
-      fs.rmSync(hookPath);
+      // `force` so a path that was claimed but never written is not reported
+      // as stuck: nothing there is exactly the state rollback wants.
+      fs.rmSync(hookPath, { force: true });
     } catch {
       stuck.push(hookPath);
     }
@@ -183,9 +185,12 @@ function installBoth(hooksDir) {
   try {
     for (const name of Object.keys(HOOKS)) {
       const hookPath = path.join(hooksDir, name);
-      const existed = fs.existsSync(hookPath);
+      // Recorded BEFORE the write, not after: `writeFileSync` can succeed and
+      // the `chmod` that follows it fail, and a hook noted only on success is
+      // a hook the rollback never hears about. Removal tolerates a file that
+      // was never created, so claiming one costs nothing.
+      if (!fs.existsSync(hookPath)) created.push(hookPath);
       writeHook(hookPath, name);
-      if (!existed) created.push(hookPath);
     }
   } catch (err) {
     const stuck = rollBack(created);
