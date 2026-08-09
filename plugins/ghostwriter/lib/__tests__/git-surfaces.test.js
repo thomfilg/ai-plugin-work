@@ -342,6 +342,21 @@ describe('scanCommand — identity surfaces', () => {
     }
   });
 
+  // An am that names no file reads its patch from a pipe. Reporting an empty
+  // list would let `cat bot.patch | git am` clear on a clean configured user.
+  it('records an am whose patch arrives on stdin', () => {
+    for (const command of ['cat bot.patch | git am', 'git am', 'git am -', 'git am <(gen)']) {
+      const surface = scanCommand(command).surfaces.find((entry) => entry.kind === 'am');
+      assert.equal(surface.patchStdin, true, command);
+    }
+  });
+
+  it('does not call a named patch or a resume form stdin', () => {
+    for (const command of ['git am p.mbox', 'git am < p.mbox', 'git am --continue']) {
+      assert.equal(onlySurface(command).patchStdin, false, command);
+    }
+  });
+
   it('reads a GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n identity pair', () => {
     const surface = onlySurface(
       `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=${TOOL} git commit -m x`

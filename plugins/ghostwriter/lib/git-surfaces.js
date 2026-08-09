@@ -78,6 +78,24 @@ const AM_VALUE_FLAGS = new Set([
   '-C',
 ]);
 
+/**
+ * `git am` forms that resume or drop an am already in progress. They apply no
+ * new patch, so naming no file is normal for them — without this list they
+ * would read as "the patch is on stdin" and block.
+ */
+const AM_CONTROL_FLAGS = new Set([
+  '--continue',
+  '--resolved',
+  '-r',
+  '--skip',
+  '--abort',
+  '--quit',
+  '--show-current-patch',
+]);
+
+/** `<(cmd)` — bash hands git a pipe, and the token is not a path at all. */
+const PROC_SUBST_RE = /^<\(/;
+
 /** Subcommands that stamp a new object with the current committer identity. */
 const IDENTITY_SUBCOMMANDS = new Set([
   'commit',
@@ -249,22 +267,33 @@ function readMessageArgs(argv, start, out) {
  * diff below `---` is content, and reading the whole file as a message would
  * block a patch that merely touches a file discussing these rules.
  *
- * `git am --continue` / `--abort` / `--skip` name no patch, so they collect
- * nothing and the pass never runs.
+ * An am that names NO patch reads one from stdin — `cat bot.patch | git am`,
+ * `git am -`, `git am <(gen)`. Those bytes are in a pipe the guard does not
+ * own, so it records `patchStdin` and refuses instead of finding an empty list
+ * and clearing the command. The resume and abort forms legitimately name
+ * nothing, which is what AM_CONTROL_FLAGS is for.
  */
+function classifyPatchArg(token) {
+  if (AM_CONTROL_FLAGS.has(token)) return { control: true };
+  if (PROC_SUBST_RE.test(token)) return { stream: true };
+  // `git am < p` splits into two tokens, so the name arrives on the next pass
+  // of the loop; `git am <p` carries it in this one.
+  const redirect = REDIRECT_RE.exec(token);
+  if (redirect) return { file: redirect[1] };
+  if (AM_VALUE_FLAGS.has(token)) return { skip: true };
+  return token.startsWith('-') ? {} : { file: token };
+}
+
 function readPatchArgs(argv, start, out) {
+  const seen = { control: false, stream: false };
   for (let i = start; i < argv.length; i++) {
-    const redirect = REDIRECT_RE.exec(argv[i]);
-    if (redirect) {
-      // `git am < p` splits into two tokens, so the name arrives on the next
-      // pass of this loop; `git am <p` carries it in this one.
-      if (redirect[1]) out.patchFiles.push(redirect[1]);
-    } else if (AM_VALUE_FLAGS.has(argv[i])) {
-      i++;
-    } else if (!argv[i].startsWith('-')) {
-      out.patchFiles.push(argv[i]);
-    }
+    const arg = classifyPatchArg(argv[i]);
+    seen.control = seen.control || Boolean(arg.control);
+    seen.stream = seen.stream || Boolean(arg.stream);
+    if (arg.file) out.patchFiles.push(arg.file);
+    if (arg.skip) i++;
   }
+  out.patchStdin = !seen.control && (seen.stream || out.patchFiles.length === 0);
 }
 
 function newSurface(kind, writesMessage, writesCommit, target) {
@@ -278,6 +307,7 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     messages: [],
     messageFiles: [],
     patchFiles: [],
+    patchStdin: false,
     identities: [],
     authorRefs: [],
   };

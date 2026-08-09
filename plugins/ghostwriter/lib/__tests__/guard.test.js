@@ -22,6 +22,7 @@ const {
   inspectToolCall,
   renderBlock,
   readTextFile,
+  readFully,
   OVERRIDE_ENV,
   MAX_MESSAGE_FILE_BYTES,
 } = require('../guard');
@@ -440,6 +441,19 @@ describe('guard — bypasses that must stay closed', () => {
     }
   });
 
+  // A patch on stdin cannot be read: the bytes are in a pipe the guard does
+  // not own, and consuming them would take them from git. Stricter than
+  // `git commit -F -` on purpose — git runs no commit-msg hook for an am, so
+  // there is no later layer to catch it.
+  it('refuses a patch that arrives on stdin rather than clearing it', () => {
+    for (const command of ['cat bot.patch | git am', 'git am', 'git am -', 'git am <(gen)']) {
+      const verdict = inspect(command);
+      assert.equal(verdict.blocked, true, command);
+      assert.equal(verdict.rule, 'unverifiablePatch', command);
+      assert.equal(verdict.where, 'git am', command);
+    }
+  });
+
   it('blocks a patch it cannot read, and allows one that is not there', () => {
     const verdict = inspect('git am locked.patch', {
       readMessageFile: () => ({ text: '', unreadable: 'EACCES' }),
@@ -576,6 +590,38 @@ describe('guard — message files are read in full', () => {
     fs.mkdirSync(path.join(dir, 'notes'), { recursive: true });
     assert.equal(readTextFile(path.join(dir, 'notes'), dir).unreadable, 'EISDIR');
     assert.deepEqual(withRealReader('git commit -F notes'), { blocked: false });
+  });
+
+  // One readSync may return a prefix. Taking that as the whole file is the
+  // same mistake as sampling it — git reads the rest, the guard would not.
+  it('keeps reading until the buffer is full or the file ends', () => {
+    const file = path.join(dir, 'chunks.bin');
+    fs.writeFileSync(file, 'abcdefghij');
+    const fd = fs.openSync(file, 'r');
+    try {
+      const exact = Buffer.alloc(10);
+      assert.equal(readFully(fd, exact), 10);
+      assert.equal(exact.toString(), 'abcdefghij');
+      // A buffer past the end must stop at EOF rather than spin.
+      const roomy = Buffer.alloc(64);
+      assert.equal(readFully(fd, roomy), 10);
+      // And a short buffer fills exactly, leaving the rest unread.
+      const small = Buffer.alloc(4);
+      assert.equal(readFully(fd, small), 4);
+      assert.equal(small.toString(), 'abcd');
+    } finally {
+      fs.closeSync(fd);
+    }
+  });
+
+  it('inspects the tail of a multi-megabyte message, not just the head', () => {
+    const file = path.join(dir, 'tail.txt');
+    fs.writeFileSync(file, `feat: x\n\n${`${'x'.repeat(99)}\n`.repeat(40000)}`);
+    fs.appendFileSync(file, `Co-Authored-By: ${TOOL} <a@b>\n`);
+    assert.ok(fs.statSync(file).size > 4_000_000, 'fixture must span many read buffers');
+    const verdict = withRealReader(`git commit -F ${file}`);
+    assert.equal(verdict.blocked, true, 'a short read would have missed the suffix');
+    assert.equal(verdict.rule, 'aiCoAuthorTrailer');
   });
 
   // End to end on real bytes: the byline is inside the file, and the trailer

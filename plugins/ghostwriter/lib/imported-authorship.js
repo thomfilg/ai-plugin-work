@@ -72,6 +72,33 @@ function checkCopiedCommits(surfaces, io) {
   return null;
 }
 
+/**
+ * `git am` reading its patch from stdin — `cat bot.patch | git am`, `git am -`,
+ * `git am <(gen)`.
+ *
+ * The guard cannot read that: the bytes are in a pipe it does not own, and
+ * consuming them would take them away from git. So the command is refused,
+ * like everything else this plugin cannot see.
+ *
+ * This is stricter than the equivalent `git commit -F -`, deliberately. A
+ * commit has a backstop — git runs `commit-msg` on the final message, after
+ * every expansion — and `git am` does not: it runs `applypatch-msg` and
+ * friends instead, so nothing downstream would ever see this patch. Refusing
+ * here is the only place the byline can be caught.
+ */
+function checkStdinPatch(surfaces) {
+  if (!surfaces.some((surface) => surface.patchStdin)) return null;
+  return finding(
+    {
+      rule: 'unverifiablePatch',
+      reason: 'the patch arrives on stdin, so its author and message cannot be read',
+      hint: 'Write the patch to a file and pass it to git am, so it can be checked.',
+      evidence: 'git am with no patch file named',
+    },
+    'git am'
+  );
+}
+
 /** One mail file, which may hold several patches — `git am` applies them all. */
 function checkPatchFile(surface, file, io) {
   const read = normalizeRead(io.readMessageFile(file, surfaceCwd(surface, io)));
@@ -95,4 +122,4 @@ function checkPatchFiles(surfaces, io) {
   return null;
 }
 
-module.exports = { checkCopiedCommits, checkPatchFiles };
+module.exports = { checkCopiedCommits, checkStdinPatch, checkPatchFiles };

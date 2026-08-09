@@ -48,7 +48,7 @@ const {
   checkPostAccount,
   unverifiableAccount,
 } = require('./forge-guard');
-const { checkCopiedCommits, checkPatchFiles } = require('./imported-authorship');
+const { checkCopiedCommits, checkStdinPatch, checkPatchFiles } = require('./imported-authorship');
 const { surfaceCwd, surfaceGitDir } = require('./surface-target');
 const { readExpectedIdentity } = require('./expected-identity');
 const { MAX_UNWRAP_DEPTH } = require('./command-scan');
@@ -66,6 +66,27 @@ const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
  * clean. Blocking a 32 MiB commit message is not a cost worth optimising.
  */
 const ALLOW = Object.freeze({ blocked: false });
+
+/**
+ * Fill `buffer` from `fd`, looping until it is full or the file ends.
+ *
+ * ONE `readSync` is allowed to return fewer bytes than asked for — a signal
+ * arrives, the file lives on a network mount — and taking that prefix as the
+ * whole file is the same mistake as sampling it: git reads the rest, the guard
+ * does not. Stopping at a zero-length read is not that mistake; it is the end
+ * of a file that shrank since the stat, and what was read IS all of it.
+ *
+ * @returns {number} bytes actually read.
+ */
+function readFully(fd, buffer) {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const read = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+    if (read === 0) break;
+    offset += read;
+  }
+  return offset;
+}
 
 /**
  * Read a message file in full.
@@ -95,8 +116,7 @@ function readTextFile(filePath, cwd) {
     if (!stat.isFile()) return { text: '', unreadable: 'ENOTREG' };
     if (stat.size > MAX_MESSAGE_FILE_BYTES) return { text: '', truncated: true };
     const buffer = Buffer.alloc(stat.size);
-    const read = fs.readSync(fd, buffer, 0, stat.size, 0);
-    return { text: buffer.toString('utf8', 0, read) };
+    return { text: buffer.toString('utf8', 0, readFully(fd, buffer)) };
   } catch (err) {
     return { text: '', unreadable: (err && err.code) || 'EUNKNOWN' };
   } finally {
@@ -240,6 +260,7 @@ const COMMAND_PASSES = [
   (c) => checkRawPost(c.command, c.posts),
   (c) => checkPostAccount(c.posts, c.ctx),
   (c) => checkCopiedCommits(c.surfaces, c.ctx),
+  (c) => checkStdinPatch(c.surfaces),
   (c) => checkPatchFiles(c.surfaces, c.ctx),
   (c) => checkEffectiveIdentity(c.surfaces, c.ctx),
 ];
@@ -335,6 +356,7 @@ module.exports = {
   inspectToolCall,
   renderBlock,
   readTextFile,
+  readFully,
   OVERRIDE_ENV,
   MAX_MESSAGE_FILE_BYTES,
 };
