@@ -60,6 +60,42 @@ const AUTHOR_COPY_SUBCOMMANDS = new Set(['cherry-pick']);
 const REUSE_FLAGS = ['--reuse-message', '--reedit-message'];
 const REUSE_SHORT = new Set(['-C', '-c']);
 
+/**
+ * `git am` flags whose value is a SEPARATE token. Without them `--directory
+ * build` reads as a patch called `build`, and the guard would report a
+ * directory it cannot inspect. The `=` forms need no entry — they start with
+ * `-` and are skipped as flags.
+ */
+const AM_VALUE_FLAGS = new Set([
+  '--directory',
+  '--exclude',
+  '--include',
+  '--patch-format',
+  '--whitespace',
+  '--gpg-sign',
+  '-S',
+  '-p',
+  '-C',
+]);
+
+/**
+ * `git am` forms that resume or drop an am already in progress. They apply no
+ * new patch, so naming no file is normal for them — without this list they
+ * would read as "the patch is on stdin" and block.
+ */
+const AM_CONTROL_FLAGS = new Set([
+  '--continue',
+  '--resolved',
+  '-r',
+  '--skip',
+  '--abort',
+  '--quit',
+  '--show-current-patch',
+]);
+
+/** `<(cmd)` — bash hands git a pipe, and the token is not a path at all. */
+const PROC_SUBST_RE = /^<\(/;
+
 /** Subcommands that stamp a new object with the current committer identity. */
 const IDENTITY_SUBCOMMANDS = new Set([
   'commit',
@@ -221,6 +257,56 @@ function readMessageArgs(argv, start, out) {
   }
 }
 
+/**
+ * The patches `git am` would apply.
+ *
+ * They are the command's positional arguments, and they matter because the
+ * author and the message live INSIDE the file: `git am bot.patch` re-creates a
+ * bot's byline with nothing incriminating anywhere in the argv. They are kept
+ * apart from `messageFiles` because only part of a patch is a message — the
+ * diff below `---` is content, and reading the whole file as a message would
+ * block a patch that merely touches a file discussing these rules.
+ *
+ * An am that names NO patch reads one from stdin — `cat bot.patch | git am`,
+ * `git am -`, `git am <(gen)`. Those bytes are in a pipe the guard does not
+ * own, so it records `patchStdin` and refuses instead of finding an empty list
+ * and clearing the command. The resume and abort forms legitimately name
+ * nothing, which is what AM_CONTROL_FLAGS is for.
+ */
+function classifyPatchArg(token, literal) {
+  if (PROC_SUBST_RE.test(token)) return { stream: true };
+  // `git am < p` splits into two tokens, so the name arrives on the next pass
+  // of the loop; `git am <p` carries it in this one. A redirect is the SHELL's,
+  // so it never reaches git's argv and `--` has no bearing on it.
+  const redirect = REDIRECT_RE.exec(token);
+  if (redirect) return { file: redirect[1] };
+  if (literal) return { file: token };
+  if (AM_CONTROL_FLAGS.has(token)) return { control: true };
+  if (AM_VALUE_FLAGS.has(token)) return { skip: true };
+  return token.startsWith('-') ? {} : { file: token };
+}
+
+function readPatchArgs(argv, start, out) {
+  const seen = { control: false, stream: false };
+  // `--` ends option parsing in git, so everything after it is a filename
+  // however much it looks like a flag. Without that, `git am -- --continue`
+  // applies a patch named `--continue` while reading here as a resume, and
+  // neither imported-authorship check ever runs.
+  let literal = false;
+  for (let i = start; i < argv.length; i++) {
+    if (!literal && argv[i] === '--') {
+      literal = true;
+      continue;
+    }
+    const arg = classifyPatchArg(argv[i], literal);
+    seen.control = seen.control || Boolean(arg.control);
+    seen.stream = seen.stream || Boolean(arg.stream);
+    if (arg.file) out.patchFiles.push(arg.file);
+    if (arg.skip) i++;
+  }
+  out.patchStdin = !seen.control && (seen.stream || out.patchFiles.length === 0);
+}
+
 function newSurface(kind, writesMessage, writesCommit, target) {
   return {
     kind,
@@ -231,6 +317,8 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     configSources: target.configSources || {},
     messages: [],
     messageFiles: [],
+    patchFiles: [],
+    patchStdin: false,
     identities: [],
     authorRefs: [],
   };
@@ -259,7 +347,10 @@ function authoringSurface(argv, found, env) {
     configSources: readConfigSources(env),
   };
   const surface = newSurface(found.subcommand, writesMessage, writesCommit, target);
-  readMessageArgs(argv, found.index + 1, surface);
+  // `am` names patches, not messages: its argument is a whole mail file, and
+  // routing it through the message reader would inspect the diff as prose.
+  if (found.subcommand === 'am') readPatchArgs(argv, found.index + 1, surface);
+  else readMessageArgs(argv, found.index + 1, surface);
   readAuthorRefs(found.subcommand, argv, found.index + 1, surface);
   readIdentities(argv, found.index, env, surface);
   return surface;

@@ -90,7 +90,23 @@ This is not a gap that can be closed by better parsing — evaluating those woul
 
 **The `commit-msg` hook is the layer that closes this.** Git hands it the final message, after every expansion, so it sees exactly what would be committed. If you want the guarantee to hold against evasion rather than accident, run `/ghostwriter:install` — the PreToolUse hook gives fast feedback at the point of the mistake, and the git hook is the backstop that cannot be talked around.
 
-Identity is treated more strictly than message text, because there are fewer ways to write it: `--config-env=user.name=VAR` is resolved from the command's own assignments or the guard's environment, and a value the guard genuinely cannot read blocks as `unverifiableIdentity` rather than passing. Message files too large to read in full block as `unverifiableMessage`. A partial check is never reported as a pass.
+Identity is treated more strictly than message text, because there are fewer ways to write it: `--config-env=user.name=VAR` is resolved from the command's own assignments or the guard's environment, and a value the guard genuinely cannot read blocks as `unverifiableIdentity` rather than passing. Message files too large to read in full — or that exist and cannot be read at all — block as `unverifiableMessage`. A file that is simply *missing* is allowed, because git fails on it too and nothing gets authored. A partial check is never reported as a pass.
+
+### Bylines that arrive from somewhere else
+
+Two commands take their author and message from an object that already exists, so nothing incriminating appears in the command at all:
+
+```bash
+git cherry-pick <ref>      # copies the source commit's author AND message
+git commit -C <ref>        # same
+git am bot.patch           # takes both from the mail headers in the file
+```
+
+Both are read and checked. For a patch, only the headers and the message region are inspected — everything below the `---` separator is the diff, and reading it would block any patch that merely touches a file discussing these rules. An in-body `From:` overrides the header, as it does in git.
+
+`git am` with no file named — `cat bot.patch | git am`, `git am -`, `git am <(gen)` — blocks as `unverifiablePatch`. The bytes are in a pipe the guard does not own, and consuming them would take them away from git. This is stricter than the equivalent `git commit -F -`, deliberately: a commit has the `commit-msg` backstop below it, and `git am` does not run that hook at all, so refusing here is the only place the byline can be caught.
+
+The expected-human policy is not applied to a patch author. A mailed patch is somebody else's work by definition — preserving a contributor's authorship is the point of `git am` — so requiring a match with the operator would block the command's normal use. A tool or bot byline is still refused.
 
 ## Failure policy
 
@@ -140,6 +156,9 @@ ghostwriter/
 │   ├── attribution.js          the rules — attribution vs identity
 │   ├── git-surfaces.js         quote-aware command reader
 │   ├── git-identity.js         effective git identity
+│   ├── imported-authorship.js  bylines copied from a commit or a patch
+│   ├── patch.js                mbox headers and message region
+│   ├── surface-target.js       which directory / repository a surface targets
 │   ├── guard.js                the five-pass decision
 │   ├── hookEntrypoint/         vendored from factories/ (do not edit)
 │   └── runtime/                vendored from factories/ (do not edit)

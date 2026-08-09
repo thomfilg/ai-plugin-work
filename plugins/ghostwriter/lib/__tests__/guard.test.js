@@ -15,12 +15,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const {
   inspectCommand,
   inspectToolCall,
   renderBlock,
   readTextFile,
+  readFully,
   OVERRIDE_ENV,
   MAX_MESSAGE_FILE_BYTES,
 } = require('../guard');
@@ -41,6 +43,36 @@ function inspect(command, overrides = {}) {
     expected: { emails: [], logins: [], configured: false },
     ...overrides,
   });
+}
+
+/**
+ * A mail-formatted patch, as `git format-patch` writes one.
+ *
+ * The diff deliberately CONTAINS an attribution trailer: excluding the diff is
+ * the behaviour under test, and a reader that inspected the whole file would
+ * block every case below — including the ones that must pass.
+ */
+function patch(overrides) {
+  const {
+    from = 'Ada Lovelace <ada@example.com>',
+    subject = 'feat: a change',
+    body = 'Why it changed.',
+  } = overrides || {};
+  return [
+    'From 8a3f4c2e0f9b Mon Sep 17 00:00:00 2001',
+    `From: ${from}`,
+    'Date: Mon, 2 Jun 2025 10:00:00 +0000',
+    `Subject: [PATCH v2 1/2] ${subject}`,
+    '',
+    body,
+    '---',
+    ' lib/rules.js | 1 +',
+    'diff --git a/lib/rules.js b/lib/rules.js',
+    '--- a/lib/rules.js',
+    '+++ b/lib/rules.js',
+    `+  reject('Co-Authored-By: ${TOOL} <a@b>');`,
+    '',
+  ].join('\n');
 }
 
 describe('guard — commands with nothing at stake', () => {
@@ -349,6 +381,101 @@ describe('guard — bypasses that must stay closed', () => {
     );
   });
 
+  // `git am` names a file and nothing else. Every other pass sees a clean
+  // command and a clean configured user; the byline is inside the patch.
+  it('blocks a patch authored by a tool', () => {
+    const verdict = inspect('git am bot.patch', {
+      readMessageFile: () => patch({ from: `${TOOL} <noreply@example.com>` }),
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'the author in bot.patch');
+  });
+
+  it('blocks an attribution trailer in a patch message', () => {
+    const verdict = inspect('git am mail.patch', {
+      readMessageFile: () => patch({ body: `Fixes the thing.\n\nCo-Authored-By: ${TOOL} <a@b>` }),
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'aiCoAuthorTrailer');
+    assert.equal(verdict.where, 'the message in mail.patch');
+  });
+
+  // The diff below `---` is content. Reading it as a message would block any
+  // patch that touches a file discussing these rules — this plugin's own.
+  it('ignores the diff, so a patch that edits these rules still applies', () => {
+    assert.deepEqual(inspect('git am rules.patch', { readMessageFile: () => patch({}) }), {
+      blocked: false,
+    });
+  });
+
+  // An in-body `From:` is how a patch keeps its author through a mailing list
+  // that rewrites the envelope, and git prefers it over the header.
+  it('prefers the in-body From: over the mail header, as git does', () => {
+    const verdict = inspect('git am relayed.patch', {
+      readMessageFile: () =>
+        patch({ from: 'Ada <ada@example.com>', body: `From: ${TOOL} <a@b>\n\nreal body` }),
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'the author in relayed.patch');
+  });
+
+  it('checks every patch in an mbox, not just the first', () => {
+    const verdict = inspect('git am series.mbox', {
+      readMessageFile: () => patch({}) + patch({ from: `${TOOL} <a@b>`, subject: 'feat: second' }),
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'the author in series.mbox');
+  });
+
+  it('leaves a patch from another human alone — that is what am is for', () => {
+    const verdict = inspect('git am contributor.patch', {
+      expected: { emails: ['ada@example.com'], logins: [], configured: true },
+      readMessageFile: () => patch({ from: 'Grace Hopper <grace@example.com>' }),
+    });
+    assert.deepEqual(verdict, { blocked: false });
+  });
+
+  it('allows the resume and abort forms, which apply no patch', () => {
+    for (const command of ['git am --continue', 'git am --abort', 'git am --skip']) {
+      assert.deepEqual(inspect(command), { blocked: false }, command);
+    }
+  });
+
+  // A patch on stdin cannot be read: the bytes are in a pipe the guard does
+  // not own, and consuming them would take them from git. Stricter than
+  // `git commit -F -` on purpose — git runs no commit-msg hook for an am, so
+  // there is no later layer to catch it.
+  it('refuses a patch that arrives on stdin rather than clearing it', () => {
+    for (const command of ['cat bot.patch | git am', 'git am', 'git am -', 'git am <(gen)']) {
+      const verdict = inspect(command);
+      assert.equal(verdict.blocked, true, command);
+      assert.equal(verdict.rule, 'unverifiablePatch', command);
+      assert.equal(verdict.where, 'git am', command);
+    }
+  });
+
+  it('inspects a patch whose name looks like a resume flag', () => {
+    const verdict = inspect('git am -- --continue', {
+      readMessageFile: () => patch({ from: `${TOOL} <a@b>` }),
+    });
+    assert.equal(verdict.blocked, true, 'a file named --continue is still a patch');
+    assert.equal(verdict.where, 'the author in --continue');
+  });
+
+  it('blocks a patch it cannot read, and allows one that is not there', () => {
+    const verdict = inspect('git am locked.patch', {
+      readMessageFile: () => ({ text: '', unreadable: 'EACCES' }),
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'the patch locked.patch');
+    assert.deepEqual(
+      inspect('git am gone.patch', {
+        readMessageFile: () => ({ text: '', unreadable: 'ENOENT' }),
+      }),
+      { blocked: false }
+    );
+  });
+
   it('follows a GIT_DIR inherited from the session, not just the command', () => {
     const asked = [];
     inspect('git commit -m "feat: x"', {
@@ -440,12 +567,80 @@ describe('guard — message files are read in full', () => {
     assert.equal(verdict.rule, 'unverifiableMessage');
   });
 
-  it('treats an unreadable file as empty, not as a block', () => {
-    assert.deepEqual(readTextFile(path.join(dir, 'missing.txt'), dir), {
-      text: '',
-      truncated: false,
-    });
+  it('allows a missing file, which git would reject itself', () => {
+    assert.equal(readTextFile(path.join(dir, 'missing.txt'), dir).unreadable, 'ENOENT');
     assert.deepEqual(withRealReader('git commit -F missing.txt'), { blocked: false });
+  });
+
+  // A file that is THERE and unreadable is a message nobody saw. Clearing it
+  // would make `chmod 000` the cheapest way past every rule in the plugin.
+  it('blocks a file that exists but cannot be read', () => {
+    const read = { text: '', unreadable: 'EACCES' };
+    const verdict = inspect('git commit -F secret.txt', { readMessageFile: () => read });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiableMessage');
+    assert.match(verdict.evidence, /EACCES/);
+  });
+
+  // Reading a pipe is worse than useless: it reports size 0, so the check
+  // passes on an empty string, and it consumes the bytes git was going to use.
+  it('refuses to clear a message that is not a regular file', () => {
+    const fifo = path.join(dir, 'fifo');
+    const made = spawnSync('mkfifo', [fifo]);
+    if (made.status !== 0) return; // no mkfifo here — the unit case above covers it
+    assert.equal(readTextFile(fifo, dir).unreadable, 'ENOTREG');
+    const verdict = withRealReader(`git commit -F ${fifo}`);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unverifiableMessage');
+  });
+
+  it('treats a directory named as a message file the way git does', () => {
+    fs.mkdirSync(path.join(dir, 'notes'), { recursive: true });
+    assert.equal(readTextFile(path.join(dir, 'notes'), dir).unreadable, 'EISDIR');
+    assert.deepEqual(withRealReader('git commit -F notes'), { blocked: false });
+  });
+
+  // One readSync may return a prefix. Taking that as the whole file is the
+  // same mistake as sampling it — git reads the rest, the guard would not.
+  it('keeps reading until the buffer is full or the file ends', () => {
+    const file = path.join(dir, 'chunks.bin');
+    fs.writeFileSync(file, 'abcdefghij');
+    const fd = fs.openSync(file, 'r');
+    try {
+      const exact = Buffer.alloc(10);
+      assert.equal(readFully(fd, exact), 10);
+      assert.equal(exact.toString(), 'abcdefghij');
+      // A buffer past the end must stop at EOF rather than spin.
+      const roomy = Buffer.alloc(64);
+      assert.equal(readFully(fd, roomy), 10);
+      // And a short buffer fills exactly, leaving the rest unread.
+      const small = Buffer.alloc(4);
+      assert.equal(readFully(fd, small), 4);
+      assert.equal(small.toString(), 'abcd');
+    } finally {
+      fs.closeSync(fd);
+    }
+  });
+
+  it('inspects the tail of a multi-megabyte message, not just the head', () => {
+    const file = path.join(dir, 'tail.txt');
+    fs.writeFileSync(file, `feat: x\n\n${`${'x'.repeat(99)}\n`.repeat(40000)}`);
+    fs.appendFileSync(file, `Co-Authored-By: ${TOOL} <a@b>\n`);
+    assert.ok(fs.statSync(file).size > 4_000_000, 'fixture must span many read buffers');
+    const verdict = withRealReader(`git commit -F ${file}`);
+    assert.equal(verdict.blocked, true, 'a short read would have missed the suffix');
+    assert.equal(verdict.rule, 'aiCoAuthorTrailer');
+  });
+
+  // End to end on real bytes: the byline is inside the file, and the trailer
+  // in the diff below it must not count against the patch.
+  it('reads a real patch file, headers only', () => {
+    fs.writeFileSync(path.join(dir, 'bot.patch'), patch({ from: `${TOOL} <a@b>` }));
+    fs.writeFileSync(path.join(dir, 'ok.patch'), patch({}));
+    const verdict = withRealReader('git am bot.patch');
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'the author in bot.patch');
+    assert.deepEqual(withRealReader('git am ok.patch'), { blocked: false });
   });
 
   it('accepts a plain string from an injected reader', () => {
