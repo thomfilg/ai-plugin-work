@@ -65,7 +65,7 @@ function checkFileText(filePath, text) {
  * from a rule that does not work. `.ghostwriterignore` is read from the tree
  * being checked — which is the point, since an exemption belongs in the diff
  * with the file it covers — but that only holds up if the exemption is
- * ANNOUNCED. A caller with somewhere to report (the CI scanner) names every
+ * ANNOUNCED. A caller with somewhere to report — the scanner CLI — names every
  * path it skipped; the PreToolUse hook passes nothing, because a hook that
  * writes to stderr while allowing a call breaks the fail-open contract.
  *

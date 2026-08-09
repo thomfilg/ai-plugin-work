@@ -118,11 +118,11 @@ function resetIgnoreCache() {
  * Is this path exempt from the FILE rules? Never throws.
  *
  * `ignoreFrom` takes the LIST from another tree while still judging paths in
- * this one. CI uses it to read exemptions from the base revision: a change
- * that adds an attribution-bearing file and adds its path to the list in the
- * same breath would otherwise clear itself, which is the one thing a final
- * gate must not allow. Locally the parameter is unused — there the list is
- * the working tree's own, which is what makes it editable at all.
+ * this one. A checker run against a known-good tree uses it so that a change
+ * cannot add an attribution-bearing file and the line exempting it in the same
+ * breath — an exemption that clears itself is not an exemption anyone
+ * reviewed. Left unset, the list is the working tree's own, which is what
+ * makes it editable at all.
  */
 function isIgnored(filePath, cwd, ignoreFrom) {
   if (!filePath || typeof filePath !== 'string') return false;

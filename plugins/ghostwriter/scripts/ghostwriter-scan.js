@@ -9,11 +9,13 @@
  * been through others as well: a script, an editor, a second agent, a merge.
  * This is the layer that does not care how the lines got there.
  *
- * Three places to run it, answering different questions:
+ * Three questions, none of them a pipeline:
  *
- *   pre-commit   --staged         what this commit would add    (before it lands)
- *   CI           --diff <base>    what this branch adds to base (before it merges)
- *   CI           --commits <base> who signed each commit, and what each says
+ *   --staged         what this commit would add, which is what the pre-commit
+ *                    hook runs on every commit
+ *   --diff <base>    what this branch adds to base, for checking a branch
+ *                    before you push it
+ *   --commits <base> who signed each commit, and what each says
  *
  * `--commits` is the only pass that reads HISTORY rather than a working tree.
  * It is what catches a branch that was pushed from somewhere the guard never
@@ -32,7 +34,7 @@
  *   ghostwriter-scan.js --files <path...>               whole files, as they are
  *
  * `--ignore-from <dir>` reads `.ghostwriterignore` from another tree while
- * still judging this one. CI points it at the base revision, so a change
+ * still judging this one — point it at a known-good tree, so a change
  * cannot add an attribution-bearing file and the line exempting it in the same
  * breath. Every exemption applied is printed either way: an exemption nobody
  * sees is indistinguishable from a rule that does not work.
@@ -88,7 +90,7 @@ const READERS = {
   '--repo': (args, value) => {
     args.repo = value;
   },
-  // CI reads exemptions from the base revision, so a change cannot add an
+  // Read exemptions from another tree, so a change cannot add an
   // attribution-bearing file and the line exempting it in one breath.
   '--ignore-from': (args, value) => {
     args.ignoreFrom = value;

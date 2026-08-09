@@ -21,11 +21,12 @@ Naming a product is not attribution. `feat: add <vendor> adapter` is ordinary en
 | `PreToolUse` on `mcp__github__*` | PR, issue and comment text, and files committed through the API | same hook |
 | `commit-msg` git hook (opt-in) | the final message, after the shell expanded it | `/ghostwriter:install` |
 | `pre-commit` git hook (opt-in) | what a commit adds to the files, whoever wrote the lines | `/ghostwriter:install` |
-| CI (opt-in) | the whole branch, and the pull request's own description | `templates/attribution.yml` |
 
-The PreToolUse hooks are always on once the plugin is installed. The git hooks are opt-in because they write into the repository's hooks directory, and the CI job is opt-in because it belongs to the repository being guarded, not to this plugin — see [Enforcing in CI](#enforcing-in-ci).
+The PreToolUse hooks are always on once the plugin is installed. The git hooks are opt-in because they write into the repository's hooks directory.
 
-Each layer exists because the one above it cannot see something. The tool hooks see only what the agent does through its own tools; the git hooks see anything committed on that machine; CI sees what actually arrived, from wherever it came.
+There is deliberately no CI job, and the plugin ships no workflow to add one. Enforcement belongs where the text is written, not in a pipeline that reports it afterwards: a check that fails on a pull request tells someone a footer already reached a branch, while a hook that refuses the write means it never existed. The layers below are for text that reaches a repository without passing a tool at all.
+
+Each layer exists because the one above it cannot see something. The tool hooks see everything an agent writes through its own tools — a command, a file, a pull request body — and refuse it at the point of writing. The git hooks see what reaches the repository by any other route: a terminal, a script, an editor, a second agent.
 
 ## Pinning the human (optional)
 
@@ -105,7 +106,7 @@ That exempts a path from the FILE rules only. No path excuses a commit message, 
 Two properties keep the list from becoming the hole in the guard:
 
 - **Every exemption applied is announced.** The scanner names each path it skipped, so an exemption is visible in the check output, not only in the diff. A silent skip and a working rule look identical.
-- **CI reads the list from the base revision** (`--ignore-from`), so a change cannot add an attribution-bearing file and the line exempting it in the same breath. A new exemption takes effect once it is merged — reviewing the permission separately from the file it covers is how an allowlist is supposed to work. Locally the list is the working tree's own, which is what makes it editable at all.
+- **`--ignore-from` reads the list from another tree**, so a checker can judge this working tree against exemptions reviewed elsewhere. Without it the list is the working tree's own, which is what makes it editable at all.
 
 Locating a `gh` command group depends on knowing which of that tool's options consume the token after them, and an enumeration of another tool's flags goes stale every time it grows one — three review rounds found three. So the TEXT check does not depend on that knowledge: any invocation of `gh` is enough to read the command for attribution, whatever its options do. The precise classification still drives the account and per-argument checks, where a false positive would cost something; the text net cannot cost more than refusing a command whose own text credits a tool.
 
@@ -204,25 +205,6 @@ Tool names live in `lib/attribution.js`, assembled from string fragments so the 
 
 Names that collide with common words or common surnames are deliberately excluded. A guard that rejects a real person because of their surname is worse than the attribution it prevents; for the collisions that remain, the escape hatch is the answer.
 
-## Enforcing in CI
-
-The hooks run where the agent runs and where they are installed. Neither covers a branch pushed from a machine that has neither, and neither covers the pull request's own description, which is written on github.com after every other layer has finished.
-
-`templates/attribution.yml` is a workflow for that. Copy it into your repository and pin the ref:
-
-```bash
-mkdir -p .github/workflows
-cp "${CLAUDE_PLUGIN_ROOT}/templates/attribution.yml" .github/workflows/attribution.yml
-# then edit PLUGIN_REF to a tag or commit
-```
-
-It checks three things against the base: the files the branch adds, every commit's message and author, and the pull request's title and body. It needs no secrets and no permissions beyond reading the code.
-
-Two properties worth keeping if you adapt it:
-
-- **The checker comes from the plugin repository at a pinned ref**, not from the pull request's own tree. Run from the branch it is judging, a change could weaken the scanner and make its own check pass — the one property a final gate cannot have. Your `.ghostwriterignore` still comes from your repository, because that is where exemptions are reviewed.
-- **`edited` is in the trigger set.** The job reads the title and body, and some tools append an attribution footer to a description at creation time, after every earlier layer has had its say. Without `edited`, a description that gains one later is never re-checked and one that is corrected stays red.
-
 ## Layout
 
 ```
@@ -254,8 +236,6 @@ ghostwriter/
 │   ├── ghostwriter-check.js    check a message or an identity
 │   ├── ghostwriter-scan.js     check what a change adds
 │   └── install-git-hooks.js
-├── templates/
-│   └── attribution.yml         a CI workflow to copy into your repository
 └── skills/{check,install}/SKILL.md
 ```
 
