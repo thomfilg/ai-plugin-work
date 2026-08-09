@@ -150,17 +150,6 @@ function writeHook(hookPath, name) {
   process.stdout.write(`ghostwriter: ${name} hook installed at ${hookPath}\n`);
 }
 
-/**
- * Install both hooks, or leave the repository as it was found.
- *
- * The preflight catches the expected refusal — somebody else's hook already
- * there — before anything is written. This catches the unexpected one: a full
- * disk, a read-only hooks directory, a permission that changed between the two
- * writes. Either way the outcome has to be both or neither, so anything
- * created before the failure is removed again. A hook that was ALREADY ours is
- * left alone: it was not created here, and deleting it would turn a failed
- * upgrade into a repository with no guard at all.
- */
 function message(err) {
   return (err && err.message) || String(err);
 }
@@ -210,6 +199,20 @@ function rollBack(touched) {
   return touched.filter((entry) => !restore(entry)).map((entry) => entry.path);
 }
 
+/**
+ * Install both hooks, or leave the repository as it was found.
+ *
+ * The preflight catches the expected refusal — somebody else's hook already
+ * there — before anything is written. This catches the unexpected one: a full
+ * disk, a read-only hooks directory, a permission that changed between the two
+ * writes. Either way the outcome has to be both or neither.
+ *
+ * "As it was found" is stricter than "nothing new added". A destination that
+ * held an older version of our own hook is put back holding it, not emptied
+ * and not left holding whatever the failed write managed to produce — the
+ * first leaves a repository with no guard, the second leaves one with a
+ * broken guard, and neither is the state the operator started in.
+ */
 function installBoth(hooksDir) {
   const touched = [];
   try {
