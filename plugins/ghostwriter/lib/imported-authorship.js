@@ -18,7 +18,8 @@
  * place only a read can reach.
  */
 
-const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
+const { checkText } = require('./attribution');
+const { checkIdentity, checkExpectedIdentity } = require('./identity-rules');
 const { finding, normalizeRead, readFailure } = require('./finding');
 const { surfaceCwd, surfaceGitDir } = require('./surface-target');
 const { parsePatches } = require('./patch');

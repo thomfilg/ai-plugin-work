@@ -33,7 +33,7 @@
     {
       "name": "ghostwriter",
       "source": "./plugins/ghostwriter",
-      "description": "No AI self-attribution in git — a PreToolUse hook blocks co-author trailers, generated-with footers, product attribution links, session trailers and AI committer identities; bare product mentions always ship",
+      "description": "No AI self-attribution anywhere a change gets signed — PreToolUse hooks block co-author trailers, generated-with footers, attribution links and session trailers in commit messages, pull request text and the files themselves, plus AI or absent committer identities; opt-in git hooks cover what happens outside the session; bare product mentions always ship",
       "category": "safety",
       "tags": [
         "git",
@@ -43,6 +43,8 @@
         "hooks",
         "pretooluse",
         "provenance",
+        "identity",
+        "pull-request",
         "guard"
       ]
     },

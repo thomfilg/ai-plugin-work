@@ -41,6 +41,13 @@ const GH_POST_COMMANDS = {
 const TEXT_FLAGS = ['--body', '--title', '--notes', '--subject', '--message'];
 const SHORT_TEXT_FLAGS = { '-b': '--body', '-t': '--title', '-n': '--notes', '-m': '--message' };
 const FILE_FLAGS = ['--body-file', '--notes-file'];
+/**
+ * `-F` is `gh`'s short form of `--body-file` on every posting command. Reading
+ * only the long form left the idiomatic invocation — `gh pr create -F body.md`
+ * — publishing a file nobody opened. (Under `gh api` the same letter means a
+ * raw field, which is why that group is read by readApiFields instead.)
+ */
+const SHORT_FILE_FLAGS = { '-F': '--body-file' };
 
 /** `gh api -f body=…` — a field whose key publishes prose. */
 const API_FIELD_FLAGS = ['--field', '--raw-field', '-f', '-F'];
@@ -65,26 +72,58 @@ const MCP_TEXT_FIELDS = new Set([
 
 /** Tokens that name an account explicitly rather than using the logged-in one. */
 const ACCOUNT_ENV_RE = /^(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN)$/;
+/** The flag that does the same thing in the open, by naming the account. */
+const ACCOUNT_OPTION = '--account';
 
 function newPost(kind) {
-  return { kind, texts: [], textFiles: [], tokenOverride: null };
+  return { kind, texts: [], textFiles: [], tokenOverride: null, account: null };
+}
+
+/**
+ * The account this command SELECTS, if it names one.
+ *
+ * Skipping the flag's value was only half the job: it stopped the value being
+ * mistaken for the command group, and left the guard checking the login `gh`
+ * would use by DEFAULT — a human, quite possibly — while the post went out as
+ * whoever the flag named. A command that says which account to publish as has
+ * answered the question the resolver was about to go and ask.
+ */
+function readSelectedAccount(argv, start) {
+  for (let i = start; i < argv.length; i++) {
+    const value = longFlagValue(argv, i, ACCOUNT_OPTION);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+/** Literal text at `argv[i]`: `--body value`, `--body=value`, or `-b value`. */
+function readTextArg(argv, i, kind, out) {
+  for (const flag of TEXT_FLAGS) {
+    const value = longFlagValue(argv, i, flag);
+    if (value !== null) out.texts.push({ where: `gh ${kind} ${flag}`, text: value });
+  }
+  const short = SHORT_TEXT_FLAGS[argv[i]];
+  if (short && i + 1 < argv.length)
+    out.texts.push({ where: `gh ${kind} ${short}`, text: argv[i + 1] });
+}
+
+/** A path to text at `argv[i]`: `--body-file`, `--notes-file`, or `-F`. */
+function readTextFileArg(argv, i, kind, out) {
+  for (const flag of FILE_FLAGS) {
+    const file = longFlagValue(argv, i, flag);
+    if (file !== null) out.textFiles.push({ where: `gh ${kind} ${flag}`, file });
+  }
+  const short = SHORT_FILE_FLAGS[argv[i]];
+  if (short && i + 1 < argv.length) {
+    out.textFiles.push({ where: `gh ${kind} ${short}`, file: argv[i + 1] });
+  }
 }
 
 /** Read `--body` / `-b` / `--body-file` style arguments onto a post surface. */
 function readPostArgs(argv, start, kind, out) {
   for (let i = start; i < argv.length; i++) {
-    const short = SHORT_TEXT_FLAGS[argv[i]];
-    for (const flag of TEXT_FLAGS) {
-      const value = longFlagValue(argv, i, flag);
-      if (value !== null) out.texts.push({ where: `gh ${kind} ${flag}`, text: value });
-    }
-    if (short && i + 1 < argv.length) {
-      out.texts.push({ where: `gh ${kind} ${short}`, text: argv[i + 1] });
-    }
-    for (const flag of FILE_FLAGS) {
-      const file = longFlagValue(argv, i, flag);
-      if (file !== null) out.textFiles.push({ where: `gh ${kind} ${flag}`, file });
-    }
+    readTextArg(argv, i, kind, out);
+    readTextFileArg(argv, i, kind, out);
   }
 }
 
@@ -100,10 +139,57 @@ function readApiFields(argv, start, out) {
   }
 }
 
-/** The first two non-flag words after `gh` — its command group and action. */
+/**
+ * `gh` options that consume the FOLLOWING token as their value.
+ *
+ * Without this list the value is read as a word, and the first two words are
+ * how the command group and action are found: `gh --repo owner/name pr create`
+ * offers `owner/name` where `pr` was expected, no group matches, and no post
+ * surface is built — so no pass runs and the whole command publishes
+ * uninspected. A missed group is not a weaker check, it is no check.
+ *
+ * The `--flag=value` forms need no entry: they are one token, and a token
+ * starting with `-` is already skipped.
+ */
+const VALUE_OPTIONS = new Set([
+  '-R',
+  '--repo',
+  '--hostname',
+  '-H',
+  '--header',
+  '-X',
+  '--method',
+  '-f',
+  '--field',
+  '-F',
+  '--raw-field',
+  '-q',
+  '--jq',
+  '-t',
+  '--template',
+  '--input',
+  '--cache',
+  '--account',
+  '--user',
+  '-b',
+  '--body',
+  '--body-file',
+  '--title',
+  '-n',
+  '--notes',
+  '--notes-file',
+]);
+
+/** The first two words after `gh` — its command group and action. */
 function commandWords(argv) {
   const words = [];
   for (let i = 1; i < argv.length && words.length < 2; i++) {
+    // A value is not a word. Skipping it keeps the POSITIONAL rule intact,
+    // which is what stops `gh pr list --search create` reading as `pr create`.
+    if (VALUE_OPTIONS.has(argv[i])) {
+      i += 1;
+      continue;
+    }
     if (!argv[i].startsWith('-')) words.push({ word: argv[i], index: i });
   }
   return words;
@@ -129,7 +215,39 @@ function classifyGhSegment(tokens) {
   else readPostArgs(argv, found.index + 1, found.kind, surface);
   const token = env.find((entry) => ACCOUNT_ENV_RE.test(entry.name));
   if (token) surface.tokenOverride = token.name;
+  surface.account = readSelectedAccount(argv, 1);
   return surface;
+}
+
+/**
+ * Does this command invoke `gh` at all?
+ *
+ * The list above is an enumeration of ANOTHER tool's flags, and an enumeration
+ * lags the tool: three review rounds found three more options that push the
+ * command group out of the position the parser reads it from. Precision is
+ * still worth having — it is what keeps a read-only `gh pr list` out of the
+ * account check — but it cannot be the only thing standing between a footer
+ * and a comment.
+ *
+ * So the text check does not depend on the enumeration at all. Any invocation
+ * of `gh` is enough to read the command for attribution, whatever its options
+ * do, because the only thing a false positive can block there is a command
+ * whose own text credits a tool for the work.
+ *
+ * @param {string} command
+ * @returns {boolean}
+ */
+function invokesGh(command) {
+  return (
+    scanSegments(command, {
+      binary: 'gh',
+      binaryRe: GH_BINARY_RE,
+      classify: (tokens) => {
+        const { argv } = splitEnvPrefix(tokens);
+        return argv.length && GH_BINARY_RE.test(argv[0]) ? { invoked: true } : null;
+      },
+    }).length > 0
+  );
 }
 
 /**
@@ -146,6 +264,32 @@ function scanForgeCommand(command) {
       classify: classifyGhSegment,
     }),
   };
+}
+
+/**
+ * Tool-input keys carrying FILE content — a commit made without a working
+ * tree, straight through the API. `create_or_update_file` writes one file;
+ * `push_files` writes a list. Neither passes through the shell, so nothing the
+ * command walker does can see them, and the text they carry lands in the
+ * repository exactly as a `git commit` would put it there.
+ *
+ * @param {string} toolName
+ * @param {object} toolInput
+ * @returns {Array<{path: string, text: string}>}
+ */
+function scanToolFiles(toolName, toolInput) {
+  if (!isForgeTool(toolName) || !toolInput || typeof toolInput !== 'object') return [];
+  const files = [];
+  const add = (entry) => {
+    if (!entry || typeof entry.content !== 'string' || !entry.content) return;
+    files.push({
+      path: typeof entry.path === 'string' && entry.path ? entry.path : `${toolName} content`,
+      text: entry.content,
+    });
+  };
+  add(toolInput);
+  if (Array.isArray(toolInput.files)) toolInput.files.forEach(add);
+  return files;
 }
 
 /** Is this MCP tool one that publishes to a forge? */
@@ -175,7 +319,9 @@ function scanToolCall(toolName, toolInput) {
 
 module.exports = {
   scanForgeCommand,
+  invokesGh,
   scanToolCall,
+  scanToolFiles,
   isForgeTool,
   classifyGhSegment,
   GH_POST_COMMANDS,

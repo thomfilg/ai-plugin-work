@@ -38,10 +38,22 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { checkText, checkIdentity, checkExpectedIdentity } = require('./attribution');
-const { scanCommand, identityEntry } = require('./git-surfaces');
-const { resolveGitUser, resolveCommitInfo, resolveGhAccount } = require('./git-identity');
-const { scanForgeCommand, scanToolCall } = require('./forge-surfaces');
+const { scanCommand } = require('./git-surfaces');
+const {
+  checkMessageArgs,
+  checkMessageFiles,
+  checkIdentityLiterals,
+  checkRawCommand,
+  checkHookBypass,
+  checkEffectiveIdentity,
+} = require('./git-guard');
+const {
+  resolveGitUser,
+  resolveCommitInfo,
+  resolveGhAccount,
+  resolveInstalledHook,
+} = require('./git-identity');
+const { scanForgeCommand, scanToolCall, scanToolFiles, invokesGh } = require('./forge-surfaces');
 const {
   checkPostText,
   checkRawPost,
@@ -53,9 +65,9 @@ const { surfaceCwd, surfaceGitDir } = require('./surface-target');
 const { readExpectedIdentity } = require('./expected-identity');
 const { MAX_UNWRAP_DEPTH } = require('./command-scan');
 const { finding, normalizeRead, readFailure, MAX_MESSAGE_FILE_BYTES } = require('./finding');
-
-/** Operator override, honoured ONLY from the hook's own environment. */
-const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
+const { inspectFileWrites } = require('./file-content');
+const { OVERRIDE_ENV, isOverridden } = require('./policy');
+const { renderBlock } = require('./report');
 
 /**
  * A `-F` target can be any file the caller names, so the read has to be
@@ -130,16 +142,24 @@ function readTextFile(filePath, cwd) {
   }
 }
 
+/** The real readers, overridden wholesale by a caller that supplies fakes. */
+const IO_DEFAULTS = Object.freeze({
+  readMessageFile: readTextFile,
+  resolveIdentity: resolveGitUser,
+  resolveCommitInfo,
+  resolveAccount: resolveGhAccount,
+  resolveInstalledHook,
+});
+
 function defaultIo(io) {
   const opts = io || {};
+  const env = opts.env || process.env;
   return {
+    ...IO_DEFAULTS,
+    ...opts,
     cwd: opts.cwd || process.cwd(),
-    env: opts.env || process.env,
-    readMessageFile: opts.readMessageFile || ((p, cwd) => readTextFile(p, cwd)),
-    resolveIdentity: opts.resolveIdentity || resolveGitUser,
-    resolveCommitInfo: opts.resolveCommitInfo || resolveCommitInfo,
-    resolveAccount: opts.resolveAccount || resolveGhAccount,
-    expected: opts.expected || readExpectedIdentity(opts.env || process.env),
+    env,
+    expected: opts.expected || readExpectedIdentity(env),
   };
 }
 
@@ -158,94 +178,6 @@ function checkUnverifiableSurfaces(surfaces, posts) {
   );
 }
 
-/** Pass 1 — every `-m` / `--message` value on every authoring surface. */
-function checkMessageArgs(surfaces) {
-  for (const surface of surfaces) {
-    for (const message of surface.messages) {
-      const result = checkText(message);
-      if (!result.ok) return finding(result, `git ${surface.kind} message`);
-    }
-  }
-  return null;
-}
-
-/** Pass 2 — every `-F` / `--file` / redirected message body, read in full. */
-function checkMessageFiles(surfaces, io) {
-  for (const surface of surfaces) {
-    for (const file of surface.messageFiles) {
-      if (!file || file.startsWith('-')) continue;
-      const where = `git ${surface.kind} message file ${file}`;
-      const read = normalizeRead(io.readMessageFile(file, surfaceCwd(surface, io)));
-      const result = checkText(read.text);
-      if (!result.ok) return finding(result, where);
-      const failed = readFailure(read, where);
-      if (failed) return failed;
-    }
-  }
-  return null;
-}
-
-/**
- * An identity recorded as a REFERENCE (`--config-env=user.name=VAR`) resolved
- * against the guard's environment, or null when the variable is not visible.
- */
-function resolveIdentityRef(identity, io) {
-  if (!identity.envVar) return identity;
-  const value = io.env[identity.envVar];
-  if (value === undefined) return null;
-  return identityEntry(identity.source, identity.key, value);
-}
-
-/** A referenced identity nobody can read is not an identity anyone can clear. */
-function unverifiableIdentity(identity) {
-  return {
-    rule: 'unverifiableIdentity',
-    reason: `the committing identity comes from $${identity.envVar}, which the guard cannot read`,
-    hint: 'Set user.name/user.email directly so the identity can be checked.',
-    evidence: `${identity.source}=${identity.envVar}`,
-  };
-}
-
-/** Pass 3 — identities written by the command itself. */
-function checkIdentityLiterals(surfaces, io) {
-  for (const surface of surfaces) {
-    for (const identity of surface.identities) {
-      const where = `${identity.source} on git ${surface.kind}`;
-      const resolved = resolveIdentityRef(identity, io);
-      if (!resolved) return finding(unverifiableIdentity(identity), where);
-      const result = checkIdentity(resolved);
-      if (!result.ok) return finding(result, where);
-    }
-  }
-  return null;
-}
-
-/** Pass 4 — the raw command text, for bodies the tokenizer cannot reach. */
-function checkRawCommand(command, surfaces) {
-  if (!surfaces.some((surface) => surface.writesMessage)) return null;
-  const result = checkText(command);
-  return result.ok ? null : finding(result, 'the command text');
-}
-
-/** Pass 5 — the identity git would stamp on the object being written. */
-function checkEffectiveIdentity(surfaces, io) {
-  const seen = new Set();
-  for (const surface of surfaces) {
-    if (!surface.writesCommit) continue;
-    const cwd = surfaceCwd(surface, io);
-    const gitDir = surfaceGitDir(surface, io);
-    const key = `${cwd}\u0000${gitDir || ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const user = io.resolveIdentity(cwd, gitDir, surface.configSources);
-    const result = checkIdentity(user);
-    if (!result.ok) return finding(result, 'the configured git identity');
-    const expected = checkExpectedIdentity(user, io.expected);
-    if (!expected.ok) return finding(expected, 'the configured git identity');
-  }
-  return null;
-}
-
 /**
  * The ordered passes, sharpest evidence first. Kept as a list so the order is
  * a readable fact rather than the shape of a boolean chain.
@@ -257,11 +189,12 @@ const COMMAND_PASSES = [
   (c) => checkIdentityLiterals(c.surfaces, c.ctx),
   (c) => checkRawCommand(c.command, c.surfaces),
   (c) => checkPostText(c.posts, c.ctx),
-  (c) => checkRawPost(c.command, c.posts),
+  (c) => checkRawPost(c.command, c.posts, c.reachesForge),
   (c) => checkPostAccount(c.posts, c.ctx),
   (c) => checkCopiedCommits(c.surfaces, c.ctx),
   (c) => checkStdinPatch(c.surfaces),
   (c) => checkPatchFiles(c.surfaces, c.ctx),
+  (c) => checkHookBypass(c.surfaces, c.ctx),
   (c) => checkEffectiveIdentity(c.surfaces, c.ctx),
 ];
 
@@ -286,41 +219,22 @@ function inspectCommand(command, io) {
   const ctx = defaultIo(io);
   const { surfaces } = scanCommand(command);
   const posts = scanForgeCommand(command).surfaces;
-  if (!surfaces.length && !posts.length) return ALLOW;
+  // A `gh` invocation the classifier did not recognise as a post is still a
+  // `gh` invocation. Locating the command group depends on knowing which
+  // options consume a value, and that knowledge goes stale; the raw pass does
+  // not depend on it, so it is given the chance to run.
+  const reachesForge = invokesGh(command);
+  if (!surfaces.length && !posts.length && !reachesForge) return ALLOW;
 
   // An override the command sets for itself is not an override — it is the
   // thing the guard exists to prevent, spelled differently. Only the hook's
   // inherited environment can lift the rules.
   const selfGranted = String(command).includes(OVERRIDE_ENV);
-  if (!selfGranted && ctx.env[OVERRIDE_ENV] === '1') return ALLOW;
+  if (!selfGranted && isOverridden(ctx.env)) return ALLOW;
 
-  const hit = firstFinding(COMMAND_PASSES, { command, surfaces, posts, ctx });
+  const hit = firstFinding(COMMAND_PASSES, { command, surfaces, posts, reachesForge, ctx });
   if (!hit) return ALLOW;
   return selfGranted ? { ...hit, selfGranted: true } : hit;
-}
-
-/** Render a finding as the stderr block the runtime shows the agent. */
-function renderBlock(hit) {
-  const lines = [
-    'ghostwriter: this command would sign the work as an AI.',
-    '',
-    `  rule      ${hit.rule}`,
-    `  where     ${hit.where}`,
-    `  problem   ${hit.reason}`,
-    `  evidence  ${hit.evidence}`,
-    '',
-    `↳ Fix: ${hit.hint}`,
-    '',
-    'The change belongs to the person who asked for it. Tools do not get a byline.',
-  ];
-  if (hit.selfGranted) {
-    lines.push(
-      '',
-      `Note: ${OVERRIDE_ENV} set inside the command is ignored — the override is`,
-      "honoured only from the operator's own environment."
-    );
-  }
-  return `${lines.join('\n')}\n`;
 }
 
 /**
@@ -338,11 +252,15 @@ function renderBlock(hit) {
 function inspectToolCall(toolName, toolInput, io) {
   const ctx = defaultIo(io);
   const { surfaces } = scanToolCall(toolName, toolInput);
-  if (!surfaces.length) return ALLOW;
-  if (ctx.env[OVERRIDE_ENV] === '1') return ALLOW;
-  const hit = checkPostText(surfaces, ctx);
+  // `push_files` and `create_or_update_file` commit CONTENT through the API,
+  // which no message pass would ever see.
+  const files = scanToolFiles(toolName, toolInput);
+  if (!surfaces.length && !files.length) return ALLOW;
+  if (isOverridden(ctx.env)) return ALLOW;
+  const written = inspectFileWrites(files, ctx);
+  const hit = checkPostText(surfaces, ctx) || (written.blocked ? written : null);
   if (hit) return hit;
-  if (!ctx.expected.configured) return ALLOW;
+  if (!surfaces.length || !ctx.expected.configured) return ALLOW;
   return finding(
     unverifiableAccount(
       "an MCP tool posts under the server's credential, which the guard cannot read"
@@ -351,9 +269,27 @@ function inspectToolCall(toolName, toolInput, io) {
   );
 }
 
+/**
+ * Decide whether a file write may run.
+ *
+ * The other two entry points inspect text ABOUT a change. This one inspects
+ * the change: a footer in a source comment ships in the diff, appears in the
+ * pull request, and stays in the tree long after the message has scrolled away.
+ *
+ * @param {Array<{path: string, text: string}>} files
+ * @param {object} [io]
+ */
+function inspectWrite(files, io) {
+  const ctx = defaultIo(io);
+  if (!files || !files.length) return ALLOW;
+  if (isOverridden(ctx.env)) return ALLOW;
+  return inspectFileWrites(files, ctx);
+}
+
 module.exports = {
   inspectCommand,
   inspectToolCall,
+  inspectWrite,
   renderBlock,
   readTextFile,
   readFully,
