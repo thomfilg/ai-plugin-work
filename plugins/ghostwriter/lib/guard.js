@@ -50,7 +50,7 @@ const {
   resolveGhAccount,
   resolveInstalledHook,
 } = require('./git-identity');
-const { scanForgeCommand, scanToolCall, scanToolFiles } = require('./forge-surfaces');
+const { scanForgeCommand, scanToolCall, scanToolFiles, invokesGh } = require('./forge-surfaces');
 const { inspectFileWrites } = require('./file-content');
 const { scanCommand } = require('./git-surfaces');
 const {
@@ -166,7 +166,7 @@ const COMMAND_PASSES = [
   (c) => checkIdentityLiterals(c.surfaces, c.ctx),
   (c) => checkRawCommand(c.command, c.surfaces),
   (c) => checkPostText(c.posts, c.ctx),
-  (c) => checkRawPost(c.command, c.posts),
+  (c) => checkRawPost(c.command, c.posts, c.reachesForge),
   (c) => checkPostAccount(c.posts, c.ctx),
   (c) => checkCopiedCommits(c.surfaces, c.ctx),
   (c) => checkPatchFiles(c.surfaces, c.ctx),
@@ -200,7 +200,12 @@ function inspectCommand(command, io) {
   const ctx = defaultIo(io);
   const { surfaces } = scanCommand(command);
   const posts = scanForgeCommand(command).surfaces;
-  if (!surfaces.length && !posts.length) return ALLOW;
+  // A `gh` the classifier did not recognise as a post is still a `gh`. Its
+  // text is read even when no surface was built, because recognising the
+  // surface depends on knowing that tool's options and reading the text
+  // does not.
+  const reachesForge = invokesGh(command);
+  if (!surfaces.length && !posts.length && !reachesForge) return ALLOW;
 
   // An override the command sets for itself is not an override — it is the
   // thing the guard exists to prevent, spelled differently. Only the hook's
@@ -208,7 +213,7 @@ function inspectCommand(command, io) {
   const selfGranted = String(command).includes(OVERRIDE_ENV);
   if (!selfGranted && isOverridden(ctx.env)) return ALLOW;
 
-  const hit = firstFinding(COMMAND_PASSES, { command, surfaces, posts, ctx });
+  const hit = firstFinding(COMMAND_PASSES, { command, surfaces, posts, reachesForge, ctx });
   if (!hit) return ALLOW;
   return selfGranted ? { ...hit, selfGranted: true } : hit;
 }

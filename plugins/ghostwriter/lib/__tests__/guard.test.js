@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { scanForgeCommand } = require('../forge-surfaces');
 const {
   inspectCommand,
   inspectToolCall,
@@ -674,6 +675,42 @@ describe('guard — pull requests, issues and comments', () => {
       blocked: false,
     });
     assert.equal(inspectToolCall('mcp__github__issue_write', { body: FOOTER }, {}).blocked, true);
+  });
+});
+
+// Locating the command group depends on knowing which of `gh`'s options eat
+// the token after them, and that knowledge goes stale every time `gh` grows a
+// flag — three review rounds found three such options. The text check no
+// longer depends on it.
+describe('guard — a gh command the classifier did not recognise', () => {
+  it('reports the flag when the option IS known', () => {
+    // `--account` is in the value-option list, so the group is found and the
+    // finding names the argument rather than the whole command.
+    const verdict = inspect(`gh --account someone pr comment 1 --body "Generated with ${TOOL}"`);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'gh pr comment --body');
+  });
+
+  it('still reads the text when the option is one nobody listed', () => {
+    // The case the enumeration cannot cover: a flag `gh` grows after this was
+    // written. No surface is built, and the command is blocked anyway.
+    const command = `gh --a-flag-added-next-year x pr comment 1 --body "Generated with ${TOOL}"`;
+    assert.deepEqual(scanForgeCommand(command).surfaces, [], 'no surface — that is the premise');
+    const verdict = inspect(command);
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.where, 'the command text');
+  });
+
+  it('leaves an ordinary gh command alone', () => {
+    for (const command of ['gh pr list --limit 5', 'gh repo clone o/r', 'gh pr view 784']) {
+      assert.deepEqual(inspect(command), { blocked: false }, command);
+    }
+  });
+
+  it('does not treat a command that merely mentions gh as one', () => {
+    assert.deepEqual(inspect(`echo "gh pr comment --body 'Generated with ${TOOL}'"`), {
+      blocked: false,
+    });
   });
 });
 
