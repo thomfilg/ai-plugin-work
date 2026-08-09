@@ -31,6 +31,22 @@
       "tags": ["orchestrate", "conduct", "agents", "tmux", "workflow", "multi-agent"]
     },
     {
+      "name": "ghostwriter",
+      "source": "./plugins/ghostwriter",
+      "description": "No AI self-attribution in git — a PreToolUse hook blocks co-author trailers, generated-with footers, product attribution links, session trailers and AI committer identities; bare product mentions always ship",
+      "category": "safety",
+      "tags": [
+        "git",
+        "commit",
+        "attribution",
+        "authorship",
+        "hooks",
+        "pretooluse",
+        "provenance",
+        "guard"
+      ]
+    },
+    {
       "name": "heimdall",
       "source": "./plugins/heimdall",
       "description": "Config-driven file/directory guard — lock blocks pair protected paths with an unlock phrase and a PreToolUse hook blocks Edit/Write/Bash/Task mutations unless the phrase is spoken; also conceals paths (hard read+write deny, no unlock) and hardens MCP secrets behind a setuid OS boundary",

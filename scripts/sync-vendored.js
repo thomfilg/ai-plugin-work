@@ -39,6 +39,7 @@ const VENDOR_SETS = [
   {
     master: 'factories/runtime',
     vendorDirs: [
+      'plugins/ghostwriter/lib/runtime',
       'plugins/heimdall/lib/runtime',
       'plugins/maestro/scripts/lib/runtime',
       'plugins/synapsys/lib/runtime',
@@ -60,6 +61,7 @@ const VENDOR_SETS = [
   {
     master: 'factories/hookEntrypoint',
     vendorDirs: [
+      'plugins/ghostwriter/lib/hookEntrypoint',
       'plugins/synapsys/lib/hookEntrypoint',
       'plugins/work/scripts/workflows/lib/hookEntrypoint',
       'plugins/heimdall/lib/hookEntrypoint',
