@@ -60,6 +60,24 @@ const AUTHOR_COPY_SUBCOMMANDS = new Set(['cherry-pick']);
 const REUSE_FLAGS = ['--reuse-message', '--reedit-message'];
 const REUSE_SHORT = new Set(['-C', '-c']);
 
+/**
+ * `git am` flags whose value is a SEPARATE token. Without them `--directory
+ * build` reads as a patch called `build`, and the guard would report a
+ * directory it cannot inspect. The `=` forms need no entry — they start with
+ * `-` and are skipped as flags.
+ */
+const AM_VALUE_FLAGS = new Set([
+  '--directory',
+  '--exclude',
+  '--include',
+  '--patch-format',
+  '--whitespace',
+  '--gpg-sign',
+  '-S',
+  '-p',
+  '-C',
+]);
+
 /** Subcommands that stamp a new object with the current committer identity. */
 const IDENTITY_SUBCOMMANDS = new Set([
   'commit',
@@ -221,6 +239,34 @@ function readMessageArgs(argv, start, out) {
   }
 }
 
+/**
+ * The patches `git am` would apply.
+ *
+ * They are the command's positional arguments, and they matter because the
+ * author and the message live INSIDE the file: `git am bot.patch` re-creates a
+ * bot's byline with nothing incriminating anywhere in the argv. They are kept
+ * apart from `messageFiles` because only part of a patch is a message — the
+ * diff below `---` is content, and reading the whole file as a message would
+ * block a patch that merely touches a file discussing these rules.
+ *
+ * `git am --continue` / `--abort` / `--skip` name no patch, so they collect
+ * nothing and the pass never runs.
+ */
+function readPatchArgs(argv, start, out) {
+  for (let i = start; i < argv.length; i++) {
+    const redirect = REDIRECT_RE.exec(argv[i]);
+    if (redirect) {
+      // `git am < p` splits into two tokens, so the name arrives on the next
+      // pass of this loop; `git am <p` carries it in this one.
+      if (redirect[1]) out.patchFiles.push(redirect[1]);
+    } else if (AM_VALUE_FLAGS.has(argv[i])) {
+      i++;
+    } else if (!argv[i].startsWith('-')) {
+      out.patchFiles.push(argv[i]);
+    }
+  }
+}
+
 function newSurface(kind, writesMessage, writesCommit, target) {
   return {
     kind,
@@ -231,6 +277,7 @@ function newSurface(kind, writesMessage, writesCommit, target) {
     configSources: target.configSources || {},
     messages: [],
     messageFiles: [],
+    patchFiles: [],
     identities: [],
     authorRefs: [],
   };
@@ -259,7 +306,10 @@ function authoringSurface(argv, found, env) {
     configSources: readConfigSources(env),
   };
   const surface = newSurface(found.subcommand, writesMessage, writesCommit, target);
-  readMessageArgs(argv, found.index + 1, surface);
+  // `am` names patches, not messages: its argument is a whole mail file, and
+  // routing it through the message reader would inspect the diff as prose.
+  if (found.subcommand === 'am') readPatchArgs(argv, found.index + 1, surface);
+  else readMessageArgs(argv, found.index + 1, surface);
   readAuthorRefs(found.subcommand, argv, found.index + 1, surface);
   readIdentities(argv, found.index, env, surface);
   return surface;

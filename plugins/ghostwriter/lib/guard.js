@@ -17,7 +17,9 @@
  *                           heredoc bodies, unquoted `$(…)`, chained writes
  *   5. published prose    — `gh pr/issue/release` bodies, titles and api fields
  *   6. the posting account— the account `gh` would publish as
- *   7. the repo identity  — what git would stamp, in the repository targeted
+ *   7. imported authorship— the byline and message inside a commit being
+ *                           reused, or inside a patch `git am` would apply
+ *   8. the repo identity  — what git would stamp, in the repository targeted
  *
  * A forge MCP call skips the parsing — its text arrives as named fields — and
  * is checked by the same rules. Its ACCOUNT cannot be checked at all: the
@@ -46,9 +48,11 @@ const {
   checkPostAccount,
   unverifiableAccount,
 } = require('./forge-guard');
+const { checkCopiedCommits, checkPatchFiles } = require('./imported-authorship');
+const { surfaceCwd, surfaceGitDir } = require('./surface-target');
 const { readExpectedIdentity } = require('./expected-identity');
 const { MAX_UNWRAP_DEPTH } = require('./command-scan');
-const { finding, normalizeRead, UNVERIFIABLE, MAX_MESSAGE_FILE_BYTES } = require('./finding');
+const { finding, normalizeRead, readFailure, MAX_MESSAGE_FILE_BYTES } = require('./finding');
 
 /** Operator override, honoured ONLY from the hook's own environment. */
 const OVERRIDE_ENV = 'GHOSTWRITER_ALLOW_ATTRIBUTION';
@@ -66,20 +70,35 @@ const ALLOW = Object.freeze({ blocked: false });
 /**
  * Read a message file in full.
  *
- * @returns {{text: string, truncated: boolean}} `truncated` means the file was
- *   too large to inspect — never that part of it was checked and passed.
+ * Three outcomes, and telling the last two apart is the whole point: the text,
+ * `truncated` for a file too large to inspect, or `unreadable` with the errno
+ * for one that is there and could not be read. Reporting that last case as an
+ * empty string would make an unreadable file the cheapest way past every rule
+ * in this plugin; `readFailure` decides which codes mean "nothing was there".
+ *
+ * Only REGULAR files are read. A FIFO — `git commit -F <(gen)` — reports size 0
+ * and yields its bytes exactly once, so reading it would both clear the check
+ * on an empty string and consume the data git was about to use. The open is
+ * NON-BLOCKING for the same reason: opening a FIFO for reading otherwise waits
+ * for a writer that may never arrive, and a guard that hangs is a guard that
+ * gets removed. Regular files ignore the flag.
+ *
+ * @returns {{text: string, truncated?: boolean, unreadable?: string}}
  */
 function readTextFile(filePath, cwd) {
   let fd;
   try {
-    fd = fs.openSync(path.resolve(cwd || process.cwd(), filePath), 'r');
-    const { size } = fs.fstatSync(fd);
-    if (size > MAX_MESSAGE_FILE_BYTES) return { text: '', truncated: true };
-    const buffer = Buffer.alloc(size);
-    const read = fs.readSync(fd, buffer, 0, size, 0);
-    return { text: buffer.toString('utf8', 0, read), truncated: false };
-  } catch {
-    return { text: '', truncated: false };
+    const flags = fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+    fd = fs.openSync(path.resolve(cwd || process.cwd(), filePath), flags);
+    const stat = fs.fstatSync(fd);
+    if (stat.isDirectory()) return { text: '', unreadable: 'EISDIR' };
+    if (!stat.isFile()) return { text: '', unreadable: 'ENOTREG' };
+    if (stat.size > MAX_MESSAGE_FILE_BYTES) return { text: '', truncated: true };
+    const buffer = Buffer.alloc(stat.size);
+    const read = fs.readSync(fd, buffer, 0, stat.size, 0);
+    return { text: buffer.toString('utf8', 0, read) };
+  } catch (err) {
+    return { text: '', unreadable: (err && err.code) || 'EUNKNOWN' };
   } finally {
     if (fd !== undefined) {
       try {
@@ -130,32 +149,6 @@ function checkMessageArgs(surfaces) {
   return null;
 }
 
-/**
- * The directory this surface actually operates on. `git -C <dir> commit` reads
- * its config — and resolves a relative `-F` path — from there, not from the
- * shell's cwd, so both later passes have to follow it.
- */
-function surfaceCwd(surface, io) {
-  // `-C` compounds, so every value applies in order: `-C outer -C inner`
-  // lands in outer/inner. path.resolve does exactly that, absolutes included.
-  return surface.dirs && surface.dirs.length ? path.resolve(io.cwd, ...surface.dirs) : io.cwd;
-}
-
-/**
- * The repository whose config this surface commits under. `--git-dir` /
- * `GIT_DIR` select it independently of the process directory, so a command can
- * sit in a clean repo and author into another one.
- */
-function surfaceGitDir(surface, io) {
-  // A GIT_DIR already exported in the session reaches git without appearing in
-  // the command at all. The guard's own `git config` read inherits it too, so
-  // the two agree either way — but threading it explicitly makes that a stated
-  // contract rather than a coincidence, and keeps it right if the guard's
-  // environment ever stops matching the command's.
-  const selected = surface.gitDir || io.env.GIT_DIR;
-  return selected ? path.resolve(surfaceCwd(surface, io), selected) : null;
-}
-
 /** Pass 2 — every `-F` / `--file` / redirected message body, read in full. */
 function checkMessageFiles(surfaces, io) {
   for (const surface of surfaces) {
@@ -165,7 +158,8 @@ function checkMessageFiles(surfaces, io) {
       const read = normalizeRead(io.readMessageFile(file, surfaceCwd(surface, io)));
       const result = checkText(read.text);
       if (!result.ok) return finding(result, where);
-      if (read.truncated) return finding(UNVERIFIABLE, where);
+      const failed = readFailure(read, where);
+      if (failed) return failed;
     }
   }
   return null;
@@ -213,36 +207,6 @@ function checkRawCommand(command, surfaces) {
   return result.ok ? null : finding(result, 'the command text');
 }
 
-/**
- * A copied commit — `git cherry-pick <ref>`, `git commit -C <ref>`.
- *
- * BOTH halves ride along: the source commit's author, which the configured
- * identity pass would never see, and its message, which none of the message
- * passes receive because it appears nowhere in the command. Checking one and
- * not the other leaves exactly half the copy uninspected.
- */
-function checkCopiedCommit(surface, ref, io) {
-  const cwd = surfaceCwd(surface, io);
-  const source = io.resolveCommitInfo(cwd, surfaceGitDir(surface, io), ref);
-  const author = checkIdentity(source);
-  if (!author.ok) return finding(author, `the author copied from ${ref}`);
-  const expected = checkExpectedIdentity(source, io.expected);
-  if (!expected.ok) return finding(expected, `the author copied from ${ref}`);
-  const message = checkText(source.message);
-  if (!message.ok) return finding(message, `the message copied from ${ref}`);
-  return null;
-}
-
-function checkCopiedCommits(surfaces, io) {
-  for (const surface of surfaces) {
-    for (const ref of surface.authorRefs || []) {
-      const hit = checkCopiedCommit(surface, ref, io);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
-
 /** Pass 5 — the identity git would stamp on the object being written. */
 function checkEffectiveIdentity(surfaces, io) {
   const seen = new Set();
@@ -276,6 +240,7 @@ const COMMAND_PASSES = [
   (c) => checkRawPost(c.command, c.posts),
   (c) => checkPostAccount(c.posts, c.ctx),
   (c) => checkCopiedCommits(c.surfaces, c.ctx),
+  (c) => checkPatchFiles(c.surfaces, c.ctx),
   (c) => checkEffectiveIdentity(c.surfaces, c.ctx),
 ];
 

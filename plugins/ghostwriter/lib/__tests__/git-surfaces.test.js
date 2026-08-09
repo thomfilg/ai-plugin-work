@@ -315,6 +315,33 @@ describe('scanCommand — identity surfaces', () => {
     assert.deepEqual(onlySurface('git commit -m x').authorRefs, []);
   });
 
+  // `git am` carries its author and its message INSIDE the file, so the file
+  // has to be collected — but as a patch, not as a message: only part of it is
+  // one, and the rest is a diff.
+  it('collects the patches an am would apply', () => {
+    assert.deepEqual(onlySurface('git am bot.patch').patchFiles, ['bot.patch']);
+    assert.deepEqual(onlySurface('git am -3 a.patch b.patch').patchFiles, ['a.patch', 'b.patch']);
+    assert.deepEqual(onlySurface('git am bot.patch').messageFiles, []);
+  });
+
+  it('reads a patch fed by a redirect, in either spelling', () => {
+    assert.deepEqual(onlySurface('git am < p.mbox').patchFiles, ['p.mbox']);
+    assert.deepEqual(onlySurface('git am <p.mbox').patchFiles, ['p.mbox']);
+  });
+
+  // Without the value-flag list `build` reads as a patch, and the guard then
+  // reports a directory it cannot inspect — a block on a valid command.
+  it('does not mistake a flag value for a patch', () => {
+    assert.deepEqual(onlySurface('git am --directory build p.mbox').patchFiles, ['p.mbox']);
+    assert.deepEqual(onlySurface('git am --exclude=doc/* p.mbox').patchFiles, ['p.mbox']);
+  });
+
+  it('collects nothing from the resume and abort forms', () => {
+    for (const command of ['git am --continue', 'git am --abort', 'git am --skip']) {
+      assert.deepEqual(onlySurface(command).patchFiles, [], command);
+    }
+  });
+
   it('reads a GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n identity pair', () => {
     const surface = onlySurface(
       `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=${TOOL} git commit -m x`
