@@ -706,11 +706,21 @@ describe('guard — the posting account', () => {
     });
   });
 
-  it('blocks an account nobody can name, pinned human or not', () => {
-    // The anonymous half of the same rule. `gh` itself refuses to post with no
-    // account, so refusing here costs a working command nothing — and the
-    // identity checks cannot run on '' any more than on a tool name.
-    const verdict = inspect('gh pr comment 1 --body ok', { resolveAccount: () => '' });
+  it('leaves a gh that will not name an account alone', () => {
+    // In practice this is a gh that is logged out — a CI runner, a fresh
+    // machine. It posts nothing and says why better than a guard would. The
+    // case that WOULD matter, a logged-in gh whose status wording does not
+    // parse, is answered by the resolver's second probe rather than here.
+    assert.deepEqual(inspect('gh pr comment 1 --body ok', { resolveAccount: () => '' }), {
+      blocked: false,
+    });
+  });
+
+  it('refuses it once a human is pinned', () => {
+    const verdict = inspect('gh pr comment 1 --body ok', {
+      resolveAccount: () => '',
+      expected: { emails: [], logins: ['ada'], configured: true },
+    });
     assert.equal(verdict.blocked, true);
     assert.equal(verdict.rule, 'unverifiableAccount');
   });
