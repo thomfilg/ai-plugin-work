@@ -231,3 +231,30 @@ describe('scanForgeCommand — options in front of the command group', () => {
     assert.deepEqual(scanForgeCommand('gh pr view 784').surfaces, []);
   });
 });
+
+describe('invokesGh — the net that needs no flag knowledge', () => {
+  const { invokesGh } = require('../forge-surfaces');
+
+  it('sees a gh invocation whatever its options do', () => {
+    for (const command of [
+      'gh pr comment 1 --body hello',
+      'gh --account someone pr comment 1 --body hello',
+      'gh --a-flag-added-next-year x pr comment 1 --body hello',
+      'bash -c "gh pr create --body hello"',
+      '/usr/local/bin/gh pr view 1',
+    ]) {
+      assert.equal(invokesGh(command), true, command);
+    }
+  });
+
+  it('does not see gh where gh is not the command', () => {
+    for (const command of [
+      'echo gh pr comment',
+      'git commit -m "use gh pr create"',
+      'grep -r "gh pr comment" .',
+      'ghost --help',
+    ]) {
+      assert.equal(invokesGh(command), false, command);
+    }
+  });
+});

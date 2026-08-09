@@ -60,9 +60,19 @@ function checkPostText(posts, io) {
   return null;
 }
 
-/** The raw command, in prose mode, for post bodies built by a heredoc. */
-function checkRawPost(command, posts) {
-  if (!posts.length) return null;
+/**
+ * The raw command, in prose mode — for bodies built by a heredoc, and for
+ * every `gh` invocation the classifier did not recognise as a post.
+ *
+ * The second is the important one. Locating the command group depends on
+ * knowing which of `gh`'s options consume the token after them, and that
+ * knowledge goes stale every time `gh` grows a flag. This pass is deliberately
+ * free of it: if the command runs `gh` and its text credits a tool, that is
+ * enough. The only thing a false positive can cost here is a command whose own
+ * text carries an attribution footer, which is not a command worth protecting.
+ */
+function checkRawPost(command, posts, reachesForge) {
+  if (!posts.length && !reachesForge) return null;
   const result = checkText(command, { prose: true });
   return result.ok ? null : finding(result, 'the command text');
 }

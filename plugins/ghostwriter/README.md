@@ -105,6 +105,8 @@ Two properties keep the list from becoming the hole in the guard:
 - **Every exemption applied is announced.** The scanner names each path it skipped, so an exemption is visible in the check output, not only in the diff. A silent skip and a working rule look identical.
 - **CI reads the list from the base revision** (`--ignore-from`), so a change cannot add an attribution-bearing file and the line exempting it in the same breath. A new exemption takes effect once it is merged — reviewing the permission separately from the file it covers is how an allowlist is supposed to work. Locally the list is the working tree's own, which is what makes it editable at all.
 
+Locating a `gh` command group depends on knowing which of that tool's options consume the token after them, and an enumeration of another tool's flags goes stale every time it grows one — three review rounds found three. So the TEXT check does not depend on that knowledge: any invocation of `gh` is enough to read the command for attribution, whatever its options do. The precise classification still drives the account and per-argument checks, where a false positive would cost something; the text net cannot cost more than refusing a command whose own text credits a tool.
+
 Commands that author nothing are never inspected. `echo "Co-Authored-By: …"`, `git status` and `grep -r "git commit"` all fall straight through, and the repo identity is not even read.
 
 A block looks like this:

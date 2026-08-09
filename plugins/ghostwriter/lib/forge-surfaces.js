@@ -150,6 +150,8 @@ const VALUE_OPTIONS = new Set([
   '--template',
   '--input',
   '--cache',
+  '--account',
+  '--user',
   '-b',
   '--body',
   '--body-file',
@@ -195,6 +197,37 @@ function classifyGhSegment(tokens) {
   const token = env.find((entry) => ACCOUNT_ENV_RE.test(entry.name));
   if (token) surface.tokenOverride = token.name;
   return surface;
+}
+
+/**
+ * Does this command invoke `gh` at all?
+ *
+ * The list above is an enumeration of ANOTHER tool's flags, and an enumeration
+ * lags the tool: three review rounds found three more options that push the
+ * command group out of the position the parser reads it from. Precision is
+ * still worth having — it is what keeps a read-only `gh pr list` out of the
+ * account check — but it cannot be the only thing standing between a footer
+ * and a comment.
+ *
+ * So the text check does not depend on the enumeration at all. Any invocation
+ * of `gh` is enough to read the command for attribution, whatever its options
+ * do, because the only thing a false positive can block there is a command
+ * whose own text credits a tool for the work.
+ *
+ * @param {string} command
+ * @returns {boolean}
+ */
+function invokesGh(command) {
+  return (
+    scanSegments(command, {
+      binary: 'gh',
+      binaryRe: GH_BINARY_RE,
+      classify: (tokens) => {
+        const { argv } = splitEnvPrefix(tokens);
+        return argv.length && GH_BINARY_RE.test(argv[0]) ? { invoked: true } : null;
+      },
+    }).length > 0
+  );
 }
 
 /**
@@ -266,6 +299,7 @@ function scanToolCall(toolName, toolInput) {
 
 module.exports = {
   scanForgeCommand,
+  invokesGh,
   scanToolCall,
   scanToolFiles,
   isForgeTool,
