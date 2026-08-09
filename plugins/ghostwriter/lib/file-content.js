@@ -61,14 +61,29 @@ function checkFileText(filePath, text) {
 /**
  * Check every file a write would touch, stopping at the first finding.
  *
+ * `onExempt` exists because an exemption that nobody sees is indistinguishable
+ * from a rule that does not work. `.ghostwriterignore` is read from the tree
+ * being checked — which is the point, since an exemption belongs in the diff
+ * with the file it covers — but that only holds up if the exemption is
+ * ANNOUNCED. A caller with somewhere to report (the CI scanner) names every
+ * path it skipped; the PreToolUse hook passes nothing, because a hook that
+ * writes to stderr while allowing a call breaks the fail-open contract.
+ *
  * @param {Array<{path: string, text: string}>} files
- * @param {{cwd?: string}} [opts]
+ * @param {{cwd?: string, onExempt?: (path: string) => void, ignoreFrom?: string}} [opts]
  * @returns {{blocked: false}|object}
  */
+/** Is this file exempt — and if so, say so before letting it past. */
+function isExempt(file, cwd, ignoreFrom, onExempt) {
+  if (!isIgnored(file.path, cwd, ignoreFrom)) return false;
+  if (onExempt) onExempt(file.path);
+  return true;
+}
+
 function inspectFileWrites(files, opts) {
-  const cwd = (opts && opts.cwd) || process.cwd();
+  const { cwd = process.cwd(), onExempt, ignoreFrom } = opts || {};
   for (const file of files || []) {
-    if (!file || isIgnored(file.path, cwd)) continue;
+    if (!file || isExempt(file, cwd, ignoreFrom, onExempt)) continue;
     const hit = checkFileText(file.path, file.text);
     if (hit) return hit;
   }

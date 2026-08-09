@@ -216,6 +216,40 @@ describe('.ghostwriterignore', () => {
     );
   });
 
+  it('names every path an exemption let through', () => {
+    // A silent skip and a working rule look identical. The CI scanner prints
+    // these, so an exemption is visible in the check as well as in the diff.
+    const seen = [];
+    inspectFileWrites([{ path: 'vendor/pkg/lib.js', text: `// Generated with ${TOOL} Code` }], {
+      cwd: repo,
+      onExempt: (file) => seen.push(file),
+    });
+    assert.deepEqual(seen, ['vendor/pkg/lib.js']);
+  });
+
+  it('can take the list from another tree while judging this one', () => {
+    // What CI does: a change that adds an attribution-bearing file AND the
+    // line exempting it would otherwise clear itself. The list comes from the
+    // base revision, so the new exemption does not apply until it merges.
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'ghostwriter-base-'));
+    try {
+      fs.writeFileSync(path.join(other, '.ghostwriterignore'), 'docs/attribution.md\n');
+      resetIgnoreCache();
+      // `vendor/**` is exempt in `repo` and not in `other`.
+      assert.equal(isIgnored('vendor/pkg/lib.js', repo, other), false, 'the local list is ignored');
+      assert.equal(isIgnored('docs/attribution.md', repo, other), true, 'the given list applies');
+      assert.equal(
+        inspectFileWrites([{ path: 'vendor/pkg/lib.js', text: `// Generated with ${TOOL} Code` }], {
+          cwd: repo,
+          ignoreFrom: other,
+        }).blocked,
+        true
+      );
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
+  });
+
   it('exempts nothing when no ignore file exists', () => {
     const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'ghostwriter-bare-'));
     try {
