@@ -306,6 +306,56 @@ describe('unifiedAdditions — every added line, headers told apart by position'
     assert.equal(checkFileText(files[0].path, files[0].text).blocked, true);
   });
 
+  // The hunk header declares how many lines follow, so nothing inside a hunk
+  // can end it early — not `--- `, not `+++ `, not a line that reads exactly
+  // like a new file boundary.
+  it('treats a whole hunk as content, whatever its lines look like', () => {
+    const spoof = [
+      'diff --git a/x.md b/x.md',
+      '--- a/x.md',
+      '+++ b/x.md',
+      '@@ -1 +1,3 @@',
+      '+diff --git a/z b/z',
+      '+-- old',
+      `++ Generated with ${TOOL} Code`,
+    ].join('\n');
+    const files = unifiedAdditions(spoof);
+    assert.equal(files.length, 1, 'nothing in a hunk may open a second file');
+    assert.equal(checkFileText(files[0].path, files[0].text).blocked, true);
+  });
+
+  // Even hand-fed text that git would never emit: the counts still bound it.
+  it('counts its way past an unprefixed boundary inside a hunk', () => {
+    const spoof = [
+      'diff --git a/x.md b/x.md',
+      '--- a/x.md',
+      '+++ b/x.md',
+      '@@ -1 +1,3 @@',
+      '+a',
+      'diff --git a/z b/z',
+      '--- a/z',
+      `+++ Generated with ${TOOL} Code`,
+    ].join('\n');
+    const files = unifiedAdditions(spoof);
+    assert.equal(files.length, 1);
+    assert.equal(checkFileText(files[0].path, files[0].text).blocked, true);
+  });
+
+  it('spends context, addition and deletion lines against the right sides', () => {
+    const mixed = [
+      'diff --git a/c.js b/c.js',
+      '--- a/c.js',
+      '+++ b/c.js',
+      '@@ -1,3 +1,4 @@',
+      ' one',
+      '-two',
+      '+TWO',
+      '+three',
+      ' four',
+    ].join('\n');
+    assert.deepEqual(unifiedAdditions(mixed), [{ path: 'c.js', text: 'TWO\nthree' }]);
+  });
+
   it('still reads the header of every real file in a multi-file diff', () => {
     const two = [
       'diff --git a/a.js b/a.js',

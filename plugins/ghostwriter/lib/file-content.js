@@ -96,10 +96,11 @@ const PATCH_MOVE_RE = /^\*\*\* Move to: (.+)$/;
 const DIFF_HEADER_RE = /^\+\+\+ (?:b\/)?(.+)$/;
 /** The line that always precedes it. A `+++` anywhere else is content. */
 const DIFF_OLD_FILE_RE = /^--- /;
-/** `diff --git a/x b/x` — opens a file's header block. */
-const DIFF_FILE_RE = /^diff --git /;
-/** `@@ -1 +1 @@` — closes it. Everything after is hunk content. */
-const DIFF_HUNK_RE = /^@@ /;
+/**
+ * `@@ -12,7 +9,5 @@` — and crucially, how long the hunk is. Both counts
+ * default to 1 when omitted, which is what git writes for a single line.
+ */
+const DIFF_HUNK_RE = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
 
 /**
  * The lines each file GAINS, in either patch dialect.
@@ -120,20 +121,21 @@ const DIFF_HUNK_RE = /^@@ /;
  * starting with `+++` drops it — which is a way to write an attribution the
  * scanner never sees.
  *
- * So headers are told apart from content by WHERE THEY ARE, and position here
- * means two things, because either alone can be forged:
+ * So headers are told apart from content by WHERE THEY ARE, and a hunk says
+ * exactly where it ends: `@@ -a,b +c,d @@` declares how many lines of each
+ * side follow, and every body line spends one of them. While a hunk still owes
+ * lines, EVERY line in it is content — `--- x`, `+++ y`, even `diff --git a/z
+ * b/z` — because that is what the format says they are. Nothing about a line's
+ * shape can end a hunk early, so nothing about its shape can be forged into a
+ * structural boundary.
  *
- *   - the header BLOCK: `diff --git` opens it, the first `@@` closes it.
- *     Inside a hunk, `--- x` and `+++ y` are a deleted line and an added line
- *     whose text happens to start with `--` and `++`. Under `-U0` those two
- *     land adjacent with nothing between them.
- *   - the PAIR: within that block, `+++ b/path` is a header only directly
- *     after the `--- a/path` that always precedes it.
+ * That matters because the shapes really do collide. Under `-U0`, deleting a
+ * source line that starts `-- ` next to adding one that starts `++ ` puts
+ * `--- old` and `+++ Generated with <tool>` adjacent with nothing between them.
+ * Counting is what tells those apart from the real pair.
  *
- * This assumes git's own output, which always emits `diff --git` per file.
- * A hand-rolled `diff -u` with several files concatenated and no such line
- * would have only the second guard, which is the weaker one — nothing this
- * plugin runs produces that, and every caller here shells out to git.
+ * Outside a hunk, `+++ b/path` is a header only directly after the
+ * `--- a/path` that always precedes it.
  *
  * @param {string} text
  * @param {(line: string, at: {prev: string, inHunk: boolean}) =>
@@ -142,10 +144,34 @@ const DIFF_HUNK_RE = /^@@ /;
  *   that names no destination (a deletion).
  * @returns {Array<{path: string, text: string}>}
  */
-/** Advance the header/hunk position past one line. */
+/** Open a hunk, taking its declared length from its own header. */
+function beginHunk(at, line) {
+  const hunk = DIFF_HUNK_RE.exec(line);
+  if (!hunk) return;
+  at.oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
+  at.newLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+}
+
+/**
+ * Spend one line of what the hunk owes. A context line belongs to both sides,
+ * an addition only to the new one, a deletion only to the old. The `\` marker
+ * for a missing final newline belongs to neither and is free.
+ *
+ * Anything else — which a well-formed diff does not contain — is counted as
+ * context, so a malformed hunk still terminates rather than swallowing the
+ * rest of the input.
+ */
+function consumeHunkLine(at, line) {
+  if (line[0] === '\\') return;
+  if (line[0] !== '+') at.oldLeft = Math.max(0, at.oldLeft - 1);
+  if (line[0] !== '-') at.newLeft = Math.max(0, at.newLeft - 1);
+}
+
+/** Advance the position past one line. */
 function advance(at, line) {
-  if (DIFF_FILE_RE.test(line)) at.inHunk = false;
-  else if (DIFF_HUNK_RE.test(line)) at.inHunk = true;
+  if (at.inHunk) consumeHunkLine(at, line);
+  else beginHunk(at, line);
+  at.inHunk = at.oldLeft > 0 || at.newLeft > 0;
   at.prev = line;
 }
 
@@ -153,7 +179,7 @@ function additions(text, readHeader) {
   if (typeof text !== 'string') return [];
   const files = [];
   let current = null;
-  const at = { prev: '', inHunk: false };
+  const at = { prev: '', inHunk: false, oldLeft: 0, newLeft: 0 };
   for (const line of text.split('\n')) {
     const header = readHeader(line, at);
     advance(at, line);

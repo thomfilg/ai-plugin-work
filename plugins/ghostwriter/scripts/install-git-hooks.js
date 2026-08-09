@@ -161,6 +161,23 @@ function writeHook(hookPath, name) {
  * left alone: it was not created here, and deleting it would turn a failed
  * upgrade into a repository with no guard at all.
  */
+function message(err) {
+  return (err && err.message) || String(err);
+}
+
+/** Undo what this run created; report what it could not. */
+function rollBack(created) {
+  const stuck = [];
+  for (const hookPath of created) {
+    try {
+      fs.rmSync(hookPath);
+    } catch {
+      stuck.push(hookPath);
+    }
+  }
+  return stuck;
+}
+
 function installBoth(hooksDir) {
   const created = [];
   try {
@@ -171,17 +188,19 @@ function installBoth(hooksDir) {
       if (!existed) created.push(hookPath);
     }
   } catch (err) {
-    for (const hookPath of created) {
-      try {
-        fs.rmSync(hookPath);
-      } catch {
-        /* nothing better to do, and the message below says what to check */
-      }
+    const stuck = rollBack(created);
+    process.stderr.write(`ghostwriter: could not install the hooks (${message(err)}).\n`);
+    // Claiming a clean rollback that did not happen is worse than the failure
+    // itself: it sends the operator away believing the repository is untouched
+    // while a hook they never agreed to is running in it.
+    if (stuck.length) {
+      process.stderr.write(
+        `ghostwriter: could NOT remove ${stuck.join(', ')} — a partial install remains.\n` +
+          'Delete that file by hand, or re-run once the directory is writable.\n'
+      );
+    } else {
+      process.stderr.write('Nothing was left behind — both hooks go in together.\n');
     }
-    process.stderr.write(
-      `ghostwriter: could not install the hooks (${(err && err.message) || err}).\n` +
-        'Nothing was left behind — both hooks go in together.\n'
-    );
     return EXIT_REFUSED;
   }
   return EXIT_OK;
