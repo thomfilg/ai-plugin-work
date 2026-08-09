@@ -183,6 +183,22 @@ describe('install-git-hooks — other people’s hooks', () => {
     );
   });
 
+  // Contents are only half of "as it was found". `writeFileSync`'s mode option
+  // applies when it CREATES a file, so over an existing path the 0755 this
+  // installer chmods on would otherwise outlive the restore.
+  it('restores the mode it found, not just the bytes', () => {
+    assert.equal(install().code, 0);
+    const old = '#!/usr/bin/env sh\n# ghostwriter-commit-msg v1\nexit 0\n';
+    fs.writeFileSync(hookPath('commit-msg'), old, { mode: 0o644 });
+    fs.chmodSync(hookPath('commit-msg'), 0o644);
+    fs.rmSync(hookPath('pre-commit'));
+    fs.mkdirSync(hookPath('pre-commit'));
+
+    assert.equal(install().code, 1);
+    assert.equal(fs.statSync(hookPath('commit-msg')).mode & 0o777, 0o644);
+    assert.equal(fs.readFileSync(hookPath('commit-msg'), 'utf8'), old);
+  });
+
   it('never deletes a foreign hook', () => {
     fs.mkdirSync(path.dirname(hookPath()), { recursive: true });
     fs.writeFileSync(hookPath(), '#!/bin/sh\nexit 0\n', { mode: 0o755 });

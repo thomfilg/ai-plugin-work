@@ -171,11 +171,20 @@ function snapshot(hookPath) {
   }
 }
 
-/** Put one destination back the way it was found. */
+/**
+ * Put one destination back the way it was found — contents AND mode.
+ *
+ * `writeFileSync`'s `mode` option applies only when it CREATES the file, so
+ * over an existing path it is silently ignored and the 0755 this installer
+ * chmodded on would survive the restore. A hook that arrived non-executable
+ * would be left executable, which is a different repository from the one the
+ * operator started in even though every byte matches.
+ */
 function restore(entry) {
   if (entry.before) {
     try {
-      fs.writeFileSync(entry.path, entry.before.data, { mode: entry.before.mode });
+      fs.writeFileSync(entry.path, entry.before.data);
+      fs.chmodSync(entry.path, entry.before.mode & 0o7777);
       return true;
     } catch {
       return false;
