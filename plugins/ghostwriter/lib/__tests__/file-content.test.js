@@ -20,6 +20,7 @@ const {
   inspectFileWrites,
   checkFileText,
   patchAdditions,
+  unifiedAdditions,
   writeFiles,
   isProseFile,
 } = require('../file-content');
@@ -257,5 +258,79 @@ describe('.ghostwriterignore', () => {
     } finally {
       fs.rmSync(bare, { recursive: true, force: true });
     }
+  });
+});
+
+// A source line of `++i;` arrives in a diff as `+++i;`. A reader that skips
+// anything starting with `+++` drops it — which is a way to write an
+// attribution the scanner never reads.
+describe('unifiedAdditions — every added line, headers told apart by position', () => {
+  function diff(...body) {
+    return ['diff --git a/x.c b/x.c', '--- a/x.c', '+++ b/x.c', '@@ -1 +1,2 @@', ...body].join(
+      '\n'
+    );
+  }
+
+  it('keeps an added line that begins with a plus', () => {
+    const [file] = unifiedAdditions(diff('+++i;', '+  return 0;'));
+    assert.equal(file.path, 'x.c');
+    assert.equal(file.text, '++i;\n  return 0;');
+  });
+
+  it('reads attribution hidden behind a doubled plus', () => {
+    const [file] = unifiedAdditions(diff(`++ Generated with ${TOOL} Code`));
+    assert.equal(checkFileText(file.path, file.text).blocked, true);
+  });
+
+  it('reads the real file header, and only where a header can be', () => {
+    const [file] = unifiedAdditions(diff('++ b/evil.c', '+ok'));
+    assert.equal(file.path, 'x.c', 'a mid-hunk +++ line is content, not a new file');
+    assert.equal(file.text, '+ b/evil.c\nok');
+  });
+
+  it('drops what a deletion adds, which is nothing', () => {
+    const gone = ['diff --git a/x.c b/x.c', '--- a/x.c', '+++ /dev/null'].join('\n');
+    assert.deepEqual(unifiedAdditions(gone), []);
+  });
+
+  it('ignores removed and context lines', () => {
+    const [file] = unifiedAdditions(diff(` const keep = '${TOOL}';`, `-// Generated with ${TOOL}`));
+    assert.equal(file.text, '');
+  });
+});
+
+// An exemption is only an exemption where it was reviewed. A repository
+// checked out below a directory that happens to hold an ignore file must not
+// adopt rules written for something else.
+describe('.ghostwriterignore — the repository boundary', () => {
+  let outer;
+
+  before(() => {
+    outer = fs.mkdtempSync(path.join(os.tmpdir(), 'ghostwriter-boundary-'));
+    fs.writeFileSync(path.join(outer, '.ghostwriterignore'), '**\n');
+    fs.mkdirSync(path.join(outer, 'repo', '.git'), { recursive: true });
+  });
+
+  after(() => {
+    if (outer) fs.rmSync(outer, { recursive: true, force: true });
+  });
+
+  beforeEach(() => resetIgnoreCache());
+
+  it('does not adopt an ignore file from outside the repository', () => {
+    assert.equal(isIgnored('src/a.js', path.join(outer, 'repo')), false);
+  });
+
+  it('still honours one at the repository root', () => {
+    const root = path.join(outer, 'repo');
+    fs.writeFileSync(path.join(root, '.ghostwriterignore'), 'src/a.js\n');
+    resetIgnoreCache();
+    assert.equal(isIgnored('src/a.js', root), true);
+    fs.rmSync(path.join(root, '.ghostwriterignore'));
+  });
+
+  it('applies normally where there is no repository at all', () => {
+    resetIgnoreCache();
+    assert.equal(isIgnored('anything.js', outer), true);
   });
 });

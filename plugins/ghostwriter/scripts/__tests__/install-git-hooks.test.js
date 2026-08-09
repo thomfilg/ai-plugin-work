@@ -118,6 +118,19 @@ describe('install-git-hooks — other people’s hooks', () => {
     assert.match(install('--status').stdout, /is ours/);
   });
 
+  // "Install both hooks" is one operation with one outcome. Installing the
+  // first and then refusing the second reports failure while leaving a new
+  // hook running, which is a state nobody chose.
+  it('installs neither when one destination is somebody else’s', () => {
+    fs.mkdirSync(path.dirname(hookPath()), { recursive: true });
+    fs.writeFileSync(hookPath('pre-commit'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const result = install();
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /nothing was installed/);
+    assert.equal(fs.existsSync(hookPath('commit-msg')), false, 'the other hook must not land');
+    assert.match(fs.readFileSync(hookPath('pre-commit'), 'utf8'), /exit 0/);
+  });
+
   it('never deletes a foreign hook', () => {
     fs.mkdirSync(path.dirname(hookPath()), { recursive: true });
     fs.writeFileSync(hookPath(), '#!/bin/sh\nexit 0\n', { mode: 0o755 });

@@ -94,6 +94,8 @@ const PATCH_HEADER_RE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/;
 const PATCH_MOVE_RE = /^\*\*\* Move to: (.+)$/;
 /** `+++ b/path` — git's own name for the file a hunk lands in. */
 const DIFF_HEADER_RE = /^\+\+\+ (?:b\/)?(.+)$/;
+/** The line that always precedes it. A `+++` anywhere else is content. */
+const DIFF_OLD_FILE_RE = /^--- /;
 
 /**
  * The lines each file GAINS, in either patch dialect.
@@ -109,28 +111,36 @@ const DIFF_HEADER_RE = /^\+\+\+ (?:b\/)?(.+)$/;
  * markdown paragraph read strictly and a source comment read as prose are both
  * wrong answers, arrived at by discarding what the patch already says.
  *
+ * EVERY added line counts, including one that begins with `+`. A source line
+ * of `++i;` arrives in the diff as `+++i;`, and a reader that skips anything
+ * starting with `+++` drops it — which is a way to write an attribution the
+ * scanner never sees. Headers are told apart by POSITION rather than by shape:
+ * `+++ b/path` is a header only directly after the `--- a/path` that always
+ * precedes it, which is how git's own format defines it. Anywhere else those
+ * characters are content, and are read as such.
+ *
  * @param {string} text
- * @param {(line: string) => {path: string|null}|null} readHeader - the path a
- *   following block lands in; `null` when the line is not a header, and a null
- *   `path` for a header that names no destination (a deletion).
+ * @param {(line: string, prev: string) => {path: string|null}|null} readHeader -
+ *   the path a following block lands in; `null` when the line is not a header,
+ *   and a null `path` for a header that names no destination (a deletion).
  * @returns {Array<{path: string, text: string}>}
  */
 function additions(text, readHeader) {
   if (typeof text !== 'string') return [];
   const files = [];
   let current = null;
+  let prev = '';
   for (const line of text.split('\n')) {
-    const header = readHeader(line);
+    const header = readHeader(line, prev);
+    prev = line;
     if (header) {
       current = header.path ? { path: header.path, lines: [] } : null;
       if (current) files.push(current);
       continue;
     }
-    // `+++`/`---` are diff furniture, not content. A real added line that
-    // begins with `+` keeps it: `++i;` arrives as `+++i;` and slicing one
-    // character leaves it intact.
-    if (current && line.startsWith('+') && !line.startsWith('+++'))
-      current.lines.push(line.slice(1));
+    // The leading `+` is the diff's, and only the first one: `+++i;` is the
+    // line `++i;`, not furniture.
+    if (current && line.startsWith('+')) current.lines.push(line.slice(1));
   }
   return files.map((file) => ({ path: file.path, text: file.lines.join('\n') }));
 }
@@ -145,7 +155,8 @@ function patchAdditions(patchText) {
 
 /** Unified diffs — `git diff`, `git diff --cached`, a mailed patch. */
 function unifiedAdditions(diffText) {
-  return additions(diffText, (line) => {
+  return additions(diffText, (line, prev) => {
+    if (!DIFF_OLD_FILE_RE.test(prev)) return null;
     const header = DIFF_HEADER_RE.exec(line);
     if (!header) return null;
     const name = header[1].trim();

@@ -118,16 +118,33 @@ function statusOf(hookPath, name) {
  * replacing it is how a guard earns its reputation. The message says how to
  * chain ours from theirs, which keeps both.
  */
+function refuseForeign(hookPath, name) {
+  process.stderr.write(
+    `ghostwriter: ${hookPath} already exists and was not written by ghostwriter.\n` +
+      'Re-run with --force to replace it, or chain the check from your own hook:\n' +
+      `  ${HOOKS[name].run.replace('exec ', '')} || exit 1\n`
+  );
+  return EXIT_REFUSED;
+}
+
+/**
+ * Every destination that would be refused, checked BEFORE anything is written.
+ *
+ * "Install both hooks" has to be one operation with one outcome. Installing
+ * the first and then refusing the second reports failure while leaving a new
+ * hook running — an operator who reads the exit code and tries something else
+ * is now in a state nobody chose. Refusing before the first write leaves the
+ * repository exactly as it was found.
+ */
+function refusals(hooksDir, force) {
+  if (force) return [];
+  return Object.keys(HOOKS).filter(
+    (name) => statusOf(path.join(hooksDir, name), name) === 'foreign'
+  );
+}
+
 function installOne(hookPath, name, force) {
-  const status = statusOf(hookPath, name);
-  if (status === 'foreign' && !force) {
-    process.stderr.write(
-      `ghostwriter: ${hookPath} already exists and was not written by ghostwriter.\n` +
-        'Re-run with --force to replace it, or chain the check from your own hook:\n' +
-        `  ${HOOKS[name].run.replace('exec ', '')} || exit 1\n`
-    );
-    return EXIT_REFUSED;
-  }
+  if (statusOf(hookPath, name) === 'foreign' && !force) return refuseForeign(hookPath, name);
   fs.mkdirSync(path.dirname(hookPath), { recursive: true });
   fs.writeFileSync(hookPath, hookBody(name), { mode: 0o755 });
   fs.chmodSync(hookPath, 0o755);
@@ -182,6 +199,12 @@ function main(argv) {
     });
   }
   if (args.mode === 'uninstall') return forEachHook(hooksDir, uninstallOne);
+  const blocked = refusals(hooksDir, args.force);
+  if (blocked.length) {
+    for (const name of blocked) refuseForeign(path.join(hooksDir, name), name);
+    process.stderr.write('ghostwriter: nothing was installed — both hooks go in together.\n');
+    return EXIT_REFUSED;
+  }
   return forEachHook(hooksDir, (hookPath, name) => installOne(hookPath, name, args.force));
 }
 

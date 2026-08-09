@@ -62,12 +62,23 @@ function parse(text) {
     }));
 }
 
-/** The nearest directory at or above `from` holding a `.ghostwriterignore`. */
+/**
+ * The nearest directory at or above `from` holding a `.ghostwriterignore`,
+ * stopping at the repository root.
+ *
+ * The boundary matters: a repository checked out below a directory that
+ * happens to hold an ignore file would otherwise adopt rules written for
+ * something else entirely, and exempt files nobody meant to exempt. An
+ * exemption is only an exemption where it was reviewed, which is inside the
+ * repository it ships with.
+ */
 function findIgnoreFile(from) {
   let dir = path.resolve(from || process.cwd());
   for (let depth = 0; depth < MAX_WALK_UP; depth++) {
     const candidate = path.join(dir, IGNORE_FILE);
     if (fs.existsSync(candidate)) return { root: dir, file: candidate };
+    // Checked AFTER the candidate, so a list at the repository root counts.
+    if (fs.existsSync(path.join(dir, '.git'))) return null;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
