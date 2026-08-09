@@ -72,9 +72,28 @@ const MCP_TEXT_FIELDS = new Set([
 
 /** Tokens that name an account explicitly rather than using the logged-in one. */
 const ACCOUNT_ENV_RE = /^(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN)$/;
+/** The flag that does the same thing in the open, by naming the account. */
+const ACCOUNT_OPTION = '--account';
 
 function newPost(kind) {
-  return { kind, texts: [], textFiles: [], tokenOverride: null };
+  return { kind, texts: [], textFiles: [], tokenOverride: null, account: null };
+}
+
+/**
+ * The account this command SELECTS, if it names one.
+ *
+ * Skipping the flag's value was only half the job: it stopped the value being
+ * mistaken for the command group, and left the guard checking the login `gh`
+ * would use by DEFAULT — a human, quite possibly — while the post went out as
+ * whoever the flag named. A command that says which account to publish as has
+ * answered the question the resolver was about to go and ask.
+ */
+function readSelectedAccount(argv, start) {
+  for (let i = start; i < argv.length; i++) {
+    const value = longFlagValue(argv, i, ACCOUNT_OPTION);
+    if (value !== null) return value;
+  }
+  return null;
 }
 
 /** Literal text at `argv[i]`: `--body value`, `--body=value`, or `-b value`. */
@@ -196,6 +215,7 @@ function classifyGhSegment(tokens) {
   else readPostArgs(argv, found.index + 1, found.kind, surface);
   const token = env.find((entry) => ACCOUNT_ENV_RE.test(entry.name));
   if (token) surface.tokenOverride = token.name;
+  surface.account = readSelectedAccount(argv, 1);
   return surface;
 }
 

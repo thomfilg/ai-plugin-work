@@ -729,6 +729,37 @@ describe('guard — the posting account', () => {
     });
   });
 
+  it('checks the account the command NAMES, not the default login', () => {
+    // Skipping the flag's value stopped it being read as the command group and
+    // left the guard checking the login gh would use by DEFAULT — a human,
+    // quite possibly — while the post went out as whoever the flag named.
+    for (const command of [
+      'gh --account release-bot pr comment 1 --body ok',
+      'gh --account=some-app[bot] pr comment 1 --body ok',
+    ]) {
+      const verdict = inspect(command, { resolveAccount: () => 'ada' });
+      assert.equal(verdict.blocked, true, command);
+      assert.equal(verdict.rule, 'botIdentity', command);
+      assert.match(verdict.where, /--account/, command);
+    }
+  });
+
+  it('allows a named account that is a person', () => {
+    assert.deepEqual(
+      inspect('gh --account ada pr comment 1 --body ok', { resolveAccount: () => 'someone-else' }),
+      { blocked: false }
+    );
+  });
+
+  it('holds a named account to the pinned human too', () => {
+    const verdict = inspect('gh --account someone-else pr comment 1 --body ok', {
+      resolveAccount: () => 'ada',
+      expected: { emails: [], logins: ['ada'], configured: true },
+    });
+    assert.equal(verdict.blocked, true);
+    assert.equal(verdict.rule, 'unexpectedIdentity');
+  });
+
   it('blocks a token override, which replaces the account the guard can read', () => {
     const verdict = inspect('GH_TOKEN=xyz gh pr comment 1 --body ok');
     assert.equal(verdict.blocked, true);

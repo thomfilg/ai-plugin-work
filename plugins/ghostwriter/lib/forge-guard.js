@@ -93,6 +93,13 @@ function checkPostAccount(posts, io) {
       `gh ${override.kind}`
     );
   }
+  // An account the command NAMES is the account it posts as, and it is a
+  // better answer than the resolver's: the resolver reports the default login,
+  // which is the one this command has just declined to use.
+  const selected = posts.find((post) => post.account);
+  if (selected)
+    return checkAccountIdentity(selected.account, `gh --account ${selected.account}`, io);
+
   const login = io.resolveAccount(io.cwd);
   // Two ways to name nobody, and neither is a post going out unchecked. null
   // is "there is no `gh` here"; '' is a `gh` that will not name an account,
@@ -112,11 +119,16 @@ function checkPostAccount(posts, io) {
       `gh ${posts[0].kind}`
     );
   }
+  return checkAccountIdentity(login, `the account gh would post as (${login})`, io);
+}
+
+/** Is this login a person, and the right one? Shared by both ways of naming it. */
+function checkAccountIdentity(login, where, io) {
   const identity = { name: login, email: '' };
   const result = checkIdentity(identity);
-  if (!result.ok) return finding(result, `the account gh would post as (${login})`);
+  if (!result.ok) return finding(result, where);
   const expected = checkExpectedIdentity(identity, io.expected);
-  return expected.ok ? null : finding(expected, `the account gh would post as (${login})`);
+  return expected.ok ? null : finding(expected, where);
 }
 
 module.exports = { checkPostText, checkRawPost, checkPostAccount, unverifiableAccount };
