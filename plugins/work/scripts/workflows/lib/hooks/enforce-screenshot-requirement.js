@@ -36,16 +36,31 @@ function getRepoRoot() {
   return _cachedRepoRoot;
 }
 
+/**
+ * Resolve the screenshots dir, or null when nothing configured a tasks root.
+ *
+ * The configured location comes first. The repo-anchored `<repo-parent>/tasks`
+ * fallback stays: it is the legacy layout, and it only fires when neither
+ * TASKS_BASE nor WORKTREES_BASE is set. (From a ticket worktree it still
+ * resolves to `<worktrees>/tasks` — the split check-setup.js just stopped
+ * producing — but it is at least anchored to a real repo.)
+ *
+ * The old last resort, `process.cwd()/../tasks/<id>/screenshots`, is gone. A
+ * hook's cwd is wherever the agent happened to be, so it invented a
+ * plausible-looking path with no relationship to the repo — and because the
+ * caller read "directory does not exist" as "no screenshots", the guess made
+ * the hook BLOCK rather than fail open. Unresolvable now returns null and the
+ * callers decline to enforce.
+ */
 function getScreenshotDir(ticketId) {
   const config = require('../config');
   const tasksDir = config.tasksDir(ticketId);
   if (tasksDir) return path.join(tasksDir, 'screenshots');
-  // Fallback: use repo root or cwd parent
   const repoRoot = getRepoRoot();
   if (repoRoot) {
     return path.join(path.dirname(repoRoot), 'tasks', ticketId, 'screenshots');
   }
-  return path.join(process.cwd(), '..', 'tasks', ticketId, 'screenshots');
+  return null;
 }
 
 function getTicketId() {
@@ -145,6 +160,10 @@ function hasTsxChanges() {
  */
 function hasScreenshots(ticketId) {
   const root = getScreenshotDir(ticketId);
+  // Unresolvable tasks root: there is no directory to judge against, so report
+  // "satisfied" and let the run continue. Hooks fail open — blocking against a
+  // path we could not resolve is the failure mode this replaces.
+  if (!root) return true;
   try {
     if (!fs.existsSync(root)) return false;
     const stack = [root];
@@ -276,6 +295,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-});
+// Same entrypoint shape as check/hooks/check-setup.js: run as a hook, import
+// the resolvers under test. Without this the module read stdin on require, so
+// getScreenshotDir could only ever be exercised through a spawned process.
+if (require.main === module) {
+  main().catch((err) => {
+    logHookError(__filename, err);
+  });
+} else {
+  module.exports = { getScreenshotDir, hasScreenshots };
+}

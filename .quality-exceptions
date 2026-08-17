@@ -54,7 +54,6 @@ plugins/work/scripts/workflows/lib/workflow-monitor.js
 plugins/work/scripts/workflows/lib/preflight.js
 plugins/work/scripts/workflows/check/hooks/qa-progress.js
 plugins/work/scripts/workflows/work/lib/work-claims.js
-plugins/work/scripts/workflows/check/hooks/check-setup.js
 plugins/work/scripts/workflows/check/check.workflow.js
 plugins/work/scripts/workflows/check/hooks/check-start-env.js
 plugins/work/scripts/workflows/work/engine/transition-step.js
