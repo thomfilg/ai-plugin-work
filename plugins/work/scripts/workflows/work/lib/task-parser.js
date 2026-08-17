@@ -288,12 +288,4 @@ function buildTaskPrompt(task, tasksDir, allTasks, taskState) {
   return lines.join('\n');
 }
 
-module.exports = {
-  parseTasks,
-  buildTaskPrompt,
-  extractTestStrategy,
-  // Exported for the work-tasks gates (kind_assign, scope_exists), which parse
-  // the same `### Files in scope` sections and need the same start-of-line
-  // anchoring — a backticked mention of the heading in prose must not match.
-  extractSectionByHeading,
-};
+module.exports = { parseTasks, buildTaskPrompt, extractTestStrategy };

@@ -69,7 +69,7 @@ function parseTaskBlocks(text) {
     const body = (parts[i + 1] || '').replace(/\n## (?!Task\s)\S[\s\S]*$/, '');
     // Anchored at start-of-line — a backticked `### Files in scope` inside an
     // AC bullet must not match as the heading and swallow the real list.
-    const scopeMatch = matchScopeSection(body, '### Files in scope');
+    const scopeMatch = matchScopeSection(body, 'Files in scope');
     const typeMatch = body.match(/###\s+Type\s*\n([^\n#]+)/);
     const type = typeMatch ? typeMatch[1].trim().toLowerCase() : null;
     const entries = parseScopeEntries(scopeMatch ? scopeMatch[1] : '');

@@ -63,9 +63,9 @@ function parseBlocks(text) {
     // Anchored at start-of-line via _scope-section, so a backticked
     // `### Files in scope` in an AC bullet does not match as the heading and
     // truncate the list to nothing.
-    const filesInScope = extractScopeList(matchScopeSection(body, '### Files in scope'));
+    const filesInScope = extractScopeList(matchScopeSection(body, 'Files in scope'));
     const filesOutOfScope = extractScopeList(
-      matchScopeSection(body, '### Files explicitly out of scope')
+      matchScopeSection(body, 'Files explicitly out of scope')
     );
     out.push({ num: Number(num), type, filesInScope, filesOutOfScope });
   }

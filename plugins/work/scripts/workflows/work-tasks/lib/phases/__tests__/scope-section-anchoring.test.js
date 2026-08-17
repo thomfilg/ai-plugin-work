@@ -44,7 +44,7 @@ const INLINE_MENTION = [
 
 describe('matchScopeSection', () => {
   it('skips a backticked heading mentioned mid-line', () => {
-    const m = matchScopeSection(INLINE_MENTION, '### Files in scope');
+    const m = matchScopeSection(INLINE_MENTION, 'Files in scope');
     assert.ok(m, 'expected the real section to match');
     assert.match(m[1], /lib\/x\/writer\.ts/);
     assert.match(m[1], /lib\/x\/writer\.test\.ts/);
@@ -52,17 +52,57 @@ describe('matchScopeSection', () => {
   });
 
   it('returns null for an absent heading, and for non-string input', () => {
-    assert.equal(
-      matchScopeSection('## Task 1\n\n### Type\ntdd-code\n', '### Files in scope'),
-      null
-    );
-    assert.equal(matchScopeSection(null, '### Files in scope'), null);
-    assert.equal(matchScopeSection('', '### Files in scope'), null);
+    assert.equal(matchScopeSection('## Task 1\n\n### Type\ntdd-code\n', 'Files in scope'), null);
+    assert.equal(matchScopeSection(null, 'Files in scope'), null);
+    assert.equal(matchScopeSection('', 'Files in scope'), null);
   });
 
   it('keeps the last line of a section that has no trailing newline', () => {
-    const m = matchScopeSection('### Files in scope\n- `a.ts`\n- `b.ts`', '### Files in scope');
+    const m = matchScopeSection('### Files in scope\n- `a.ts`\n- `b.ts`', 'Files in scope');
     assert.match(m[1], /b\.ts/);
+  });
+});
+
+// Adding the start-of-line anchor must not narrow anything else. Borrowing
+// `work/lib/task-parser.js`'s helper wholesale did exactly that: it interpolates
+// a literal heading line, so `###  Files in scope` (two spaces) and a tab both
+// stopped matching — producing the very "lists no `*.test.*` file" false
+// rejection this module exists to prevent — and its `\n###` terminator began
+// truncating a section at a `#### Sub-heading`.
+describe('matchScopeSection tolerates the same heading shapes as before', () => {
+  const scope = ['- `lib/x/writer.ts`', '- `lib/x/writer.test.ts`'];
+  const build = (heading, extra = []) =>
+    ['## Task 1', '', '### Type', 'tdd-code', '', heading, ...scope, ...extra, ''].join('\n');
+
+  for (const [label, heading] of [
+    ['one space', '### Files in scope'],
+    ['two spaces', '###  Files in scope'],
+    ['a tab', '###\tFiles in scope'],
+    ['trailing text', '### Files in scope (globs)'],
+  ]) {
+    it(`matches a heading separated by ${label}`, () => {
+      assert.deepEqual(kindAssign.parseBlocks(build(heading))[0].filesInScope, [
+        'lib/x/writer.ts',
+        'lib/x/writer.test.ts',
+      ]);
+    });
+  }
+
+  it('does not truncate the section at a #### sub-heading', () => {
+    const body = build('### Files in scope', ['', '#### Notes', '- `lib/x/extra.ts`']);
+    assert.deepEqual(kindAssign.parseBlocks(body)[0].filesInScope, [
+      'lib/x/writer.ts',
+      'lib/x/writer.test.ts',
+      'lib/x/extra.ts',
+    ]);
+  });
+
+  it('still terminates at the next ### section', () => {
+    const body = build('### Files in scope', ['', '### Acceptance Criteria', '- does the thing']);
+    assert.deepEqual(kindAssign.parseBlocks(body)[0].filesInScope, [
+      'lib/x/writer.ts',
+      'lib/x/writer.test.ts',
+    ]);
   });
 });
 

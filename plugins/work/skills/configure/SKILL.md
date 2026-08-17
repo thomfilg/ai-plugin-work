@@ -67,8 +67,13 @@ at direnv time via `gh auth token`.
 
 3. **Collect values for missing vars.** For every `vars[]` entry with
    `advanced: false` and `current: null`, ask in batches of ≤4, grouped by
-   `section`. Required vars (`REPO_NAME`, `WORKTREES_BASE`, `TICKET_PROVIDER`)
-   come first. Per var offer: the schema `default`/`example` (Recommended when
+   `section`. Required vars (`REPO_NAME`, `WORKTREES_BASE`, `TASKS_BASE`,
+   `TICKET_PROVIDER`) come first. `TASKS_BASE` is required, not optional:
+   the runtime refuses to derive it from `WORKTREES_BASE`, because a guessed
+   tasks dir looks valid while splitting report writers from report readers
+   (see `scripts/workflows/lib/resolve-base-dirs.js`). Offer
+   `<WORKTREES_BASE>/tasks` as the Recommended value — that is the
+   conventional layout — but write it out explicitly. Per var offer: the schema `default`/`example` (Recommended when
    sensible), "Keep unset", and let "Other" capture a custom value. Never
    prompt for `advanced` vars — they render as commented defaults.
 
