@@ -24,9 +24,14 @@ function mk(files) {
   return { root, tasksDir };
 }
 
+// `worktreeRoot` points at the sandbox — outside any git repo — for the phases
+// that fall back to `gh pr view`. Without it they would inherit the process cwd
+// and could pick up THIS repo's real PR, making the assertion depend on whether
+// `gh` happens to be installed and authenticated. See runner-owns-writes.test.js
+// for the stubbed-`gh` coverage of those fallbacks.
 test('description_draft blocks when pr-body.md is missing', () => {
   const { root, tasksDir } = mk({});
-  const r = descDraft.validate({ tasksDir });
+  const r = descDraft.validate({ tasksDir, worktreeRoot: root });
   assert.equal(r.ok, false);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -141,7 +146,7 @@ test('create_or_update blocks when prNumber missing from context', () => {
   const { root, tasksDir } = mk({
     'pr-context.json': JSON.stringify({ files: ['a.ts'] }),
   });
-  const r = createOrUpdate.validate({ tasksDir });
+  const r = createOrUpdate.validate({ tasksDir, worktreeRoot: root });
   assert.equal(r.ok, false);
   fs.rmSync(root, { recursive: true, force: true });
 });
