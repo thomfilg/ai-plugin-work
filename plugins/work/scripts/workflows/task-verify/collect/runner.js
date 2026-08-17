@@ -161,8 +161,17 @@ function configuredCommand(files, runner, cwd) {
   if (!repoCanRunTemplate(cwd, template)) return null;
   const flag = REPORTER_FLAG[runner];
   return {
-    cmd: 'sh',
-    args: ['-c', flag ? `${template} ${flag}` : template],
+    // `bash -lc`, NOT `sh -c` — the same invocation tdd-phase-state/io.js and
+    // task-next.js runTest() use, for the reason spelled out there: /bin/sh is
+    // dash on Debian/Ubuntu, and the strict-mode wrappers these templates carry
+    // (`set -euo pipefail; …`, GH-392 §P0#3) die on dash with "set: Illegal
+    // option -o pipefail". Running the repo's own command under a shell that
+    // cannot execute it would manufacture the exact false "tests do not pass on
+    // head" this function exists to remove. `bash` stays PATH-resolved rather
+    // than pinned to /bin/bash so hosts that keep it elsewhere (NixOS, macOS
+    // homebrew) resolve the same binary as the rest of the pipeline.
+    cmd: 'bash',
+    args: ['-lc', flag ? `${template} ${flag}` : template],
     // `$CHANGED_FILES` in the template expands from env (set by the caller).
     parse: runner === 'node-test' ? parseNodeTestSummary : parseJsonReporter,
     changedFiles: files.join(' '),
@@ -220,6 +229,28 @@ function scrubTestFlags(nodeOptions) {
 }
 
 /**
+ * Child environment for a derived test run.
+ *
+ * Scrub test-runner context vars: when the verifier itself runs under
+ * `node --test`, an inherited NODE_TEST_CONTEXT flips the child into the
+ * parent's reporter protocol and the TAP summary disappears. NODE_OPTIONS
+ * keeps its non-test flags (heap size, --require/--import preloads the suite
+ * may depend on) — only the --test* family hijacks the reporter.
+ *
+ * @param {string|undefined} changedFiles - repo-configured templates address
+ *   the derived files as `$CHANGED_FILES`; omitted for the built-in table.
+ */
+function childEnv(changedFiles) {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const scrubbed = scrubTestFlags(env.NODE_OPTIONS);
+  if (scrubbed) env.NODE_OPTIONS = scrubbed;
+  else delete env.NODE_OPTIONS;
+  if (changedFiles !== undefined) env.CHANGED_FILES = changedFiles;
+  return env;
+}
+
+/**
  * Run the derived test files with the detected runner.
  * @returns the run-observation shape (see module docblock).
  */
@@ -238,18 +269,7 @@ function runDerivedTests({ cwd, files, runner, timeoutMs = DEFAULT_TIMEOUT_MS })
     };
   }
   const { cmd, args, parse, changedFiles } = configured || make(files);
-  // Scrub test-runner context vars: when the verifier itself runs under
-  // `node --test`, an inherited NODE_TEST_CONTEXT flips the child into the
-  // parent's reporter protocol and the TAP summary disappears. NODE_OPTIONS
-  // keeps its non-test flags (heap size, --require/--import preloads the
-  // suite may depend on) — only the --test* family hijacks the reporter.
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  const scrubbed = scrubTestFlags(env.NODE_OPTIONS);
-  if (scrubbed) env.NODE_OPTIONS = scrubbed;
-  else delete env.NODE_OPTIONS;
-  // Repo-configured templates address the derived files as `$CHANGED_FILES`.
-  if (changedFiles !== undefined) env.CHANGED_FILES = changedFiles;
+  const env = childEnv(changedFiles);
   const spawned = spawnSync(cmd, args, {
     cwd,
     env,
