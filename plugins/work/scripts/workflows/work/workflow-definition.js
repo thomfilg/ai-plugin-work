@@ -22,15 +22,6 @@ const { buildAgentGatedScripts } = require(
 const { buildArtifactRules } = require(path.join(__dirname, 'workflow-def', 'artifact-rules'));
 
 // ─── Declarative policy config (GH-206 Task 12) ─────────────────────────────
-//
-// Artifact patterns per step — consumed by artifact-archival.js on backward
-// transitions. `complete` has no entry because complete->complete is a
-// self-transition (same index) which does not trigger archival; recovery
-// archival for `complete` is handled by unstick-complete.js directly.
-const archivalPatterns = {
-  [STEPS.check]: [/^.*\.check\.md$/],
-  [STEPS.pr]: [/^\.pr-update-sha$/, /^\.post-pr-update-sha$/],
-};
 
 // Evidence requirements per step — consumed by step verify functions and
 // reporters. requiredFiles are plain basenames that must exist; qaReportPattern
@@ -40,6 +31,11 @@ const evidenceRequirements = {
   [STEPS.check]: {
     requiredFiles: ['code-review.check.md', 'tests.check.md', 'completion.check.md', 'README.md'],
     qaReportPattern: /^qa-.*\.check\.md$/,
+    // The requiredFiles the check step itself (re)writes — the subset whose
+    // freshness a loop-back has to invalidate. README.md is deliberately NOT
+    // here: it is a bootstrap artifact `/check` never rewrites, so demanding
+    // a fresh README.md would make the check gate permanently unsatisfiable.
+    refreshedFiles: ['code-review.check.md', 'tests.check.md', 'completion.check.md'],
   },
   [STEPS.reports]: {
     // \*{0,2} around the label: the canonical machine-readable status line
@@ -54,6 +50,83 @@ const evidenceRequirements = {
     qaApprovalPattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i,
   },
 };
+
+// Artifact patterns per step — consumed by artifact-archival.js on backward
+// transitions. `complete` has no entry because complete->complete is a
+// self-transition (same index) which does not trigger archival; recovery
+// archival for `complete` is handled by unstick-complete.js directly.
+//
+// Written as unanchored bodies so `archivalPattern` can bolt on the evidence
+// guard below. Archival at the ticket root uses the guarded patterns; the
+// taskN/ sweep (GH-259) uses the raw bodies — no gate reads taskN/*.check.md,
+// only taskN/tdd-phase.json, so nothing there is gate evidence.
+const ARCHIVAL_PATTERN_BODIES = {
+  [STEPS.check]: ['.*\\.check\\.md'],
+  [STEPS.pr]: ['\\.pr-update-sha', '\\.post-pr-update-sha'],
+};
+
+function escapeRegExp(literal) {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function unanchor(pattern) {
+  return pattern.source.replace(/^\^/, '').replace(/\$$/, '');
+}
+
+/**
+ * echo-6842: archival must never target a file the SAME step's evidence
+ * contract requires. `check` used to archive `/^.*\.check\.md$/`, which
+ * covered three of its own four requiredFiles plus every qa-*.check.md — so
+ * archiving the step moved the evidence verifyCheck and validateCheckGate
+ * read, and the gate reported "Missing report: tests.check.md" for files
+ * sitting in runs/runN/. The guard is derived rather than hand-written so a
+ * new requiredFile is excluded automatically instead of re-opening the trap.
+ *
+ * Freshness after a loop-back is not lost — it moved to lib/evidence-staleness.js,
+ * which invalidates the reports in place instead of moving them.
+ */
+function archivalPattern(step, body) {
+  const reqs = evidenceRequirements[step] || {};
+  const evidence = (reqs.requiredFiles || []).map(escapeRegExp);
+  if (reqs.qaReportPattern) evidence.push(unanchor(reqs.qaReportPattern));
+  const guard = evidence.length ? `(?!(?:${evidence.join('|')})$)` : '';
+  return new RegExp(`^${guard}(?:${body})$`);
+}
+
+const archivalPatterns = Object.fromEntries(
+  Object.entries(ARCHIVAL_PATTERN_BODIES).map(([step, bodies]) => [
+    step,
+    bodies.map((body) => archivalPattern(step, body)),
+  ])
+);
+
+const perTaskArchivalPatterns = Object.fromEntries(
+  Object.entries(ARCHIVAL_PATTERN_BODIES).map(([step, bodies]) => [
+    step,
+    bodies.map((body) => new RegExp(`^(?:${body})$`)),
+  ])
+);
+
+/**
+ * What `archivalPatterns` just excluded, archival COPIES into runs/runN/
+ * instead of moving. GH-130 wanted each loop-back's reports preserved under
+ * their run number, and that is still worth having — it was only the moving
+ * that broke the gate. Copying keeps the per-run history and leaves the
+ * evidence where verifyCheck and validateCheckGate read it.
+ */
+function preservedPattern(step) {
+  const reqs = evidenceRequirements[step] || {};
+  const evidence = (reqs.refreshedFiles || []).map(escapeRegExp);
+  const patterns = evidence.length ? [new RegExp(`^(?:${evidence.join('|')})$`)] : [];
+  if (reqs.qaReportPattern) patterns.push(reqs.qaReportPattern);
+  return patterns;
+}
+
+const preservedArchivalPatterns = Object.fromEntries(
+  Object.keys(ARCHIVAL_PATTERN_BODIES)
+    .map((step) => [step, preservedPattern(step)])
+    .filter(([, patterns]) => patterns.length > 0)
+);
 
 // Tool can be a string or array -- some runtimes emit Agent instead of Task.
 function buildCommandMap(v) {
@@ -163,6 +236,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     isActive: (state) => state?.status === 'in_progress',
     steps: WORK_STEPS,
     archivalPatterns,
+    perTaskArchivalPatterns,
+    preservedArchivalPatterns,
     evidenceRequirements,
     agentGatedScripts: buildAgentGatedScripts(STEPS),
     // Soft steps allow transition without evidence -- these are optional or metadata-only steps.

@@ -1247,10 +1247,12 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.success, true);
         assert.equal(result.direction, 'backward');
 
-        // Reports should be moved to runs/run1/
+        // Reports should be preserved under runs/run1/ — echo-6842: copied,
+        // not moved. They are the check gate's own evidence, and archiving
+        // them out from under it is what stranded ECHO-6842 mid-workflow.
         assert.ok(
-          !fs.existsSync(path.join(ticketDir, 'tests.check.md')),
-          'reports should be archived'
+          fs.existsSync(path.join(ticketDir, 'tests.check.md')),
+          'gate evidence must stay where verifyCheck reads it'
         );
         assert.ok(
           fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'tests.check.md')),

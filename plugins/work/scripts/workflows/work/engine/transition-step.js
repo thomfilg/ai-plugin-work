@@ -17,6 +17,7 @@ const { computeTaskNum, runTransitionGates, cleanStaleTddEvidence } = require(
   path.join(__dirname, 'transition-gates')
 );
 const { computeGateInputHashes } = require(path.join(__dirname, '..', 'lib', 'gate-input-hashes'));
+const { markEvidenceStale } = require(path.join(__dirname, '..', 'lib', 'evidence-staleness'));
 const { stampVersionAnchor } = require(path.join(__dirname, '..', 'lib', 'version-skew'));
 
 /** Fresh work state for a first-ever transition. */
@@ -40,6 +41,21 @@ function initialTransitionState(deps, safeTicket) {
   return ws;
 }
 
+/**
+ * Invalidate the evidence of every reset step that declares files it rewrites
+ * when it runs again (`evidenceRequirements[step].refreshedFiles`). Steps
+ * without that declaration — everything but `check` today — are untouched.
+ */
+function markResetEvidenceStale(ctx, stepsToReset, tasksDir) {
+  const { ws, deps } = ctx;
+  for (const step of stepsToReset) {
+    const refreshed = deps.evidenceRequirements?.[step]?.refreshedFiles;
+    if (markEvidenceStale(ws, step, tasksDir, refreshed, 'step reset')) {
+      deps.appendAction(ctx.safeTicket, { step, what: 'evidence marked stale' });
+    }
+  }
+}
+
 /** Going backward (retry loop): reset intermediates + archive their artifacts. */
 function resetIntermediateSteps(ctx, currentIdx, targetIdx) {
   const { ws, currentStep, safeTicket, deps } = ctx;
@@ -57,6 +73,11 @@ function resetIntermediateSteps(ctx, currentIdx, targetIdx) {
       what: `artifacts archived to ${archivePath}`,
     });
   }
+  // echo-6842: archival no longer moves a step's own gate evidence, so the
+  // "reports must not survive a loop-back" half of its job is recorded here
+  // instead. The reports stay readable; the check gate refuses them until
+  // /check rewrites them.
+  markResetEvidenceStale(ctx, stepsToReset, tasksDir);
   ws.deferredSteps = [];
   ws.lastPlanTimestamp = null;
 }
