@@ -103,6 +103,72 @@ const RUNNER_COMMANDS = {
   }),
 };
 
+/**
+ * Structured-reporter flag appended to a repo-configured test command so the
+ * run still yields parseable counts rather than exit-code-only grade.
+ */
+const REPORTER_FLAG = {
+  vitest: '--reporter=json',
+  jest: '--json',
+  'node-test': '--test-reporter=tap',
+};
+
+/** Package-manager subcommands that are not script names. */
+const PM_SUBCOMMANDS = new Set(['exec', 'dlx', 'x', 'run-script']);
+
+/**
+ * Guard: a configured template is only usable in a repo that can actually run
+ * it. The variable is exported process-wide (direnv), so it is also inherited
+ * by runs against unrelated directories — notably this verifier's own temp
+ * fixture repos, which have no such script. Applying it blindly there turns a
+ * healthy fixture run into a spurious failure, so fall back to the built-in
+ * table whenever the target repo does not declare the referenced script.
+ *
+ * Non-script commands (`pnpm exec …`, `npx …`, a bare binary) are trusted
+ * as-is — there is nothing to look up.
+ */
+function repoCanRunTemplate(cwd, template) {
+  const match = template.trim().match(/^(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?([\w:.-]+)/);
+  if (!match || PM_SUBCOMMANDS.has(match[1])) return true;
+  if (!cwd) return false;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
+    return Boolean(pkg.scripts && pkg.scripts[match[1]]);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build the run from the repo-configured test command when one is exported
+ * (`.envrc`: TEST_UNIT_COMMAND, falling back to TEST_COMMAND).
+ *
+ * Phase-mode `task-next.js` already runs tests as
+ * `CHANGED_FILES="…" eval "$TEST_UNIT_COMMAND"`. The outcome verifier must use
+ * the SAME command, or it resolves a different runner config than the repo
+ * intends. Concrete failure this fixes: in a repo whose ROOT `vitest.config.ts`
+ * is the integration lane (`include: ['**\/*.integration.test.ts(x)']`) with
+ * unit tests in a separate `vitest.unit.config.ts`, the hardcoded
+ * `vitest run <unit-file>` collects 0 tests and exits non-zero, producing a
+ * false I4 "tests do not pass on head" contradiction against a green suite.
+ *
+ * Returns null when nothing is configured, so the caller falls back to the
+ * RUNNER_COMMANDS table (previous behavior, unchanged).
+ */
+function configuredCommand(files, runner, cwd) {
+  const template = process.env.TEST_UNIT_COMMAND || process.env.TEST_COMMAND;
+  if (!template || !template.trim()) return null;
+  if (!repoCanRunTemplate(cwd, template)) return null;
+  const flag = REPORTER_FLAG[runner];
+  return {
+    cmd: 'sh',
+    args: ['-c', flag ? `${template} ${flag}` : template],
+    // `$CHANGED_FILES` in the template expands from env (set by the caller).
+    parse: runner === 'node-test' ? parseNodeTestSummary : parseJsonReporter,
+    changedFiles: files.join(' '),
+  };
+}
+
 /** Map a finished (non-hang) spawn into the run-observation shape. */
 function interpretRun(spawned, parse) {
   const output = `${spawned.stdout || ''}\n${spawned.stderr || ''}`;
@@ -158,8 +224,11 @@ function scrubTestFlags(nodeOptions) {
  * @returns the run-observation shape (see module docblock).
  */
 function runDerivedTests({ cwd, files, runner, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  // The repo's own configured command wins over the built-in table: it is the
+  // only one guaranteed to resolve the config the repo actually uses.
+  const configured = configuredCommand(files, runner, cwd);
   const make = RUNNER_COMMANDS[runner];
-  if (!make) {
+  if (!configured && !make) {
     return {
       attempted: true,
       supported: false,
@@ -168,7 +237,7 @@ function runDerivedTests({ cwd, files, runner, timeoutMs = DEFAULT_TIMEOUT_MS })
       notes: `unknown runner: ${runner || 'none detected'}`,
     };
   }
-  const { cmd, args, parse } = make(files);
+  const { cmd, args, parse, changedFiles } = configured || make(files);
   // Scrub test-runner context vars: when the verifier itself runs under
   // `node --test`, an inherited NODE_TEST_CONTEXT flips the child into the
   // parent's reporter protocol and the TAP summary disappears. NODE_OPTIONS
@@ -179,6 +248,8 @@ function runDerivedTests({ cwd, files, runner, timeoutMs = DEFAULT_TIMEOUT_MS })
   const scrubbed = scrubTestFlags(env.NODE_OPTIONS);
   if (scrubbed) env.NODE_OPTIONS = scrubbed;
   else delete env.NODE_OPTIONS;
+  // Repo-configured templates address the derived files as `$CHANGED_FILES`.
+  if (changedFiles !== undefined) env.CHANGED_FILES = changedFiles;
   const spawned = spawnSync(cmd, args, {
     cwd,
     env,
@@ -215,6 +286,7 @@ module.exports = {
   scrubTestFlags,
   parseNodeTestSummary,
   parseJsonReporter,
+  configuredCommand,
   runDerivedTests,
   DEFAULT_TIMEOUT_MS,
 };
