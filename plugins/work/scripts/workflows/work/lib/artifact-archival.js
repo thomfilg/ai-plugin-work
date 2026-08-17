@@ -12,28 +12,8 @@ const fs = require('fs');
 const path = require('path');
 
 const createWorkflowDefinition = require(path.join(__dirname, '..', 'workflow-definition'));
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function fileExists(p) {
-  try {
-    return fs.existsSync(p);
-  } catch {
-    return false;
-  }
-}
-
-function listFiles(dir, pattern) {
-  if (!fileExists(dir)) return [];
-  try {
-    return fs
-      .readdirSync(dir)
-      .filter((f) => (pattern instanceof RegExp ? pattern.test(f) : f.includes(pattern)))
-      .map((f) => path.join(dir, f));
-  } catch {
-    return [];
-  }
-}
+// Verbatim copies of these two lived here; work-helpers is the shared home.
+const { fileExists, listFiles } = require(path.join(__dirname, 'work-helpers'));
 
 // ─── Artifact Patterns ──────────────────────────────────────────────────────
 
@@ -94,68 +74,69 @@ function stashFiles(state, runDir, files, place) {
   }
 }
 
+/** Highest existing runN + 1, or 1 when runs/ is absent or unreadable. */
+function nextRunNumber(runsDir) {
+  if (!fileExists(runsDir)) return 1;
+  try {
+    const existing = fs
+      .readdirSync(runsDir)
+      .filter((d) => /^run\d+$/.test(d))
+      .map((d) => parseInt(d.replace('run', ''), 10))
+      .filter((n) => !isNaN(n));
+    return existing.length > 0 ? Math.max(...existing) + 1 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/** Files a step's patterns match in `dir`, deduped across patterns. */
+function matching(patternsByStep, step, dir) {
+  // Dedupe paths across patterns — multiple regex/substring patterns can
+  // match the same file, which would otherwise cause fs.renameSync to fail
+  // on the second attempt (file already moved) and log a spurious warning.
+  return [...new Set((patternsByStep[step] || []).flatMap((p) => listFiles(dir, p)))];
+}
+
+/** taskN/ subdirectories of a multi-task ticket dir. */
+function taskSubdirs(tasksDir) {
+  if (!fileExists(path.join(tasksDir, 'tasks.md'))) return []; // GH-259: multi-task mode only
+  try {
+    return fs
+      .readdirSync(tasksDir)
+      .filter((d) => /^task\d+$/.test(d))
+      .filter((d) => {
+        try {
+          return fs.statSync(path.join(tasksDir, d)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+  } catch {
+    return []; // ignore readdir failures
+  }
+}
+
 function archiveStepArtifacts(tasksDir, stepsToArchive) {
   if (!fileExists(tasksDir)) return null;
 
-  // Determine next run number
   const runsDir = path.join(tasksDir, 'runs');
-  let runNum = 1;
-  if (fileExists(runsDir)) {
-    try {
-      const existing = fs
-        .readdirSync(runsDir)
-        .filter((d) => /^run\d+$/.test(d))
-        .map((d) => parseInt(d.replace('run', ''), 10))
-        .filter((n) => !isNaN(n));
-      if (existing.length > 0) runNum = Math.max(...existing) + 1;
-    } catch {
-      /* ignore */
-    }
-  }
-
+  const runNum = nextRunNumber(runsDir);
   const runDir = path.join(runsDir, `run${runNum}`);
   const state = { archived: false, runDir };
 
   for (const step of stepsToArchive) {
-    // Dedupe paths across patterns — multiple regex/substring patterns can
-    // match the same file, which would otherwise cause fs.renameSync to fail
-    // on the second attempt (file already moved) and log a spurious warning.
-    const moved = [...new Set((STEP_ARTIFACTS[step] || []).flatMap((p) => listFiles(tasksDir, p)))];
-    const copied = [
-      ...new Set((PRESERVED_STEP_ARTIFACTS[step] || []).flatMap((p) => listFiles(tasksDir, p))),
-    ];
-    stashFiles(state, runDir, moved, fs.renameSync);
-    stashFiles(state, runDir, copied, copyFile);
+    stashFiles(state, runDir, matching(STEP_ARTIFACTS, step, tasksDir), fs.renameSync);
+    stashFiles(state, runDir, matching(PRESERVED_STEP_ARTIFACTS, step, tasksDir), copyFile);
   }
 
   // Scan taskN/ subdirectories for matching artifacts (GH-259)
-  // Only recurse when tasks.md exists (multi-task mode)
-  if (fileExists(path.join(tasksDir, 'tasks.md')))
-    try {
-      const taskDirs = fs
-        .readdirSync(tasksDir)
-        .filter((d) => /^task\d+$/.test(d))
-        .filter((d) => {
-          try {
-            return fs.statSync(path.join(tasksDir, d)).isDirectory();
-          } catch {
-            return false;
-          }
-        });
-      // GH-259: only recurse when tasks.md exists (multi-task mode)
-      for (const taskDir of taskDirs) {
-        const taskPath = path.join(tasksDir, taskDir);
-        for (const step of stepsToArchive) {
-          const patterns = PER_TASK_STEP_ARTIFACTS[step];
-          if (!patterns) continue;
-
-          const files = [...new Set(patterns.flatMap((p) => listFiles(taskPath, p)))];
-          stashFiles(state, path.join(runDir, taskDir), files, fs.renameSync);
-        }
-      }
-    } catch {
-      /* ignore readdir failures */
+  for (const taskDir of taskSubdirs(tasksDir)) {
+    const taskPath = path.join(tasksDir, taskDir);
+    for (const step of stepsToArchive) {
+      const files = matching(PER_TASK_STEP_ARTIFACTS, step, taskPath);
+      stashFiles(state, path.join(runDir, taskDir), files, fs.renameSync);
     }
+  }
 
   return state.archived ? `runs/run${runNum}` : null;
 }

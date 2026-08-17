@@ -65,7 +65,6 @@ plugins/work/scripts/workflows/work/lib/task-parser.js
 plugins/work/scripts/workflows/lib/workflow-state.js
 plugins/work/scripts/workflows/work/hooks/work-require-implement.js
 plugins/work/scripts/workflows/work/work-state/parallel-workers.js
-plugins/work/scripts/workflows/work/gates/check-gate.js
 plugins/work/scripts/workflows/lib/config.js
 plugins/work/scripts/workflows/work/lib/parse-gherkin.js
 plugins/work/scripts/workflows/work-spec/lib/phases/reuse_audit.js
@@ -99,7 +98,6 @@ plugins/work/scripts/workflows/check/scripts/write-tests-report.js
 plugins/work/scripts/listen-all.js
 plugins/work/scripts/workflows/work/hooks/enforce-review-accountability.js
 plugins/work/scripts/communicate.js
-plugins/work/scripts/workflows/work/lib/artifact-archival.js
 plugins/work/scripts/workflows/work/lib/gherkin-coverage.js
 plugins/work/scripts/workflows/work/lib/tdd-enforcement.js
 plugins/work/scripts/workflows/work/hooks/protect-orchestrator-state.js
@@ -183,7 +181,6 @@ plugins/work/scripts/workflows/work/steps/pr.js
 plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/fullstack.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/inputs.js
 plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/fullstack.js
-plugins/work/scripts/workflows/work/steps/check.js
 plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/kind-registry.js
 plugins/work/scripts/workflows/work-spec/lib/kind-checks/kind-registry.js
 plugins/work/scripts/workflows/lib/pr-state.js
