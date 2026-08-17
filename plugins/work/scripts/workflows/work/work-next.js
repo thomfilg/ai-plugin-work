@@ -52,9 +52,10 @@ if (!tp) process.exit(0);
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 const getConfig = require(path.join(libDir, 'get-config'));
-const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
-const TASKS_BASE =
-  getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
+// Shared with lib/plugin-config.js — never guesses TASKS_BASE from
+// WORKTREES_BASE. See lib/resolve-base-dirs.js.
+const { resolveBaseDirs } = require(path.join(libDir, 'resolve-base-dirs'));
+const { WORKTREES_BASE, TASKS_BASE, error: baseDirsError } = resolveBaseDirs(getConfig);
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
 
 if (!WORKTREES_BASE || !TASKS_BASE) {
@@ -69,7 +70,7 @@ if (!WORKTREES_BASE || !TASKS_BASE) {
         completedSteps: [],
         remainingSteps: [],
       },
-      reason: 'WORKTREES_BASE or TASKS_BASE not configured',
+      reason: baseDirsError || 'WORKTREES_BASE or TASKS_BASE not configured',
       suggestion: 'Set WORKTREES_BASE and TASKS_BASE in your .envrc or environment',
     })
   );

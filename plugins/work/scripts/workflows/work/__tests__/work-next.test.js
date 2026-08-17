@@ -156,6 +156,12 @@ describe('work-next.js CLI', () => {
     const { execFileSync } = require('child_process');
     const env = { ...process.env };
     delete env.CLAUDE_PLUGIN_ROOT; // Use __dirname fallback for tests
+    // TASKS_BASE must be explicit: the orchestrator refuses to guess
+    // `<WORKTREES_BASE>/tasks` and blocks on the config before parsing argv,
+    // so without this the assertion below would see the config reason instead.
+    env.TASKS_BASE = require('fs').mkdtempSync(
+      require('path').join(require('os').tmpdir(), 'work-next-noticket-')
+    );
     const result = execFileSync(
       process.execPath,
       [require('path').join(__dirname, '..', 'work-next.js')],

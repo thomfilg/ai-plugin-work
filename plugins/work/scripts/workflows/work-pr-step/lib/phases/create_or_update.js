@@ -1,6 +1,13 @@
 /**
  * Phase: create_or_update — agent runs `gh pr create` or `gh pr edit` with
- * pr-body.md. Gate checks that `pr-context.json` records a `prNumber`.
+ * pr-body.md; this phase records the resulting PR into `pr-context.json`.
+ *
+ * The recording used to be the agent's job ("Patch pr-context.json with
+ * { prNumber, url }"), which the read-only `pr-generator` driving this runner
+ * cannot do — it has no Write tool and its guard blocks every shell redirect.
+ * The runner does it instead, reading the PR back with `gh pr view`, the same
+ * way `diff_audit` writes its own snapshot. `gh pr create` stays with the
+ * agent: the guard already allows `gh`.
  */
 
 'use strict';
@@ -9,23 +16,98 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { PR_PHASES } = require('../../pr-phase-registry');
+const { readCurrentPullRequest, readPullRequest, isCurrentPr } = require('../pr-github');
+
+const CTX_FILE = 'pr-context.json';
+
+function contextPath(tasksDir) {
+  return path.join(tasksDir, CTX_FILE);
+}
 
 function readContext(tasksDir) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(tasksDir, 'pr-context.json'), 'utf8'));
+    return JSON.parse(fs.readFileSync(contextPath(tasksDir), 'utf8'));
   } catch {
     return null;
   }
 }
 
+/**
+ * Merge `{prNumber, url}` into pr-context.json.
+ *
+ * @returns {boolean} true when the file now records them.
+ */
+function recordPr(tasksDir, pctx, pr) {
+  const merged = { ...pctx, prNumber: pr.number, url: pr.url || pctx.url || null };
+  try {
+    fs.writeFileSync(contextPath(tasksDir), JSON.stringify(merged, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fill in prNumber/url from the live PR when the context does not have them.
+ *
+ * Reads through `readCurrentPullRequest`, which rejects a CLOSED or MERGED PR
+ * left over from earlier work on a reused branch — recording one would advance
+ * this phase with no open PR for the change in hand.
+ *
+ * @returns {object|null} the context with the PR recorded, or null when there
+ *   is no PR to record (or it could not be written).
+ */
+function syncFromGitHub(ctx, pctx) {
+  const pr = readCurrentPullRequest(ctx.worktreeRoot, ['number', 'url']);
+  if (!pr || typeof pr.number !== 'number' || pr.number <= 0) return null;
+  if (!recordPr(ctx.tasksDir, pctx, pr)) return null;
+  return { ...pctx, prNumber: pr.number, url: pr.url || pctx.url || null };
+}
+
+function hasPrNumber(pctx) {
+  return typeof pctx.prNumber === 'number' && pctx.prNumber > 0;
+}
+
+/**
+ * Is the prNumber already recorded in pr-context.json still this branch's PR?
+ *
+ * A re-run resumes with whatever the last run persisted, and that PR may since
+ * have been closed, merged, or superseded — accepting it would advance to
+ * `attachments` with no open PR for the work in hand.
+ *
+ * Only a positive contradiction from `gh` invalidates the record: when `gh` is
+ * absent, unauthenticated, or rate-limited this returns null and the recorded
+ * value stands. Blocking on a missing `gh` would trade a stale-PR bug for an
+ * offline-run outage, which is the sort of thing that costs a manual
+ * intervention.
+ *
+ * @returns {boolean|null} null when `gh` cannot answer.
+ */
+function recordedPrIsCurrent(ctx, prNumber) {
+  const pr = readPullRequest(ctx.worktreeRoot, ['number', 'url', 'state', 'headRefOid']);
+  if (!pr) return null;
+  return isCurrentPr(pr, ctx.worktreeRoot) && pr.number === prNumber;
+}
+
 function validate(ctx) {
-  const pctx = readContext(ctx.tasksDir);
+  let pctx = readContext(ctx.tasksDir);
   if (!pctx) return { ok: false, errors: [`Missing pr-context.json (re-run diff_audit).`] };
-  if (!pctx.prNumber || typeof pctx.prNumber !== 'number') {
+  if (hasPrNumber(pctx) && recordedPrIsCurrent(ctx, pctx.prNumber) === false) {
+    // Stale record — drop it and let syncFromGitHub adopt the branch's real PR,
+    // or block below when there is none.
+    pctx = { ...pctx, prNumber: null, url: null };
+  }
+  if (!hasPrNumber(pctx)) {
+    pctx = syncFromGitHub(ctx, pctx) || pctx;
+  }
+  if (!hasPrNumber(pctx)) {
     return {
       ok: false,
       errors: [
-        `pr-context.json has no \`prNumber\`. After running \`gh pr create -F pr-body.md\` (or \`gh pr edit\` if it already exists), update pr-context.json with the returned PR number.`,
+        `No pull request found for this branch. Run \`gh pr create --title "..." --body-file ${path.join(
+          ctx.tasksDir,
+          'pr-body.md'
+        )}\` (or \`gh pr edit <NUMBER> --body-file ...\` if one already exists), then re-invoke me — I read the PR back with \`gh pr view\` and record it in ${CTX_FILE} myself.`,
       ],
     };
   }
@@ -42,9 +124,12 @@ function instructions(ctx) {
     '2. Determine create vs update: `gh pr view --json number 2>/dev/null | jq -r .number` returns the existing PR number if any.',
     `3. Create: \`gh pr create --title "..." --body-file ${path.join(ctx.tasksDir, 'pr-body.md')}\``,
     `   OR update: \`gh pr edit <NUMBER> --body-file ${path.join(ctx.tasksDir, 'pr-body.md')}\``,
-    '4. Patch pr-context.json with `{ "prNumber": <number>, "url": "<gh url>" }`.',
     '',
-    'Re-invoke me to verify the prNumber was recorded.',
+    '### What I do',
+    `- Read the PR back with \`gh pr view\` and record \`prNumber\` + \`url\` into ${CTX_FILE}.`,
+    '  You do NOT need to write that file — I own it.',
+    '',
+    'Re-invoke me once the PR exists.',
     '',
   ].join('\n');
 }
@@ -58,3 +143,6 @@ module.exports = function register(r) {
 };
 module.exports.validate = validate;
 module.exports.instructions = instructions;
+module.exports.recordPr = recordPr;
+module.exports.syncFromGitHub = syncFromGitHub;
+module.exports.CTX_FILE = CTX_FILE;

@@ -523,3 +523,63 @@ describe('Pass D — parseFilesInScope helper', () => {
     assert.deepEqual(out, ['src/foo.js', 'src/bar.js', 'src/baz.js']);
   });
 });
+
+describe('Pass D — (NEW)/(DELETE) markers', () => {
+  // `scope_exists` REQUIRES the `(NEW)` marker on a file not yet on disk, but
+  // Pass D used to feed the un-stripped entry to the test-file classifier,
+  // whose pattern anchors at end-of-string. `x.test.ts (NEW)` therefore failed
+  // the hasTest check while `x.ts (NEW)` still passed hasSource (that half is a
+  // negation) — so every tdd-code task whose test file is newly created
+  // hard-failed with one misleading "lists no `*.test.*` file" warning about a
+  // scope that visibly lists one.
+  const NEW_MARKED_SECTION = [
+    '## Task 1',
+    '',
+    '### Type',
+    'tdd-code',
+    '',
+    '### Files in scope',
+    '- `lib/x/writer.ts` (NEW)',
+    '- `lib/x/writer.test.ts` (NEW)',
+    '',
+    '### Acceptance Criteria',
+    '- does the thing',
+    '',
+  ].join('\n');
+
+  it('does not warn for a tdd-code task whose files are all (NEW)', () => {
+    const ws = lintAllPassD({
+      file: 'tasks.md',
+      tasks: [{ number: 1, section: NEW_MARKED_SECTION, acceptanceCriteria: ['does the thing'] }],
+    });
+    assert.deepEqual(ws, [], `expected no warnings, got ${JSON.stringify(ws, null, 2)}`);
+  });
+
+  it('strips (NEW) and (DELETE) markers from parsed scope entries', () => {
+    const section = [
+      '## Task 1',
+      '',
+      '### Files in scope',
+      '- `lib/x/writer.ts` (NEW)',
+      '- `lib/x/writer.test.ts` (NEW)',
+      '- `lib/x/legacy.ts` (DELETE)',
+      '- `lib/x/kept.ts` (new)',
+      '- `lib/x/noted.ts` (NEW)  # owned by Task 1',
+      '',
+    ].join('\n');
+    assert.deepEqual(parseFilesInScope(section), [
+      'lib/x/writer.ts',
+      'lib/x/writer.test.ts',
+      'lib/x/legacy.ts',
+      'lib/x/kept.ts',
+      'lib/x/noted.ts',
+    ]);
+  });
+
+  it('still warns when a (NEW)-marked scope genuinely has no test file', () => {
+    const ws = lintAllPassD(
+      buildModel({ type: 'tdd-code', scope: ['`src/foo.js` (NEW)'], acLines: ['Behavior X'] })
+    );
+    assert.match(ws.map((w) => w.message).join('\n'), /no `\*\.test\.\*`/);
+  });
+});

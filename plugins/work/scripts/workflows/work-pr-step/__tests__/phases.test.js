@@ -24,9 +24,14 @@ function mk(files) {
   return { root, tasksDir };
 }
 
+// `worktreeRoot` points at the sandbox — outside any git repo — for the phases
+// that fall back to `gh pr view`. Without it they would inherit the process cwd
+// and could pick up THIS repo's real PR, making the assertion depend on whether
+// `gh` happens to be installed and authenticated. See runner-owns-writes.test.js
+// for the stubbed-`gh` coverage of those fallbacks.
 test('description_draft blocks when pr-body.md is missing', () => {
   const { root, tasksDir } = mk({});
-  const r = descDraft.validate({ tasksDir });
+  const r = descDraft.validate({ tasksDir, worktreeRoot: root });
   assert.equal(r.ok, false);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -73,11 +78,75 @@ test('validate_description passes when all required sections present', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// ─── validate_description ↔ pr-generator template agreement ────────────────
+// The gate used to demand `## Summary` + `## Test plan` literally, while the
+// pr-generator's own TEMPLATE TO COMPLETE emits `## Existing Behavior` +
+// `## Testing Plan / Demo`. `## Testing Plan / Demo` can never match
+// `Test plan` ("Test" is followed by "ing", not whitespace), so the gate
+// rejected every PR body the plugin's own template produced.
+
+const PR_GENERATOR_MD = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  'agents',
+  'pr-generator.md'
+);
+
+/** The literal ```markdown block under `## TEMPLATE TO COMPLETE`. */
+function prGeneratorTemplate() {
+  const md = fs.readFileSync(PR_GENERATOR_MD, 'utf8');
+  const m = md.match(/## TEMPLATE TO COMPLETE\n```markdown\n([\s\S]*?)\n```/);
+  assert.ok(m, `could not locate the TEMPLATE TO COMPLETE block in ${PR_GENERATOR_MD}`);
+  return m[1];
+}
+
+test('validate_description accepts the pr-generator template verbatim', () => {
+  const { root, tasksDir } = mk({ 'pr-body.md': prGeneratorTemplate() });
+  const r = validateDesc.validate({ tasksDir });
+  assert.equal(r.ok, true, `template rejected: ${JSON.stringify(r.errors)}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('pr-generator template still emits the headings the gate accepts', () => {
+  const tpl = prGeneratorTemplate();
+  const headings = tpl.split('\n').filter((l) => /^## /.test(l));
+  assert.ok(
+    headings.includes('## Existing Behavior'),
+    `template lost its overview heading: ${headings.join(' | ')}`
+  );
+  assert.ok(
+    headings.includes('## Testing Plan / Demo'),
+    `template lost its test-plan heading: ${headings.join(' | ')}`
+  );
+});
+
+test('validate_description accepts `## Testing Plan / Demo` as the test plan', () => {
+  const { root, tasksDir } = mk({
+    'pr-body.md': '## Existing Behavior\n\nfoo\n\n## Testing Plan / Demo\n\n- run it\n',
+  });
+  const r = validateDesc.validate({ tasksDir });
+  assert.equal(r.ok, true, `rejected: ${JSON.stringify(r.errors)}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('validate_description still blocks a body with neither spelling', () => {
+  const { root, tasksDir } = mk({ 'pr-body.md': '## Notes\n\nnothing useful here.\n' });
+  const r = validateDesc.validate({ tasksDir });
+  assert.equal(r.ok, false);
+  assert.equal(r.errors.length, 2);
+  assert.ok(r.errors.some((e) => /Summary.*Existing Behavior/.test(e)));
+  assert.ok(r.errors.some((e) => /Test plan.*Testing Plan/.test(e)));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('create_or_update blocks when prNumber missing from context', () => {
   const { root, tasksDir } = mk({
     'pr-context.json': JSON.stringify({ files: ['a.ts'] }),
   });
-  const r = createOrUpdate.validate({ tasksDir });
+  const r = createOrUpdate.validate({ tasksDir, worktreeRoot: root });
   assert.equal(r.ok, false);
   fs.rmSync(root, { recursive: true, force: true });
 });

@@ -21,14 +21,14 @@ if (require.main === module) {
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
 const { resolvePluginConfig } = require('../lib/plugin-config');
-const { libDir, TASKS_BASE } = resolvePluginConfig(path.join(__dirname, '..', 'work'));
+const { libDir, TASKS_BASE, configError } = resolvePluginConfig(path.join(__dirname, '..', 'work'));
 
 if (!TASKS_BASE) {
   console.log(
     JSON.stringify({
       type: 'check_instruction',
       action: 'blocked',
-      reason: 'TASKS_BASE not configured',
+      reason: configError || 'TASKS_BASE not configured',
     })
   );
   process.exit(0);

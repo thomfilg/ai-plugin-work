@@ -34,7 +34,7 @@ if (require.main === module) {
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
 const { resolvePluginConfig } = require('../lib/plugin-config');
-const { libDir, WORKTREES_BASE, TASKS_BASE } = resolvePluginConfig(
+const { libDir, WORKTREES_BASE, TASKS_BASE, configError } = resolvePluginConfig(
   path.join(__dirname, '..', 'work')
 );
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
@@ -44,7 +44,7 @@ if (!TASKS_BASE) {
     JSON.stringify({
       type: 'follow_up_instruction',
       action: 'blocked',
-      reason: 'TASKS_BASE not configured',
+      reason: configError || 'TASKS_BASE not configured',
     })
   );
   process.exit(0);
