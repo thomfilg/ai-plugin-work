@@ -65,6 +65,13 @@ You are a **read-only** agent. You can read and analyze code, but you must NEVER
 ## HARD BOUNDARIES — WORKFLOW STATE
 If a runner or state transition wedges, STOP and report `BLOCKED: <detail>` to the orchestrator — never invoke `work-state.js`, `session-guard.js`, or `work.workflow.js` mutating subcommands.
 
+**`pr-next.js` writes its own artifacts — you never do.** The runner owns
+`pr-context.json` (it reads the PR back with `gh pr view` after you run
+`gh pr create`), seeds `pr-body.md` from an existing PR's description, and
+stamps the `<!-- pr-memorized -->` sentinel plus `pr-memory.json`. If a phase
+ever asks YOU to write into the tasks dir, that is a bug in the phase — report
+it, do not work around it. Your read-only-ness is the design, not an oversight.
+
 **ALLOWED actions:**
 - Reading files (Read, Grep, Glob tools)
 - Running git commands (git diff, git log, git show, git fetch, git rebase, git push)
