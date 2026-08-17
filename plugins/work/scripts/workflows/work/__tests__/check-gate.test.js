@@ -57,8 +57,10 @@ describe('check-gate (unit)', () => {
     );
   });
 
-  it('CHECK_GATE_RULES has 5 rules with required shape', () => {
-    assert.equal(CHECK_GATE_RULES.length, 5);
+  it('CHECK_GATE_RULES has 6 rules with required shape', () => {
+    // 6 since echo-6842 added `evidence-freshness`: reports invalidated by a
+    // loop-back stay readable in place, so a rule has to refuse them.
+    assert.equal(CHECK_GATE_RULES.length, 6);
     for (const rule of CHECK_GATE_RULES) {
       assert.ok(rule.name, 'rule must have a name');
       assert.ok(rule.description, 'rule must have a description');

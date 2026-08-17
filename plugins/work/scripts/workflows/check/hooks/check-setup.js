@@ -33,6 +33,13 @@ const TICKET_ID = resolveTicketId(process.argv.slice(2), process.env);
 // Shared shell helper (also used by lib/impacted-apps.js)
 const { exec } = require(path.join(__dirname, '..', 'lib', 'exec-util'));
 
+// echo-6842: the orchestrator can invalidate the check evidence without the
+// diff changing, and this cache must honour that — see checkReportsCache.
+const { isEvidenceStale } = require(
+  path.join(__dirname, '..', '..', 'work', 'lib', 'evidence-staleness')
+);
+const { STEPS } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
+
 // Use centralized getBaseBranch() from config
 const getBaseBranch = config.getBaseBranch;
 
@@ -73,10 +80,28 @@ function generateChangesHash() {
 }
 
 /**
- * Check if reports are up-to-date by comparing hashes
+ * Check if reports are up-to-date by comparing hashes.
+ *
+ * echo-6842: the hash is a whitespace-insensitive diff against the base
+ * branch, so HEAD can move without moving it — a rebase, an amend, an empty
+ * or whitespace-only commit. The orchestrator's check-drift gate keys off the
+ * HEAD SHA instead, so those are exactly the cases where it invalidates the
+ * check evidence and asks for a re-run. If the cache still reported a hit,
+ * /check would skip the agents, no report would be rewritten, the mark would
+ * never clear, and the workflow would sit at check forever — the deadlock
+ * this cache would otherwise re-introduce one layer down. An invalidated
+ * step is therefore always a cache miss.
+ *
+ * The reports are not lost by that miss: `shouldPurgeReports` is keyed on the
+ * same unchanged hash, so the cycle marker still matches and the purge is
+ * skipped. The agents simply run again and overwrite.
  */
 function checkReportsCache(reportFolder, currentHash) {
   const readmePath = path.join(reportFolder, 'README.md');
+
+  if (isEvidenceStale(reportFolder, STEPS.check)) {
+    return { cached: false, reason: 'Check evidence invalidated by the orchestrator' };
+  }
 
   if (!fs.existsSync(readmePath)) {
     return { cached: false, reason: 'No README.md found' };
@@ -324,5 +349,6 @@ if (require.main === module) {
     deriveTaskId,
     setupReportFolder,
     shouldPurgeReports,
+    checkReportsCache,
   };
 }

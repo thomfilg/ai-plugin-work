@@ -134,6 +134,10 @@ function makeTransitionHelpers(cfg) {
       // GH-260: generic step-verify gate — always uses real verify functions.
       softSteps: workflow.softSteps,
       commandMap: workflow.commandMap,
+      // echo-6842: `refreshedFiles` tells the transition which artifacts a
+      // reset/re-opened step rewrites, so their freshness can be invalidated
+      // without moving them out from under the gate that reads them.
+      evidenceRequirements: workflow.evidenceRequirements,
       // GH-299: check-drift gate dep
       getHeadSha: modules.gitUtils.getHeadSha,
     };

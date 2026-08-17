@@ -15,6 +15,8 @@ const fs = require('fs');
 const { execFileSync } = require('child_process');
 const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
 const { parseReportStatus, isCodeReviewResolved } = require('../../lib/parse-report-status');
+const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
+const { staleEvidenceFiles } = require(path.join(__dirname, '..', 'lib', 'evidence-staleness'));
 
 // ─── Helpers (local, no external deps) ──────────────────────────────────────
 
@@ -43,18 +45,23 @@ function streamToString(value, trim) {
   return trim ? str.trim() : str;
 }
 
+/** One reason line per failed spec check. Shared by the rule and its error path. */
+function formatSpecFailures(checks) {
+  return checks
+    .filter((c) => !c.passed)
+    .map(
+      (c) =>
+        `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`
+    );
+}
+
 function parseSpecVerifyStdout(stdout) {
   try {
     const result = JSON.parse(stdout);
     if (typeof result.success !== 'boolean' || result.success || !Array.isArray(result.checks)) {
       return null;
     }
-    const failures = result.checks
-      .filter((c) => !c.passed)
-      .map(
-        (c) =>
-          `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`
-      );
+    const failures = formatSpecFailures(result.checks);
     return failures.length > 0
       ? failures
       : ['Spec verification failed but no specific check details available'];
@@ -85,70 +92,93 @@ function listFiles(dir, pattern) {
   }
 }
 
+// ─── required-reports helpers ───────────────────────────────────────────────
+
+const REQUIRED_CHECK_REPORTS = [
+  { file: 'tests.check.md', type: 'tests' },
+  { file: 'code-review.check.md', type: 'codeReview' },
+  { file: 'completion.check.md', type: 'completion' },
+];
+
+/**
+ * Code-review reply reconciliation. An APPROVED report is accepted regardless
+ * of reply-file state; otherwise a reply may clear the CRITICAL/IMPORTANT
+ * issues the report raised.
+ *
+ * @returns {string|null|undefined} a failure reason, `null` to accept, or
+ *   `undefined` to fall through to the standard status check.
+ */
+function codeReviewReason(dir, req, content, status) {
+  if (status === 'APPROVED') return null;
+  const replyPath = path.join(dir, 'code-review-reply.check.md');
+  if (!fileExists(replyPath)) return undefined; // no reply file — status decides
+  const resolution = isCodeReviewResolved(content, readFile(replyPath));
+  // blockingCount === 0: no CRITICAL/IMPORTANT issues found in the report, so
+  // the reply file cannot bypass a non-APPROVED status.
+  if (resolution.blockingCount === 0) return undefined;
+  if (resolution.resolved) return null; // blocking issues all addressed
+  return `Report ${req.file} has unresolved issues: ${resolution.unaddressed.join(', ')}`;
+}
+
+/** One required report's verdict: a failure reason, or null when it passes. */
+function requiredReportReason(dir, req) {
+  const fp = path.join(dir, req.file);
+  if (!fileExists(fp)) return `Missing report: ${req.file}`;
+  const content = readFile(fp);
+  // Guard: empty/whitespace content cannot pass any gate
+  if (!content || !content.trim()) return `Report ${req.file} is empty`;
+
+  const { status } = parseReportStatus(content, req.type);
+  if (req.type === 'codeReview') {
+    const verdict = codeReviewReason(dir, req, content, status);
+    if (verdict !== undefined) return verdict;
+  }
+  // Status line is the authoritative gate when no blocking issues exist
+  if (status === 'APPROVED') return null;
+  return `Report ${req.file} status is ${status} (expected APPROVED)`;
+}
+
+/** One task's TDD evidence verdict: a failure reason, or null when it passes. */
+function taskTddReason(dir, task, validateTddEvidenceForType) {
+  const taskName = `task${task.num}`;
+  const tddPath = path.join(dir, taskName, 'tdd-phase.json');
+  if (!fileExists(tddPath)) return `Missing TDD evidence: ${taskName}/tdd-phase.json`;
+  try {
+    const state = JSON.parse(readFile(tddPath));
+    const validation = validateTddEvidenceForType(state, task.type);
+    return validation.valid ? null : `${taskName}/tdd-phase.json: ${validation.reason}`;
+  } catch (e) {
+    const detail = e instanceof SyntaxError ? 'invalid JSON' : e?.message || 'read error';
+    return `${taskName}/tdd-phase.json: ${detail}`;
+  }
+}
+
 // ─── Gate Rules ─────────────────────────────────────────────────────────────
 
 const CHECK_GATE_RULES = [
+  {
+    name: 'evidence-freshness',
+    description:
+      'Check reports invalidated by a loop-back or HEAD drift must be rewritten by /check',
+    check(dir) {
+      // echo-6842: this rule carries what archival used to enforce by moving
+      // the reports away. They stay put now, so the gate has to say why it is
+      // refusing them — "stale" reads very differently from "missing" when
+      // the drift signal that invalidated them was itself wrong.
+      const stale = staleEvidenceFiles(dir, STEPS.check);
+      if (stale.length === 0) return [];
+      return [
+        `Check reports are stale (not rewritten since the step was re-opened): ${stale.join(', ')}. ` +
+          'Re-run /check — the previous reports are still readable in place.',
+      ];
+    },
+  },
   {
     name: 'required-reports',
     description:
       'All required .check.md reports must exist with accepted status (APPROVED or COMPLETE)',
     check(dir) {
-      const required = [
-        { file: 'tests.check.md', type: 'tests' },
-        { file: 'code-review.check.md', type: 'codeReview' },
-        { file: 'completion.check.md', type: 'completion' },
-      ];
-      const reasons = [];
-      for (const req of required) {
-        const fp = path.join(dir, req.file);
-        if (!fileExists(fp)) {
-          reasons.push(`Missing report: ${req.file}`);
-          continue;
-        }
-        const content = readFile(fp);
-
-        // Guard: empty/whitespace content cannot pass any gate
-        if (!content || !content.trim()) {
-          reasons.push(`Report ${req.file} is empty`);
-          continue;
-        }
-
-        const { status } = parseReportStatus(content, req.type);
-
-        // Code-review: short-circuit on APPROVED (no need to check replies),
-        // then check reply reconciliation for non-APPROVED statuses.
-        if (req.type === 'codeReview') {
-          // If already APPROVED, accept regardless of reply file state
-          if (status === 'APPROVED') {
-            continue;
-          }
-
-          const replyPath = path.join(dir, 'code-review-reply.check.md');
-          if (fileExists(replyPath)) {
-            const replyContent = readFile(replyPath);
-            const resolution = isCodeReviewResolved(content, replyContent);
-            if (resolution.blockingCount > 0) {
-              // Report has CRITICAL/IMPORTANT issues — reply reconciliation decides
-              if (resolution.resolved) {
-                continue; // blockingCount > 0 but all addressed — skip this report
-              }
-              reasons.push(
-                `Report ${req.file} has unresolved issues: ${resolution.unaddressed.join(', ')}`
-              );
-              continue;
-            } // blockingCount === 0: no CRITICAL/IMPORTANT issues found in report
-            // No blocking issues extracted — reply file cannot bypass a non-APPROVED
-            // status; fall through to the standard status check below.
-          }
-          // No reply file — fall through to status check
-        }
-
-        if (status !== 'APPROVED') {
-          // Status line is the authoritative gate when no blocking issues exist
-          reasons.push(`Report ${req.file} status is ${status} (expected APPROVED)`);
-        }
-      }
-      return reasons;
+      return REQUIRED_CHECK_REPORTS.map((req) => requiredReportReason(dir, req)).filter(Boolean);
     },
   },
   {
@@ -232,28 +262,9 @@ const CHECK_GATE_RULES = [
         return ['Unable to parse tasks.md — cannot verify per-task TDD evidence'];
       const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
       if (expectedTasks.length === 0) return []; // all checkpoint tasks
-      const reasons = [];
-      for (const task of expectedTasks) {
-        const taskName = `task${task.num}`;
-        const taskDirPath = path.join(dir, taskName);
-        const tddPath = path.join(taskDirPath, 'tdd-phase.json');
-        if (!fileExists(tddPath)) {
-          reasons.push(`Missing TDD evidence: ${taskName}/tdd-phase.json`);
-          continue;
-        }
-        try {
-          const state = JSON.parse(readFile(tddPath));
-          const validation = validateTddEvidenceForType(state, task.type);
-          if (!validation.valid) {
-            reasons.push(`${taskName}/tdd-phase.json: ${validation.reason}`);
-          }
-        } catch (e) {
-          reasons.push(
-            `${taskName}/tdd-phase.json: ${e instanceof SyntaxError ? 'invalid JSON' : e?.message || 'read error'}`
-          );
-        }
-      }
-      return reasons;
+      return expectedTasks
+        .map((task) => taskTddReason(dir, task, validateTddEvidenceForType))
+        .filter(Boolean);
     },
   },
   {
@@ -290,12 +301,7 @@ const CHECK_GATE_RULES = [
         if (result.success) return [];
         if (!Array.isArray(result.checks))
           return ['Spec verification failed with no check details'];
-        return result.checks
-          .filter((c) => !c.passed)
-          .map(
-            (c) =>
-              `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`
-          );
+        return formatSpecFailures(result.checks);
       } catch (err) {
         return parseSpecVerifyError(err); // delegates error handling to parseSpecVerifyError
       }

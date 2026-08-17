@@ -120,6 +120,11 @@ function verifyCheck(deps, ticketId) {
     const reqs = deps.evidenceRequirements[deps.STEPS.check];
     const required = reqs?.requiredFiles || [];
     if (!required.every((f) => fs.existsSync(path.join(dir, f)))) return false;
+    // echo-6842: reports that exist but were invalidated by a loop-back or
+    // HEAD drift are not evidence until /check rewrites them. Same answer the
+    // check-to-PR gate gives, so the two gates cannot disagree.
+    const { isEvidenceStale } = require(path.join(deps.workRoot, 'lib', 'evidence-staleness'));
+    if (isEvidenceStale(dir, deps.STEPS.check)) return false;
     // At least one QA report must exist when web apps are configured
     const config = require(path.join(deps.workRoot, '..', 'lib', 'config'));
     if (config.webAppNames().length > 0) {

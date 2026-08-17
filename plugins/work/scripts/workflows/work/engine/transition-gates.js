@@ -26,6 +26,11 @@ const { validateTddEvidenceForType } = require(
 // of the resolved base to leave commit/task_review; fails closed on git
 // errors AND on an explicitly configured but unresolvable BASE_BRANCH.
 const { commitEvidenceGate } = require(path.join(__dirname, 'commit-evidence-gate'));
+// echo-6842: freshness after a loop-back is recorded, not enforced by moving
+// the evidence out from under the gate that reads it.
+const { markEvidenceStale, clearEvidenceStale } = require(
+  path.join(__dirname, '..', 'lib', 'evidence-staleness')
+);
 
 /**
  * Derive the set of steps that come after `check` in the workflow.
@@ -222,6 +227,9 @@ function checkToPrGate(ctx) {
     const sha = deps.getHeadSha(process.cwd());
     if (sha) ws.checkPassedSha = sha;
     ws.checkInterruptedStep = null;
+    // The gate just accepted these reports, so whatever invalidated them has
+    // been answered. Dropping the mark keeps later gates off the stat() path.
+    clearEvidenceStale(ws, deps.STEPS.check);
   }
   return null;
 }
@@ -261,17 +269,21 @@ function checkDriftGate(ctx) {
   // Edge validated — now mutate state and redirect
   ws.checkInterruptedStep = currentStep;
   ws.checkPassedSha = null;
-  // GH-329: archive stale .check.md reports so the next /check verify starts
-  // fresh. Mirrors the backward-transition archival pattern; single
-  // source of truth lives in lib/artifact-archival.js.
-  const tasksDir = path.join(deps.TASKS_BASE, safeTicket);
-  const archivePath = deps.archiveStepArtifacts(tasksDir, [deps.STEPS.check]);
-  if (archivePath) {
-    deps.appendAction(safeTicket, {
-      step: currentStep,
-      what: `artifacts archived to ${archivePath} (check-drift)`,
-    });
-  }
+  // GH-329 wanted the next /check verify to start fresh and archived the
+  // .check.md reports to get it. echo-6842: this gate archives the artifacts
+  // of the step it redirects TO — which no other archival path does
+  // (resetIntermediateSteps only touches steps left BEHIND the destination) —
+  // and archivalPatterns[check] covered check's own evidenceRequirements, so
+  // one drift signal moved the very reports validateCheckGate reads. Mark the
+  // evidence stale in place instead: the gate stays shut until /check rewrites
+  // the reports, and a WRONG drift signal costs a re-run, not the ticket.
+  markEvidenceStale(
+    ws,
+    deps.STEPS.check,
+    path.join(deps.TASKS_BASE, safeTicket),
+    deps.evidenceRequirements?.[deps.STEPS.check]?.refreshedFiles,
+    'check-drift'
+  );
   deps.appendAction(safeTicket, {
     step: currentStep,
     what: 'check re-triggered: new commits detected',

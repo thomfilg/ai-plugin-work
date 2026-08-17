@@ -600,11 +600,20 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 });
 
-// ─── GH-329: check-drift archives stale .check.md reports ───────────────────
-describe('transition-step.js (GH-329): check-drift archives stale check reports', () => {
+// ─── GH-329 / echo-6842: check-drift invalidates the check reports ──────────
+//
+// GH-329 archived the .check.md reports on a drift redirect so the next
+// /check verify would start fresh. echo-6842: those same files ARE the check
+// gate's evidence (archivalPatterns[check] covered evidenceRequirements[check]),
+// so the redirect moved them out from under validateCheckGate and a false
+// drift signal stranded the ticket with "Missing report: tests.check.md".
+// The freshness requirement is unchanged — it is now recorded as a stale mark
+// on the work state instead of enforced by moving the files.
+describe('transition-step.js (GH-329): check-drift invalidates check reports', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const os = require('node:os');
+  const { isEvidenceStale } = require('../lib/evidence-staleness');
 
   /** Build a deps object with a real TASKS_BASE temp dir and a fake archive helper. */
   function makeDriftDeps({
@@ -631,15 +640,17 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
       }
     }
 
-    // Fake archiveStepArtifacts: moves matching *.check.md files into runs/run1
-    // and returns the relative archive path; returns null when nothing matched.
+    // Fake archiveStepArtifacts: records its calls and moves whatever the real
+    // ticket-root patterns would move. The three required reports are excluded
+    // from those patterns now, so a call here can no longer remove them.
     const archiveCalls = [];
+    const { STEP_ARTIFACTS } = require('../lib/artifact-archival');
     function fakeArchive(dir, steps) {
       archiveCalls.push({ dir, steps: [...steps] });
-      if (!steps.includes(STEPS.check)) return null;
+      const patterns = steps.flatMap((s) => STEP_ARTIFACTS[s] || []);
       let entries = [];
       try {
-        entries = fs.readdirSync(dir).filter((f) => /^.*\.check\.md$/.test(f));
+        entries = fs.readdirSync(dir).filter((f) => patterns.some((p) => p.test(f)));
       } catch {
         return null;
       }
@@ -658,6 +669,13 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
       getHeadSha: () => headSha,
       TASKS_BASE: tasksBase,
       archiveStepArtifacts: fakeArchive,
+      // Mirrors orchestrator-context.js: the transition needs to know which
+      // files the check step rewrites in order to invalidate them.
+      evidenceRequirements: {
+        [STEPS.check]: {
+          refreshedFiles: ['code-review.check.md', 'tests.check.md', 'completion.check.md'],
+        },
+      },
     });
     deps._archiveCalls = archiveCalls;
     deps._tasksDir = tasksDir;
@@ -675,35 +693,25 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
   function reportsStillPresent(tasksDir, files) {
     return files.every((f) => fs.existsSync(path.join(tasksDir, f)));
   }
-  function reportsRemoved(tasksDir, files) {
-    return files.every((f) => !fs.existsSync(path.join(tasksDir, f)));
-  }
 
-  it('check-drift redirect archives stale .check.md reports', () => {
+  it('check-drift redirect invalidates the reports without moving them', () => {
     const { transitionStep } = require('../engine/transition-step');
     const { deps, STEPS, ticket, tasksDir } = makeDriftDeps();
     const result = transitionStep(ticket, 'ready', deps);
 
     assert.equal(result.gate, 'check-drift', 'redirect must annotate gate=check-drift');
     assert.equal(result.to, STEPS.check, 'redirect targets check');
-    assert.ok(
-      deps._archiveCalls.some((c) => c.dir === tasksDir && c.steps.includes(STEPS.check)),
-      'archiveStepArtifacts must be called with tasksDir + [STEPS.check]'
-    );
-    assert.ok(
-      reportsRemoved(tasksDir, deps._reportFiles),
-      'stale .check.md files must no longer be readable at their original paths'
-    );
+
     const saved = deps._savedStates[ticket];
-    assert.equal(saved.checkPassedSha, null, 'checkPassedSha must be cleared on redirect (R6)');
-    const archivalRows = deps._actions.filter(
-      (a) => typeof a.what === 'string' && a.what.includes('artifacts archived to')
-    );
-    assert.equal(archivalRows.length, 1, 'exactly one archival audit row on drift with reports');
     assert.ok(
-      archivalRows[0].what.includes('(check-drift)'),
-      'archival row must carry (check-drift) suffix (R3)'
+      isEvidenceStale(tasksDir, STEPS.check, saved),
+      'check evidence must be marked stale so the next verify starts fresh'
     );
+    assert.ok(
+      reportsStillPresent(tasksDir, deps._reportFiles),
+      'echo-6842: the reports the check gate reads must stay readable in place'
+    );
+    assert.equal(saved.checkPassedSha, null, 'checkPassedSha must be cleared on redirect (R6)');
     const recheckRows = deps._actions.filter(
       (a) => a.what === 'check re-triggered: new commits detected'
     );
@@ -717,21 +725,22 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
     // First: drift redirect into check
     transitionStep(ticket, 'ready', deps);
 
-    // Position state at check, simulate verify failing because reports are gone
+    // Position state at check, simulate verify failing because reports are stale
     const ws = deps._savedStates[ticket];
     ws.currentStep = ALL_STEPS.indexOf(STEPS.check) + 1;
     ws.stepStatus[STEPS.check] = 'in_progress';
     deps._savedStates[ticket] = ws;
     // Inject a failing check verify via commandMap (mirrors workflow-definition wiring)
     deps.commandMap = [{ step: STEPS.check, verify: () => false }];
-    deps.validateCheckGate = () => ({ valid: false, reasons: ['no fresh reports'] });
+    deps.validateCheckGate = () => ({ valid: false, reasons: ['reports are stale'] });
 
     const result = transitionStep(ticket, STEPS.pr, deps);
     assert.equal(result.error, true, 'check -> pr must be BLOCKED after redirect (R2)');
   });
 
-  it('no archival occurs when HEAD has not drifted', () => {
+  it('no invalidation occurs when HEAD has not drifted', () => {
     const { transitionStep } = require('../engine/transition-step');
+    const { STEPS } = require('../step-registry');
     const matchingSha = 'a'.repeat(40);
     const { deps, ticket, tasksDir } = makeDriftDeps({
       headSha: matchingSha,
@@ -750,13 +759,14 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
       reportsStillPresent(tasksDir, deps._reportFiles),
       'no-drift path must leave .check.md files in place'
     );
-    const archivalRows = deps._actions.filter(
-      (a) => typeof a.what === 'string' && a.what.includes('(check-drift)')
+    assert.equal(
+      isEvidenceStale(tasksDir, STEPS.check, deps._savedStates[ticket]),
+      false,
+      'no-drift path must not invalidate the evidence'
     );
-    assert.equal(archivalRows.length, 0, 'no (check-drift) audit row on no-drift path');
   });
 
-  it('check-drift fires but no reports exist to archive', () => {
+  it('check-drift fires and still invalidates when no reports exist yet', () => {
     const { transitionStep } = require('../engine/transition-step');
     const { deps, STEPS, ticket, tasksDir } = makeDriftDeps({ writeReports: false });
     const result = transitionStep(ticket, 'ready', deps);
@@ -764,18 +774,13 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
     assert.equal(result.gate, 'check-drift', 'drift still detected');
     assert.equal(result.to, STEPS.check, 'still redirects to check');
     assert.ok(
-      deps._archiveCalls.some((c) => c.steps.includes(STEPS.check)),
-      'archive helper still invoked (idempotent no-op)'
+      isEvidenceStale(tasksDir, STEPS.check, deps._savedStates[ticket]),
+      'absent reports are stale until /check writes them'
     );
-    assert.ok(reportsRemoved(tasksDir, deps._reportFiles), 'no files to remove (trivially true)');
     const archivalRows = deps._actions.filter(
       (a) => typeof a.what === 'string' && a.what.includes('artifacts archived to')
     );
-    assert.equal(
-      archivalRows.length,
-      0,
-      'no archival audit row when no reports were present (R3 idempotency)'
-    );
+    assert.equal(archivalRows.length, 0, 'no archival audit row on the drift path');
     const recheckRows = deps._actions.filter(
       (a) => a.what === 'check re-triggered: new commits detected'
     );
@@ -824,8 +829,8 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
     assert.equal(redirect.gate, 'check-drift', 'drift detected');
     assert.equal(redirect.to, STEPS.check, 'redirected back to check');
     assert.ok(
-      reportsRemoved(tasksDir, deps._reportFiles),
-      'stale reports archived during redirect — replays GH-324 fix'
+      isEvidenceStale(tasksDir, STEPS.check, deps._savedStates[ticket]),
+      'reports invalidated during redirect — replays GH-324 fix'
     );
 
     // Step 2: agent (without re-running check) tries to push forward to pr
@@ -834,7 +839,7 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
     ws.stepStatus[STEPS.check] = 'in_progress';
     deps._savedStates[ticket] = ws;
     deps.commandMap = [{ step: STEPS.check, verify: () => false }];
-    deps.validateCheckGate = () => ({ valid: false, reasons: ['stale reports archived'] });
+    deps.validateCheckGate = () => ({ valid: false, reasons: ['reports are stale'] });
 
     const blocked = transitionStep(ticket, STEPS.pr, deps);
     assert.equal(blocked.error, true, 'check -> pr blocked without fresh reports (AC2)');
@@ -843,6 +848,11 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
     for (const f of deps._reportFiles) {
       fs.writeFileSync(path.join(tasksDir, f), '# fresh report\n');
     }
+    assert.equal(
+      isEvidenceStale(tasksDir, STEPS.check, deps._savedStates[ticket]),
+      false,
+      'rewriting the reports clears the stale mark — no restore needed'
+    );
     deps.commandMap = [{ step: STEPS.check, verify: () => true }];
     deps.validateCheckGate = () => ({ valid: true });
     const success = transitionStep(ticket, STEPS.pr, deps);

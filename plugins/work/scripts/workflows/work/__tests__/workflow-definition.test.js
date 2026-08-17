@@ -35,12 +35,46 @@ describe('workflow-definition: archivalPatterns', () => {
     assert.equal(typeof workflow.archivalPatterns, 'object');
   });
 
-  it('defines archival pattern for check step matching *.check.md files', () => {
+  it('defines archival pattern for check step matching non-evidence *.check.md files', () => {
     const patterns = workflow.archivalPatterns[STEPS.check];
     assert.ok(Array.isArray(patterns), 'check archival patterns should be an array');
     assert.ok(patterns.length > 0, 'check step should have at least one pattern');
-    assert.ok(patterns.some((p) => p instanceof RegExp && p.test('code-review.check.md')));
-    assert.ok(patterns.some((p) => p instanceof RegExp && p.test('tests.check.md')));
+    assert.ok(patterns.some((p) => p instanceof RegExp && p.test('dev-quality.check.md')));
+    assert.ok(patterns.some((p) => p instanceof RegExp && p.test('lint.check.md')));
+  });
+
+  // echo-6842: these three used to match, which is what let a drift redirect
+  // move the check gate's own evidence into runs/runN/. The disjointness is
+  // asserted structurally in check-archival-evidence.test.js; this pins the
+  // three filenames that actually caused it.
+  it('never matches the check step evidence it would destroy', () => {
+    const patterns = workflow.archivalPatterns[STEPS.check];
+    for (const file of ['code-review.check.md', 'tests.check.md', 'completion.check.md']) {
+      assert.ok(
+        !patterns.some((p) => p.test(file)),
+        `${file} is check gate evidence — archival must not move it`
+      );
+    }
+  });
+
+  it('exposes the check files a re-run rewrites, excluding README.md', () => {
+    const { refreshedFiles, requiredFiles } = workflow.evidenceRequirements[STEPS.check];
+    assert.deepEqual(refreshedFiles.slice().sort(), [
+      'code-review.check.md',
+      'completion.check.md',
+      'tests.check.md',
+    ]);
+    assert.ok(refreshedFiles.every((f) => requiredFiles.includes(f)));
+    assert.ok(
+      !refreshedFiles.includes('README.md'),
+      'README.md is a bootstrap artifact /check never rewrites'
+    );
+  });
+
+  it('keeps the taskN/ sweep unguarded — no gate reads taskN/*.check.md', () => {
+    const perTask = workflow.perTaskArchivalPatterns[STEPS.check];
+    assert.ok(perTask.some((p) => p.test('code-review.check.md')));
+    assert.ok(perTask.some((p) => p.test('tests.check.md')));
   });
 
   it('defines archival pattern for pr step matching pr update sha files', () => {
