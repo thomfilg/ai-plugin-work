@@ -15,6 +15,8 @@ const fs = require('fs');
 const { execFileSync } = require('child_process');
 const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
 const { parseReportStatus, isCodeReviewResolved } = require('../../lib/parse-report-status');
+const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
+const { staleEvidenceFiles } = require(path.join(__dirname, '..', 'lib', 'evidence-staleness'));
 
 // ─── Helpers (local, no external deps) ──────────────────────────────────────
 
@@ -88,6 +90,23 @@ function listFiles(dir, pattern) {
 // ─── Gate Rules ─────────────────────────────────────────────────────────────
 
 const CHECK_GATE_RULES = [
+  {
+    name: 'evidence-freshness',
+    description:
+      'Check reports invalidated by a loop-back or HEAD drift must be rewritten by /check',
+    check(dir) {
+      // echo-6842: this rule carries what archival used to enforce by moving
+      // the reports away. They stay put now, so the gate has to say why it is
+      // refusing them — "stale" reads very differently from "missing" when
+      // the drift signal that invalidated them was itself wrong.
+      const stale = staleEvidenceFiles(dir, STEPS.check);
+      if (stale.length === 0) return [];
+      return [
+        `Check reports are stale (not rewritten since the step was re-opened): ${stale.join(', ')}. ` +
+          'Re-run /check — the previous reports are still readable in place.',
+      ];
+    },
+  },
   {
     name: 'required-reports',
     description:

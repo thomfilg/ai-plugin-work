@@ -34,6 +34,10 @@ module.exports = function checkStep(add, s, ctx) {
     const p = [];
     if (s?.missingReports?.length) p.push(`missing: ${s.missingReports.join(', ')}`);
     if (s?.failedReports?.length) p.push(`failed: ${s.failedReports.join(', ')}`);
+    // echo-6842: present-but-invalidated reports. Named separately from
+    // `failed` because nothing is wrong with their content — they reviewed
+    // code the workflow has since moved past.
+    if (s?.staleReports?.length) p.push(`stale: ${s.staleReports.join(', ')}`);
     add(STEPS.check, 'RUN', '/check', p.length ? p.join('; ') : 'No reports found', {
       agentType: 'skill',
       agentPrompt: '/check',

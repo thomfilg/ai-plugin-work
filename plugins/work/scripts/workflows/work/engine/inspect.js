@@ -17,6 +17,8 @@ const { parseReportStatus } = require(
   path.join(__dirname, '..', '..', 'lib', 'parse-report-status')
 );
 const { phaseLedgerBlocked } = require(path.join(__dirname, '..', 'lib', 'phase-ledger'));
+const { staleEvidenceFiles } = require(path.join(__dirname, '..', 'lib', 'evidence-staleness'));
+const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 
 // Report-type mapping for the parse-report-status fallback (echo-5219: reviewer
 // agents emit prose verdicts like "## Overall Assessment: ✅ Well-Implemented"
@@ -108,6 +110,21 @@ function collectRequiredReports(s, deps) {
       s.failedReports.push(file);
     }
   }
+}
+
+/**
+ * echo-6842: reports that exist and pass but were invalidated by a loop-back
+ * or HEAD drift must not read as "all reports pass" — otherwise the plan
+ * DEFERs ("RESUME: All 3 reports PASS") the very re-run the invalidation
+ * asked for, and the check gate blocks the transition it just green-lit.
+ * Archival used to produce this state by moving the files; the mark produces
+ * it without touching them.
+ */
+function collectStaleReports(s, deps) {
+  const stale = staleEvidenceFiles(s.tasksDir, STEPS.check, s.workState);
+  if (stale.length === 0) return;
+  s.staleReports = stale.filter((f) => s.reports[f]?.exists);
+  s.allReportsPass = false;
 }
 
 /** QA reports (qa-*.check.md) — APPROVED or NOT_APPLICABLE both pass. */
@@ -265,6 +282,7 @@ function inspect(ticket, providerConfig, suffix, deps) {
   s.failedReports = [];
   collectRequiredReports(s, deps);
   collectQaReports(s, deps);
+  collectStaleReports(s, deps);
   collectPerTaskReports(s, deps);
   collectShaTracking(s, deps);
   collectContentSha(s, deps);
