@@ -23,10 +23,10 @@ const { execFileSync } = require('node:child_process');
 
 const GH_TIMEOUT_MS = 15_000;
 
-/** Current branch name in `cwd`, or null when git can't say. */
-function currentBranch(cwd) {
+/** Run a git command in `cwd`, returning trimmed stdout or null on failure. */
+function git(args, cwd) {
   try {
-    const out = execFileSync('git', ['branch', '--show-current'], {
+    const out = execFileSync('git', args, {
       encoding: 'utf8',
       timeout: GH_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -36,6 +36,16 @@ function currentBranch(cwd) {
   } catch {
     return null;
   }
+}
+
+/** Current branch name in `cwd`, or null when git can't say. */
+function currentBranch(cwd) {
+  return git(['branch', '--show-current'], cwd);
+}
+
+/** Current HEAD commit in `cwd`, or null when git can't say. */
+function headSha(cwd) {
+  return git(['rev-parse', 'HEAD'], cwd);
 }
 
 /**
@@ -71,4 +81,39 @@ function readPullRequest(cwd, fields = ['number', 'url', 'state']) {
   }
 }
 
-module.exports = { readPullRequest, currentBranch, GH_TIMEOUT_MS };
+/**
+ * Read the PR that represents the CURRENT state of this branch.
+ *
+ * `gh pr view <branch>` falls back to the most recent CLOSED or MERGED PR when
+ * the branch has no open one. Branch reuse is a normal flow here — a merged
+ * branch gets reset onto the default branch and carries follow-up work under
+ * the same name — so accepting whatever `gh` returns would record a stale PR
+ * number and seed `pr-body.md` with a previous change's description.
+ *
+ * An OPEN PR is always current. A MERGED or CLOSED one is accepted only while
+ * its head commit is still this branch's HEAD: that is the PR for the work in
+ * hand, merged between phases. Rejecting MERGED outright would strand a ticket
+ * whose PR shipped before the runner finished its remaining phases — the same
+ * trap `work/workflow-def/delivery-verifiers.js` documents.
+ *
+ * @param {string} cwd - worktree root to run `gh` in.
+ * @param {string[]} [fields] - JSON fields to request; `state` and `headRefOid`
+ *   are always included.
+ * @returns {object|null} the PR, or null when there is none worth using.
+ */
+function readCurrentPullRequest(cwd, fields = ['number', 'url']) {
+  const pr = readPullRequest(cwd, [...new Set([...fields, 'state', 'headRefOid'])]);
+  if (!pr) return null;
+  if (pr.state === 'OPEN') return pr;
+  const head = headSha(cwd);
+  if (head && pr.headRefOid && pr.headRefOid === head) return pr;
+  return null;
+}
+
+module.exports = {
+  readPullRequest,
+  readCurrentPullRequest,
+  currentBranch,
+  headSha,
+  GH_TIMEOUT_MS,
+};

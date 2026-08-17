@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { PR_PHASES } = require('../../pr-phase-registry');
-const { readPullRequest } = require('../pr-github');
+const { readCurrentPullRequest } = require('../pr-github');
 
 const CTX_FILE = 'pr-context.json';
 
@@ -50,11 +50,15 @@ function recordPr(tasksDir, pctx, pr) {
 /**
  * Fill in prNumber/url from the live PR when the context does not have them.
  *
+ * Reads through `readCurrentPullRequest`, which rejects a CLOSED or MERGED PR
+ * left over from earlier work on a reused branch — recording one would advance
+ * this phase with no open PR for the change in hand.
+ *
  * @returns {object|null} the context with the PR recorded, or null when there
  *   is no PR to record (or it could not be written).
  */
 function syncFromGitHub(ctx, pctx) {
-  const pr = readPullRequest(ctx.worktreeRoot, ['number', 'url', 'state']);
+  const pr = readCurrentPullRequest(ctx.worktreeRoot, ['number', 'url']);
   if (!pr || typeof pr.number !== 'number' || pr.number <= 0) return null;
   if (!recordPr(ctx.tasksDir, pctx, pr)) return null;
   return { ...pctx, prNumber: pr.number, url: pr.url || pctx.url || null };

@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { PR_PHASES } = require('../../pr-phase-registry');
-const { readPullRequest } = require('../pr-github');
+const { readCurrentPullRequest } = require('../pr-github');
 
 const MIN_BODY_CHARS = 80;
 
@@ -34,10 +34,14 @@ function readFile(p) {
  * Write `pr-body.md` from the live PR description, when there is one with
  * enough substance to satisfy this gate.
  *
+ * Reads through `readCurrentPullRequest`, so a CLOSED or MERGED PR left over
+ * from earlier work on a reused branch is not used — seeding from one would
+ * hand this change the previous change's description.
+ *
  * @returns {string|null} the seeded body, or null when nothing was written.
  */
 function seedFromGitHub(ctx, bodyPath) {
-  const pr = readPullRequest(ctx.worktreeRoot, ['body']);
+  const pr = readCurrentPullRequest(ctx.worktreeRoot, ['body']);
   const body = pr && typeof pr.body === 'string' ? pr.body : '';
   if (body.trim().length < MIN_BODY_CHARS) return null;
   try {

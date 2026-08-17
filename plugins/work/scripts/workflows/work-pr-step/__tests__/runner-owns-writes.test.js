@@ -29,12 +29,15 @@ const memorize = require('../lib/phases/memorize');
 let sandbox;
 let savedPath;
 
+const LOCAL_HEAD = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+
 /**
- * Put a fake `gh` (and a `git` that answers `branch --show-current`) at the
- * front of PATH. `payload` is what `gh pr view --json ...` returns; pass null
- * to make `gh` exit non-zero, i.e. "no PR for this branch".
+ * Put a fake `gh` (and a `git` answering `branch --show-current` /
+ * `rev-parse HEAD`) at the front of PATH. `payload` is what
+ * `gh pr view --json ...` returns; pass null to make `gh` exit non-zero, i.e.
+ * "no PR for this branch". `headSha` is what local git reports for HEAD.
  */
-function stubGh(payload) {
+function stubGh(payload, headSha = LOCAL_HEAD) {
   const bin = path.join(sandbox, 'bin');
   fs.mkdirSync(bin, { recursive: true });
   const fixture = path.join(sandbox, 'gh-payload.json');
@@ -48,10 +51,30 @@ function stubGh(payload) {
     ['#!/bin/sh', `[ -f "${fixture}" ] || exit 1`, `cat "${fixture}"`, ''].join('\n'),
     { mode: 0o755 }
   );
-  fs.writeFileSync(path.join(bin, 'git'), ['#!/bin/sh', 'echo feature-branch', ''].join('\n'), {
-    mode: 0o755,
-  });
+  fs.writeFileSync(
+    path.join(bin, 'git'),
+    [
+      '#!/bin/sh',
+      'case "$1 $2" in',
+      '  "rev-parse HEAD") echo ' + headSha + ' ;;',
+      '  *) echo feature-branch ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { mode: 0o755 }
+  );
   process.env.PATH = `${bin}${path.delimiter}${savedPath}`;
+}
+
+/** An OPEN PR payload. */
+function openPr(extra = {}) {
+  return {
+    number: 4211,
+    url: 'https://github.com/o/r/pull/4211',
+    state: 'OPEN',
+    headRefOid: LOCAL_HEAD,
+    ...extra,
+  };
 }
 
 /** Build a tasks dir seeded with `files`, and the ctx the phase runner passes. */
@@ -92,7 +115,7 @@ afterEach(() => {
 
 describe('create_or_update owns the pr-context.json patch', () => {
   it('records prNumber and url from the live PR without the agent writing', () => {
-    stubGh({ number: 4211, url: 'https://github.com/o/r/pull/4211', state: 'OPEN' });
+    stubGh(openPr());
     const ctx = mkCtx({
       'pr-context.json': JSON.stringify({ base: 'origin/main', files: ['a.ts'] }),
     });
@@ -108,7 +131,7 @@ describe('create_or_update owns the pr-context.json patch', () => {
   });
 
   it('leaves an already-recorded prNumber alone', () => {
-    stubGh({ number: 9999, url: 'https://github.com/o/r/pull/9999', state: 'OPEN' });
+    stubGh(openPr({ number: 9999, url: 'https://github.com/o/r/pull/9999' }));
     const ctx = mkCtx({
       'pr-context.json': JSON.stringify({ files: ['a.ts'], prNumber: 1234, url: 'kept' }),
     });
@@ -128,7 +151,7 @@ describe('create_or_update owns the pr-context.json patch', () => {
   });
 
   it('still blocks when pr-context.json is missing entirely', () => {
-    stubGh({ number: 4211, url: 'u', state: 'OPEN' });
+    stubGh(openPr({ url: 'u' }));
     const r = createOrUpdate.validate(mkCtx({}));
     assert.equal(r.ok, false);
     assert.match(r.errors.join('\n'), /diff_audit/);
@@ -137,7 +160,7 @@ describe('create_or_update owns the pr-context.json patch', () => {
 
 describe('description_draft seeds pr-body.md from the open PR', () => {
   it('writes the file itself when the branch already has a PR', () => {
-    stubGh({ body: LONG_BODY });
+    stubGh(openPr({ body: LONG_BODY }));
     const ctx = mkCtx({});
 
     const r = descDraft.validate(ctx);
@@ -148,7 +171,7 @@ describe('description_draft seeds pr-body.md from the open PR', () => {
   });
 
   it('does not overwrite a body that is already substantial', () => {
-    stubGh({ body: LONG_BODY });
+    stubGh(openPr({ body: LONG_BODY }));
     const ctx = mkCtx({ 'pr-body.md': `${LONG_BODY}\nlocal edits worth keeping\n` });
 
     assert.equal(descDraft.validate(ctx).ok, true);
@@ -166,8 +189,53 @@ describe('description_draft seeds pr-body.md from the open PR', () => {
   });
 
   it('ignores a PR body too short to satisfy the gate', () => {
-    stubGh({ body: 'wip' });
+    stubGh(openPr({ body: 'wip' }));
     const r = descDraft.validate(mkCtx({}));
+    assert.equal(r.ok, false);
+    assert.equal(fs.existsSync(path.join(sandbox, 'ECHO-6842', 'pr-body.md')), false);
+  });
+});
+
+// `gh pr view <branch>` falls back to the most recent CLOSED or MERGED PR when
+// the branch has no open one. Branch reuse is normal here — a merged branch is
+// reset onto the default branch and carries follow-up work under the same name
+// — so a stale PR must not be recorded as this change's PR, nor its
+// description seeded into pr-body.md.
+describe('a stale PR from a reused branch is not adopted', () => {
+  const STALE_HEAD = '0000000000000000000000000000000000000000';
+
+  it('create_or_update ignores a MERGED PR whose head is no longer HEAD', () => {
+    stubGh(openPr({ state: 'MERGED', headRefOid: STALE_HEAD }));
+    const ctx = mkCtx({ 'pr-context.json': JSON.stringify({ files: ['a.ts'] }) });
+
+    const r = createOrUpdate.validate(ctx);
+
+    assert.equal(r.ok, false, "must not advance on a previous change's PR");
+    assert.equal(readJson(ctx.tasksDir, 'pr-context.json').prNumber, undefined);
+  });
+
+  it('create_or_update ignores a CLOSED PR', () => {
+    stubGh(openPr({ state: 'CLOSED', headRefOid: STALE_HEAD }));
+    const ctx = mkCtx({ 'pr-context.json': JSON.stringify({ files: ['a.ts'] }) });
+
+    assert.equal(createOrUpdate.validate(ctx).ok, false);
+  });
+
+  it('create_or_update still accepts a MERGED PR that is still this HEAD', () => {
+    // Merged between phases — rejecting this would strand the ticket, the trap
+    // work/workflow-def/delivery-verifiers.js documents.
+    stubGh(openPr({ state: 'MERGED', headRefOid: LOCAL_HEAD }));
+    const ctx = mkCtx({ 'pr-context.json': JSON.stringify({ files: ['a.ts'] }) });
+
+    assert.equal(createOrUpdate.validate(ctx).ok, true);
+    assert.equal(readJson(ctx.tasksDir, 'pr-context.json').prNumber, 4211);
+  });
+
+  it('description_draft does not seed from a stale PR body', () => {
+    stubGh(openPr({ state: 'MERGED', headRefOid: STALE_HEAD, body: LONG_BODY }));
+
+    const r = descDraft.validate(mkCtx({}));
+
     assert.equal(r.ok, false);
     assert.equal(fs.existsSync(path.join(sandbox, 'ECHO-6842', 'pr-body.md')), false);
   });
