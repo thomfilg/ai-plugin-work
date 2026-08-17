@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { PR_PHASES } = require('../../pr-phase-registry');
-const { readCurrentPullRequest } = require('../pr-github');
+const { readCurrentPullRequest, readPullRequest, isCurrentPr } = require('../pr-github');
 
 const CTX_FILE = 'pr-context.json';
 
@@ -64,13 +64,43 @@ function syncFromGitHub(ctx, pctx) {
   return { ...pctx, prNumber: pr.number, url: pr.url || pctx.url || null };
 }
 
+function hasPrNumber(pctx) {
+  return typeof pctx.prNumber === 'number' && pctx.prNumber > 0;
+}
+
+/**
+ * Is the prNumber already recorded in pr-context.json still this branch's PR?
+ *
+ * A re-run resumes with whatever the last run persisted, and that PR may since
+ * have been closed, merged, or superseded — accepting it would advance to
+ * `attachments` with no open PR for the work in hand.
+ *
+ * Only a positive contradiction from `gh` invalidates the record: when `gh` is
+ * absent, unauthenticated, or rate-limited this returns null and the recorded
+ * value stands. Blocking on a missing `gh` would trade a stale-PR bug for an
+ * offline-run outage, which is the sort of thing that costs a manual
+ * intervention.
+ *
+ * @returns {boolean|null} null when `gh` cannot answer.
+ */
+function recordedPrIsCurrent(ctx, prNumber) {
+  const pr = readPullRequest(ctx.worktreeRoot, ['number', 'url', 'state', 'headRefOid']);
+  if (!pr) return null;
+  return isCurrentPr(pr, ctx.worktreeRoot) && pr.number === prNumber;
+}
+
 function validate(ctx) {
   let pctx = readContext(ctx.tasksDir);
   if (!pctx) return { ok: false, errors: [`Missing pr-context.json (re-run diff_audit).`] };
-  if (!pctx.prNumber || typeof pctx.prNumber !== 'number') {
+  if (hasPrNumber(pctx) && recordedPrIsCurrent(ctx, pctx.prNumber) === false) {
+    // Stale record — drop it and let syncFromGitHub adopt the branch's real PR,
+    // or block below when there is none.
+    pctx = { ...pctx, prNumber: null, url: null };
+  }
+  if (!hasPrNumber(pctx)) {
     pctx = syncFromGitHub(ctx, pctx) || pctx;
   }
-  if (!pctx.prNumber || typeof pctx.prNumber !== 'number') {
+  if (!hasPrNumber(pctx)) {
     return {
       ok: false,
       errors: [

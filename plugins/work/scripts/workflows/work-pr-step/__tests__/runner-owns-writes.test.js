@@ -130,8 +130,8 @@ describe('create_or_update owns the pr-context.json patch', () => {
     assert.deepEqual(pctx.files, ['a.ts']);
   });
 
-  it('leaves an already-recorded prNumber alone', () => {
-    stubGh(openPr({ number: 9999, url: 'https://github.com/o/r/pull/9999' }));
+  it('leaves an already-recorded prNumber alone when it is still the open PR', () => {
+    stubGh(openPr({ number: 1234, url: 'kept' }));
     const ctx = mkCtx({
       'pr-context.json': JSON.stringify({ files: ['a.ts'], prNumber: 1234, url: 'kept' }),
     });
@@ -229,6 +229,45 @@ describe('a stale PR from a reused branch is not adopted', () => {
 
     assert.equal(createOrUpdate.validate(ctx).ok, true);
     assert.equal(readJson(ctx.tasksDir, 'pr-context.json').prNumber, 4211);
+  });
+
+  // A re-run resumes with whatever the last run persisted. That PR may since
+  // have been closed, merged, or superseded, so a recorded number is not
+  // self-certifying either. (Pre-dates the runner-owned writes — the original
+  // `validate` accepted any persisted prNumber too — but it is the same defect
+  // reached by the other path.)
+  it('create_or_update drops a persisted prNumber that is no longer current', () => {
+    stubGh(openPr({ number: 9999, url: 'https://github.com/o/r/pull/9999' }));
+    const ctx = mkCtx({
+      'pr-context.json': JSON.stringify({ files: ['a.ts'], prNumber: 1234, url: 'stale' }),
+    });
+
+    assert.equal(createOrUpdate.validate(ctx).ok, true);
+    const pctx = readJson(ctx.tasksDir, 'pr-context.json');
+    assert.equal(pctx.prNumber, 9999, "must adopt the branch's actual open PR");
+    assert.equal(pctx.url, 'https://github.com/o/r/pull/9999');
+  });
+
+  it('create_or_update blocks when the persisted PR is stale and there is no replacement', () => {
+    stubGh(openPr({ number: 1234, state: 'CLOSED', headRefOid: STALE_HEAD }));
+    const ctx = mkCtx({
+      'pr-context.json': JSON.stringify({ files: ['a.ts'], prNumber: 1234, url: 'stale' }),
+    });
+
+    assert.equal(createOrUpdate.validate(ctx).ok, false);
+  });
+
+  it('create_or_update keeps a persisted prNumber when gh cannot answer', () => {
+    // Offline, unauthenticated, or rate-limited. Only a positive contradiction
+    // invalidates the record — blocking here would trade a stale-PR bug for an
+    // offline-run outage.
+    stubGh(null);
+    const ctx = mkCtx({
+      'pr-context.json': JSON.stringify({ files: ['a.ts'], prNumber: 1234, url: 'kept' }),
+    });
+
+    assert.equal(createOrUpdate.validate(ctx).ok, true);
+    assert.equal(readJson(ctx.tasksDir, 'pr-context.json').prNumber, 1234);
   });
 
   it('description_draft does not seed from a stale PR body', () => {

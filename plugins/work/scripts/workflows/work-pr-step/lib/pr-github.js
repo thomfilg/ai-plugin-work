@@ -103,16 +103,31 @@ function readPullRequest(cwd, fields = ['number', 'url', 'state']) {
  */
 function readCurrentPullRequest(cwd, fields = ['number', 'url']) {
   const pr = readPullRequest(cwd, [...new Set([...fields, 'state', 'headRefOid'])]);
-  if (!pr) return null;
-  if (pr.state === 'OPEN') return pr;
+  return isCurrentPr(pr, cwd) ? pr : null;
+}
+
+/**
+ * Does `pr` represent the current state of the branch in `cwd`?
+ *
+ * Split out from `readCurrentPullRequest` so a caller that must distinguish
+ * "`gh` says this PR is stale" from "`gh` could not answer" can read once and
+ * apply the predicate itself.
+ *
+ * @param {object|null} pr - a PR carrying `state` and `headRefOid`.
+ * @param {string} cwd - worktree root.
+ * @returns {boolean}
+ */
+function isCurrentPr(pr, cwd) {
+  if (!pr) return false;
+  if (pr.state === 'OPEN') return true;
   const head = headSha(cwd);
-  if (head && pr.headRefOid && pr.headRefOid === head) return pr;
-  return null;
+  return Boolean(head && pr.headRefOid && pr.headRefOid === head);
 }
 
 module.exports = {
   readPullRequest,
   readCurrentPullRequest,
+  isCurrentPr,
   currentBranch,
   headSha,
   GH_TIMEOUT_MS,
