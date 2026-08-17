@@ -107,7 +107,12 @@ const RETRY_EDGES = {
   [STEPS.spec_gate]: [STEPS.spec], // GH-244: gate failed, regenerate spec
   [STEPS.tasks_gate]: [STEPS.tasks], // Gate C: tasks.md missing scope sections → regenerate tasks
   [STEPS.task_review]: [STEPS.implement], // GH-211: review failed, fix code
-  [STEPS.check]: [STEPS.implement], // check failed, fix code
+  // check failed, fix code. `spec` is reachable because the 4b_gherkin_scope gate
+  // fails with "transition back to the spec step and add the missing tagged
+  // scenario(s)" — its declared-scope mismatch is a spec.md defect, not a code
+  // defect, so routing it through `implement` would fix the wrong artifact.
+  // Without this edge that gate's own remediation instruction is unreachable.
+  [STEPS.check]: [STEPS.implement, STEPS.spec],
   [STEPS.pr]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.ready]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.follow_up]: [STEPS.implement, STEPS.check], // backward edges: needs fixes (ci is already the linear forward edge)
