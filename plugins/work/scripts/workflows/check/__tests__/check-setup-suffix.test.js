@@ -5,7 +5,13 @@
  * - When TICKET_ID is provided with a suffix (e.g., GH-181/phase1), the
  *   reportFolder uses it as-is (preserving the / as a subdirectory)
  * - When TICKET_ID is empty, the branch name fallback sanitizes properly
- * - The reportFolder path matches what work.workflow.js passes to validateCheckGate
+ *
+ * These tests cover the LEAF only. The two path assertions used to join the
+ * leaf onto `<mainWorktree>/../tasks` — the worktrees-sibling guess that split
+ * /check in two — which made them read as confirmation of a layout the product
+ * no longer uses. They now join onto TASKS_BASE. The claim that this matches
+ * what the orchestrator uses is asserted for real, against both live
+ * resolvers, in check-dir-agreement.test.js.
  *
  * Run: node --test workflows/check/__tests__/check-setup-suffix.test.js
  */
@@ -17,6 +23,10 @@ const path = require('path');
 const { resolveTicketId, deriveTaskId } = require(
   path.join(__dirname, '..', 'hooks', 'check-setup.js')
 );
+
+// The configured tasks root — check-setup joins its leaf onto this, never onto
+// a path derived from the worktree layout.
+const TASKS_BASE = '/home/user/tasks';
 
 describe('check-setup suffix preservation (GH-181)', () => {
   it('TICKET_ID with suffix is used as-is (preserves /)', () => {
@@ -31,20 +41,15 @@ describe('check-setup suffix preservation (GH-181)', () => {
 
   it('suffixed TICKET_ID creates correct reportFolder path (subdirectory)', () => {
     const taskId = deriveTaskId('GH-181/phase1', 'feature/GH-181/phase1');
-    const mainWorktree = '/home/user/worktrees/my-repo';
-    const reportFolder = path.join(mainWorktree, '..', 'tasks', taskId);
+    const reportFolder = path.join(TASKS_BASE, taskId);
     // The key assertion: reportFolder should resolve to a subdirectory
-    assert.equal(
-      path.resolve(reportFolder),
-      path.resolve('/home/user/worktrees/tasks/GH-181/phase1')
-    );
+    assert.equal(path.resolve(reportFolder), path.resolve('/home/user/tasks/GH-181/phase1'));
   });
 
   it('unsuffixed TICKET_ID creates correct reportFolder path', () => {
     const taskId = deriveTaskId('GH-181', 'GH-181-fix-something');
-    const mainWorktree = '/home/user/worktrees/my-repo';
-    const reportFolder = path.join(mainWorktree, '..', 'tasks', taskId);
-    assert.equal(path.resolve(reportFolder), path.resolve('/home/user/worktrees/tasks/GH-181'));
+    const reportFolder = path.join(TASKS_BASE, taskId);
+    assert.equal(path.resolve(reportFolder), path.resolve('/home/user/tasks/GH-181'));
   });
 
   it('branch name fallback sanitizes special characters via deriveTaskId', () => {

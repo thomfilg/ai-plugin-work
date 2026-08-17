@@ -40,6 +40,17 @@ const { isEvidenceStale } = require(
 );
 const { STEPS } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
 
+// TASKS_BASE comes from the SAME resolver check-next.js uses, so both halves of
+// /check land in one directory. `config.tasksDir()` is deliberately NOT used:
+// config.js still derives TASKS_BASE from WORKTREES_BASE when the env is absent
+// (lib/config.js `config.TASKS_BASE = ... path.join(WORKTREES_BASE, 'tasks')`),
+// which is the guess resolve-base-dirs.js was written to refuse — reaching for
+// it here would rebuild the very split this resolves.
+const { resolvePluginConfig } = require(path.join(__dirname, '..', '..', 'lib', 'plugin-config'));
+const { validateTicketIdStructured } = require(
+  path.join(__dirname, '..', '..', 'lib', 'ticket-validation')
+);
+
 // Use centralized getBaseBranch() from config
 const getBaseBranch = config.getBaseBranch;
 
@@ -240,24 +251,54 @@ const { loadDocsFromPaths, DOCS_DENYLIST } = require(
 );
 
 /**
+ * The pre-fix layout: `<mainWorktree>/../tasks/<id>`. Tickets checked before
+ * the TASKS_BASE fix have reports stranded there and nothing reads that
+ * directory any more. Report it when it still holds check artifacts so the
+ * leftovers stay discoverable.
+ *
+ * Strictly informational — this never moves, copies or deletes anything, and
+ * never blocks a run. Copying them into TASKS_BASE would be worse than leaving
+ * them: they would land where the check gate reads and pass as current
+ * evidence for code that has since moved on.
+ */
+function findLegacyReportFolder(mainWorktreePath, taskId, reportFolder) {
+  if (!mainWorktreePath) return null;
+  const legacy = path.join(mainWorktreePath, '..', 'tasks', taskId);
+  if (path.resolve(legacy) === path.resolve(reportFolder)) return null;
+  try {
+    const stranded = fs.readdirSync(legacy).some((f) => f.endsWith('.check.md'));
+    return stranded ? path.resolve(legacy) : null;
+  } catch {
+    return null; // absent or unreadable — nothing to report
+  }
+}
+
+/** Branch name reduced to a safe single path segment. */
+function branchFallbackId(branchName) {
+  return String(branchName || '').replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+/**
  * Derive taskId from TICKET_ID or branch name fallback.
- * When TICKET_ID is provided (from orchestrator), use as-is — it may contain
- * a suffix like GH-181/phase1 which creates a subdirectory (intended behavior).
- * Only sanitize the branch name fallback: strip unsafe chars to avoid path issues.
+ *
+ * The leaf must match the orchestrator's or the base fix below only moves the
+ * split: check-next.js keys its dir on `tp.sanitizeTicketIdForPath(ticket)`, so
+ * this normalises through the same sanitiser (`config.safeTicketId` is that
+ * function with a cached provider config). Previously a GitHub `#279` failed
+ * this function's hand-rolled character test and silently became the BRANCH
+ * NAME, while the orchestrator used `GH-279`.
+ *
+ * Validation then goes through the shared `validateTicketIdStructured` — the
+ * same rule allocate-output-folder and request-index apply — which rejects
+ * traversal, absolute paths, empty ids and multi-slash suffixes. A suffix like
+ * `GH-181/phase1` still passes and still creates a subdirectory (GH-181).
+ * Anything rejected falls back to the sanitized branch name, as before.
  */
 function deriveTaskId(ticketId, branchName) {
-  if (ticketId) {
-    // Validate: reject absolute paths, path traversal, and unsafe characters.
-    // Allow one optional suffix segment (e.g., GH-181/phase1) with safe chars.
-    if (path.isAbsolute(ticketId)) return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
-    if (/\.\./.test(ticketId)) return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
-    // Allow: alphanumeric, hyphens, underscores, dots, and one / for suffix
-    if (!/^[a-zA-Z0-9._-]+(\/[a-zA-Z0-9._-]+)?$/.test(ticketId)) {
-      return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
-    }
-    return ticketId;
-  }
-  return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+  if (!ticketId) return branchFallbackId(branchName);
+  const safeId = config.safeTicketId(ticketId);
+  if (validateTicketIdStructured(safeId)) return branchFallbackId(branchName);
+  return safeId;
 }
 
 /**
@@ -266,10 +307,22 @@ function deriveTaskId(ticketId, branchName) {
 function main() {
   const mainWorktreePath = getMainWorktreePath();
   const branchName = getBranchName();
-
-  // Determine report folder - use parent of main worktree + tasks
   const taskId = deriveTaskId(TICKET_ID, branchName);
-  const reportFolder = path.join(mainWorktreePath, '..', 'tasks', taskId);
+
+  // Report folder comes from the configured TASKS_BASE — NOT from the worktree
+  // layout. `<mainWorktree>/../tasks/<id>` resolved to a sibling of the
+  // worktrees dir, so /check wrote its reports somewhere the orchestrator never
+  // looked: state in `<TASKS_BASE>/<id>/`, reports in `<worktrees>/tasks/<id>/`,
+  // and gates reporting "Missing report: tests.check.md" for files one
+  // directory over. Refuse rather than guess when TASKS_BASE is unset — a
+  // wrong-but-plausible path is what caused that.
+  const { TASKS_BASE, configError } = resolvePluginConfig(path.join(__dirname, '..', '..', 'work'));
+  if (!TASKS_BASE) {
+    console.log(JSON.stringify({ error: configError || 'TASKS_BASE not configured' }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+  const reportFolder = path.join(TASKS_BASE, taskId);
 
   // Generate changes hash
   const changesHash = generateChangesHash();
@@ -315,6 +368,11 @@ function main() {
     screenshotsFolder: path.join(reportFolder, 'screenshots'),
   };
 
+  // Informational only — see findLegacyReportFolder. Omitted when there is
+  // nothing stranded, so consumers can treat its presence as the signal.
+  const legacyReportFolder = findLegacyReportFolder(mainWorktreePath, taskId, reportFolder);
+  if (legacyReportFolder) result.legacyReportFolder = legacyReportFolder;
+
   // Always include all doc keys for stable JSON schema
   result.reviewDocs = loadedDocs.reviewDocs;
   result.qaDocs = loadedDocs.qaDocs;
@@ -350,5 +408,6 @@ if (require.main === module) {
     setupReportFolder,
     shouldPurgeReports,
     checkReportsCache,
+    findLegacyReportFolder,
   };
 }
