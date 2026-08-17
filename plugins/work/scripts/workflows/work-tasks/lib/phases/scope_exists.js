@@ -22,6 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
+const { matchScopeSection } = require('./_scope-section');
 const { loadTasksMd } = require('./_tasks-md-loader');
 
 const PLACEHOLDER_RE = /<[^>]+>|\{[^}]+\}|\bTBD\b|\bXXX\b|\?\?\?/;
@@ -66,9 +67,9 @@ function parseTaskBlocks(text) {
   for (let i = 1; i < parts.length; i += 2) {
     const num = Number(parts[i]);
     const body = (parts[i + 1] || '').replace(/\n## (?!Task\s)\S[\s\S]*$/, '');
-    const scopeMatch = body.match(
-      /###\s+Files in scope[^\n]*\n([\s\S]*?)(?=\n###\s|\n## |$(?![\s\S]))/
-    );
+    // Anchored at start-of-line — a backticked `### Files in scope` inside an
+    // AC bullet must not match as the heading and swallow the real list.
+    const scopeMatch = matchScopeSection(body, '### Files in scope');
     const typeMatch = body.match(/###\s+Type\s*\n([^\n#]+)/);
     const type = typeMatch ? typeMatch[1].trim().toLowerCase() : null;
     const entries = parseScopeEntries(scopeMatch ? scopeMatch[1] : '');

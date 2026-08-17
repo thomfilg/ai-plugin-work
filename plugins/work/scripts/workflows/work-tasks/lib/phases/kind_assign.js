@@ -25,6 +25,7 @@
 
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
 const { iterTaskBlocks } = require('./_task-block-iter');
+const { matchScopeSection } = require('./_scope-section');
 const { loadTasksMd, readFileSafe, tasksMdPath } = require('./_tasks-md-loader');
 const {
   TASK_TYPES,
@@ -59,13 +60,12 @@ function parseBlocks(text) {
     const type = typeMatch ? typeMatch[1].trim().toLowerCase() : 'unknown';
     // See note in traceability.js — `$` in multiline mode matches every
     // end-of-line, which terminates the non-greedy match prematurely.
-    const filesInScope = extractScopeList(
-      body.match(/###\s+Files in scope[^\n]*\n([\s\S]*?)(?=\n###\s|\n## |$(?![\s\S]))/)
-    );
+    // Anchored at start-of-line via _scope-section, so a backticked
+    // `### Files in scope` in an AC bullet does not match as the heading and
+    // truncate the list to nothing.
+    const filesInScope = extractScopeList(matchScopeSection(body, '### Files in scope'));
     const filesOutOfScope = extractScopeList(
-      body.match(
-        /###\s+Files explicitly out of scope[^\n]*\n([\s\S]*?)(?=\n###\s|\n## |$(?![\s\S]))/
-      )
+      matchScopeSection(body, '### Files explicitly out of scope')
     );
     out.push({ num: Number(num), type, filesInScope, filesOutOfScope });
   }
