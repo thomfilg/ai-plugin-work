@@ -53,6 +53,24 @@ if (!TASKS_BASE) {
   process.exit(0);
 }
 
+// Blocked for the same reason, one key over. Without a repo name the worktree
+// path cannot be built, and the `process.cwd()` fallback below would silently
+// classify follow-up against WHATEVER repository the command was launched in.
+// That fallback exists for "the worktree is gone / we are already inside it",
+// not for "nothing told us what to look for" — refuse instead of guessing.
+if (!MAIN_WORKTREE_FOLDER) {
+  console.log(
+    JSON.stringify({
+      type: 'follow_up_instruction',
+      action: 'blocked',
+      reason:
+        'REPO_NAME is not configured, so the ticket worktree ' +
+        `(<WORKTREES_BASE>/<REPO_NAME>-<TICKET>) cannot be resolved. Set REPO_NAME (WORKTREES_BASE=${WORKTREES_BASE || 'unset'}).`,
+    })
+  );
+  process.exit(0);
+}
+
 // Ticket provider for ID sanitization
 let tp;
 try {
@@ -251,8 +269,12 @@ function getNextInstruction(ticketId, prNumber) {
   const state = loadOrInitState(ticketId, prNumber);
 
   const tasksDir = path.join(TASKS_BASE, ticketId);
+  // MAIN_WORKTREE_FOLDER is guaranteed above, so a null here would mean an
+  // unset WORKTREES_BASE — already blocked by the TASKS_BASE/configError gate.
+  // cwd stays the fallback only for a RESOLVED path that does not exist.
   const candidateWorktree = worktreeDirFrom(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, ticketId);
-  const worktreeDir = fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
+  const worktreeDir =
+    candidateWorktree && fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
 
   // PR #542 cursor[bot]: monitor mutates state._ciAllJobs / _ciFailedLogs /
   // _ciStatus mid-loop, so a ctx built once before the loop hands a stale

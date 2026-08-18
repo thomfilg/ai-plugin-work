@@ -63,7 +63,13 @@ const { WORKTREES_BASE, TASKS_BASE, error: baseDirsError } = resolveBaseDirs(get
 // returns null rather than building a path around it.
 const MAIN_WORKTREE_FOLDER = configuredRepoName();
 
-if (!WORKTREES_BASE || !TASKS_BASE) {
+// REPO_NAME joins the gate: without it the ticket worktree
+// (<WORKTREES_BASE>/<REPO_NAME>-<TICKET>) is unresolvable, and every consumer
+// downstream — the dispatched gate's test commands, the PR-merged probe —
+// takes a null worktree as "use the current directory". Blocking here is what
+// lets those consumers treat a resolved worktree as a given.
+if (!WORKTREES_BASE || !TASKS_BASE || !MAIN_WORKTREE_FOLDER) {
+  const missingRepoName = WORKTREES_BASE && TASKS_BASE && !MAIN_WORKTREE_FOLDER;
   console.log(
     JSON.stringify({
       type: 'work_instruction',
@@ -75,8 +81,13 @@ if (!WORKTREES_BASE || !TASKS_BASE) {
         completedSteps: [],
         remainingSteps: [],
       },
-      reason: baseDirsError || 'WORKTREES_BASE or TASKS_BASE not configured',
-      suggestion: 'Set WORKTREES_BASE and TASKS_BASE in your .envrc or environment',
+      reason: missingRepoName
+        ? 'REPO_NAME is not configured, so the ticket worktree ' +
+          `(<WORKTREES_BASE>/<REPO_NAME>-<TICKET>) cannot be resolved (WORKTREES_BASE=${WORKTREES_BASE}).`
+        : baseDirsError || 'WORKTREES_BASE or TASKS_BASE not configured',
+      suggestion: missingRepoName
+        ? 'Set REPO_NAME in your .envrc or environment'
+        : 'Set WORKTREES_BASE and TASKS_BASE in your .envrc or environment',
     })
   );
   process.exit(0);

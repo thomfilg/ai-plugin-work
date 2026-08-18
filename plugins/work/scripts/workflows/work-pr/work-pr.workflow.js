@@ -51,9 +51,25 @@ function getTasksDir(ticketId) {
   return path.join(requireTasksBase(), safeTicketId(ticketId));
 }
 
+/**
+ * The ticket worktree, or throw naming the key to set.
+ *
+ * Never null: this value is handed to `execSync`/`safeExec` as `cwd`, and
+ * child_process reads a null cwd as "inherit" — so returning null would run
+ * `git rev-parse HEAD`, diffs and state updates against whatever repository
+ * the process was launched in. Refusing by name is the same contract
+ * getTasksDir() has via requireTasksBase().
+ */
 function getWorktreeDir(ticketId) {
-  const safe = safeTicketId(ticketId);
-  return config.worktreeDir(safe);
+  const dir = config.worktreeDir(safeTicketId(ticketId));
+  if (!dir) {
+    throw new Error(
+      'Cannot resolve the ticket worktree (<WORKTREES_BASE>/<REPO_NAME>-<TICKET>): ' +
+        `WORKTREES_BASE=${config.WORKTREES_BASE || 'unset'}, REPO_NAME=${process.env.REPO_NAME || 'unset'}. ` +
+        'Set both — a git command with an unresolved cwd would operate on the launch directory.'
+    );
+  }
+  return dir;
 }
 
 // ─── Step deciders (detectStepState helpers) ────────────────────────────────

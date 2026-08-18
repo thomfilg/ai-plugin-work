@@ -215,6 +215,14 @@ function readCiPhase(env, safeName) {
  */
 function probePrState(env, safeBase) {
   const worktreeDir = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, safeBase);
+  // Unresolvable and merely-absent both skip the probe, but say which: a null
+  // cwd would make `gh pr view` report on whatever repo the process launched
+  // in, which is the cross-ticket confusion this function guards against.
+  if (!worktreeDir) {
+    throw new Error(
+      'worktree directory unresolved (WORKTREES_BASE/REPO_NAME) — skipping PR-merged probe'
+    );
+  }
   if (!fs.existsSync(worktreeDir)) {
     throw new Error('worktree directory missing — skipping PR-merged probe');
   }
