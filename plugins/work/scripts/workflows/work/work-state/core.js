@@ -47,9 +47,20 @@ const CHECK_AGENTS = [
 const safeId = config.safeTicketId;
 
 /**
- * Get state file path for a ticket
+ * Get state file path for a ticket.
+ *
+ * TASKS_BASE is null when nothing configured it (lib/config.js no longer
+ * derives one). Refuse loudly here rather than letting `path.join(null, …)`
+ * throw a bare "Path must be a string" from deep inside a state read, which
+ * says nothing about what the operator has to fix.
  */
 function getStatePath(ticketId) {
+  if (!TASKS_BASE) {
+    throw new Error(
+      'TASKS_BASE is not configured — cannot locate .work-state.json. ' +
+        'Set TASKS_BASE (e.g. in .envrc) and make sure the environment is loaded in this process.'
+    );
+  }
   return path.join(TASKS_BASE, safeId(ticketId), '.work-state.json');
 }
 

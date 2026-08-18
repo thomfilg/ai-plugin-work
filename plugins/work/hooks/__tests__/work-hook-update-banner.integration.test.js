@@ -38,6 +38,14 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'work-hook-banner-'));
 });
 
+// These assert the BANNER, so the orchestrator behind it has to reach the
+// point of emitting a plan — which needs a tasks root. lib/config.js used to
+// derive one from WORKTREES_BASE, so this suite got a plan without configuring
+// anything; with the derivation gone the orchestrator (correctly) refuses and
+// there is no plan to prepend a banner to. Give the spawned hook a private
+// root so the banner stays the only thing under test.
+const TASKS_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'work-hook-banner-tasks-'));
+
 afterEach(() => {
   if (tmpRoot) {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -57,6 +65,7 @@ function runHook(userPrompt, extraEnv = {}) {
       // Isolate every persistence seam to this run's temp dir.
       WORK_UPDATE_CHECK_CACHE_DIR: path.join(tmpRoot, 'cache'),
       WORK_UPDATE_CHECK_MARKER_DIR: path.join(tmpRoot, 'marker'),
+      TASKS_BASE: process.env.TASKS_BASE || TASKS_BASE,
       ...extraEnv,
     };
     // Never let a globally-set opt-out suppress the check under test.

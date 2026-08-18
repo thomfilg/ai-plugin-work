@@ -179,10 +179,22 @@ const config = {
   })(),
 };
 
-// Derive TASKS_BASE from resolved WORKTREES_BASE — null-safe (hooks use getConfig.orExit)
-config.TASKS_BASE =
-  process.env.TASKS_BASE ||
-  (config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, 'tasks') : null);
+// TASKS_BASE is CONFIGURED, never derived. It used to fall back to
+// `path.join(WORKTREES_BASE, 'tasks')`, which is the guess `resolve-base-dirs.js`
+// was written to refuse (#788) — this was the last place still making it.
+//
+// The two are separate locations: worktrees live beside the repo, but the tasks
+// root is wherever the operator put it. This repo's own .envrc has them as
+// SIBLINGS (`<root>/worktrees` and `<root>/tasks`), so the derivation produced
+// `<root>/worktrees/tasks` — a directory nothing writes to. Because it looks
+// valid, every consumer accepted it, and the failure surfaced far away as
+// "Missing report: tests.check.md" for files that exist one directory over
+// (#791). A wrong-but-plausible path is worse than no path.
+//
+// null when unconfigured. Consumers are null-safe by contract: hooks fail open
+// (`getConfig.orExit`, or an explicit skip), and path builders refuse rather
+// than `path.join(null, …)`.
+config.TASKS_BASE = process.env.TASKS_BASE || null;
 
 config.jiraBrowseUrl = (ticketId) => `https://${config.JIRA_BASE_URL}/browse/${ticketId}`;
 

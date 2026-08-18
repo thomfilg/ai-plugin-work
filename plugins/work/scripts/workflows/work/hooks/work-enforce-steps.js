@@ -68,6 +68,15 @@ if (!ticketId.startsWith(config.TICKET_PROJECT_KEY + '-')) {
 }
 
 const TASKS_DIR = config.tasksDir(ticketId);
+// null when TASKS_BASE is unconfigured (lib/config.js no longer derives one).
+// Hooks fail open: without a tasks dir there is no session state to enforce
+// against, and `path.join(null, …)` would throw out of a PreToolUse hook.
+if (!TASKS_DIR) {
+  process.stderr.write(
+    'warn: work-enforce-steps: TASKS_BASE not configured; skipping enforcement\n'
+  );
+  process.exit(0);
+}
 const SESSION_FILE = path.join(TASKS_DIR, '.work-session');
 const WORK_PR_EXECUTED_FILE = path.join(TASKS_DIR, '.work-pr-executed');
 

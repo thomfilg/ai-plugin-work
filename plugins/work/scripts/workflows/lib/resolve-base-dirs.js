@@ -8,15 +8,20 @@
  *     getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
  *
  * That `||` is a silent guess. `getConfig` resolves `process.env[key] ||
- * config[key]` and never reads `.envrc`, and `lib/config.js` derives its own
- * `TASKS_BASE` the same way — so a process that starts without the environment
- * loaded gets a path that looks valid and is wrong. Worse, `lib/config.js`
- * ALSO guesses `WORKTREES_BASE` as `path.dirname(git rev-parse --show-toplevel)`
- * when the env is missing, so the two guesses compound: one process resolves
- * `<worktrees>/tasks/<TICKET>` while another resolves
- * `<repo-parent>/tasks/<TICKET>`. Reports get written to one and read from the
- * other, and the gates report "Missing report: tests.check.md" for files that
- * exist.
+ * config[key]` and never reads `.envrc`, and `lib/config.js` USED TO derive its
+ * own `TASKS_BASE` the same way — so a process that starts without the
+ * environment loaded got a path that looks valid and is wrong. Worse,
+ * `lib/config.js` ALSO guesses `WORKTREES_BASE` as
+ * `path.dirname(git rev-parse --show-toplevel)` when the env is missing, so the
+ * two guesses compounded: one process resolved `<worktrees>/tasks/<TICKET>`
+ * while another resolved `<repo-parent>/tasks/<TICKET>`. Reports got written to
+ * one and read from the other, and the gates reported
+ * "Missing report: tests.check.md" for files that exist.
+ *
+ * `lib/config.js` no longer derives TASKS_BASE at all — it is `process.env
+ * .TASKS_BASE || null`. The `!== derived` check in `configuredTasksBase` below
+ * therefore has nothing left to catch from that direction; it stays as a guard
+ * against the derivation coming back, and costs one comparison.
  *
  * A wrong-but-plausible path is worse than no path, so this module never
  * guesses. When WORKTREES_BASE resolves but TASKS_BASE was never configured it
@@ -56,7 +61,9 @@ function tasksBaseNotConfigured(worktreesBase, guessed) {
  *
  * Two sources qualify: an explicit `env.TASKS_BASE`, always trusted; and
  * `getConfig('TASKS_BASE')` when it differs from `derived`, i.e. when something
- * other than the `<WORKTREES_BASE>/tasks` derivation supplied it.
+ * other than the `<WORKTREES_BASE>/tasks` derivation supplied it. Since
+ * `lib/config.js` stopped deriving, the second branch only ever sees configured
+ * values — it is kept so a reintroduced derivation is refused here too.
  *
  * @param {Function} getConfig - `lib/get-config` accessor.
  * @param {object} env - Environment to read the explicit setting from.

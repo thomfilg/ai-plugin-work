@@ -167,6 +167,11 @@ async function main() {
 
   const ticketId = ticketIdFromBranch();
   const tasksDir = ticketId ? config.tasksDir(ticketId) : null;
+  // An unresolvable tasks dir means there is nowhere screenshots COULD be, so
+  // countScreenshots returns 0 and the gate would block against a directory it
+  // never located. Same fail-open rule as enforce-screenshot-requirement.js:
+  // decline to enforce rather than block on an unknown path.
+  if (!tasksDir) process.exit(0);
   if (countScreenshots(tasksDir) > 0) process.exit(0);
 
   // BLOCK: TSX changed but no screenshots

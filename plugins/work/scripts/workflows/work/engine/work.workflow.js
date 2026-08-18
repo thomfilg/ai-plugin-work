@@ -45,9 +45,13 @@ if (!tp) process.exit(0);
 // ─── Configuration ──────────────────────────────────────────────────────────
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
-const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
-const TASKS_BASE =
-  getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
+// Through resolve-base-dirs (#788) — this file still carried the verbatim
+// `getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks')` block that
+// module was written to replace, so the /work router kept guessing after every
+// other call site stopped. `baseDirsError` explains a refused TASKS_BASE by
+// naming both values; requirePaths() surfaces it.
+const { resolveBaseDirs } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
+const { WORKTREES_BASE, TASKS_BASE, error: baseDirsError } = resolveBaseDirs(getConfig);
 
 function requirePaths() {
   const missing = [];
@@ -57,10 +61,21 @@ function requirePaths() {
     console.log(
       JSON.stringify({
         error: true,
-        message: `${missing.join(', ')} not set. Set in env or ensure lib/config.js is loadable.`,
+        // Prefer the resolver's explanation: "not set" is misleading when
+        // TASKS_BASE was REFUSED rather than merely absent.
+        message:
+          baseDirsError ||
+          `${missing.join(', ')} not set. Set in env or ensure lib/config.js is loadable.`,
       })
     );
-    process.exit(1);
+    // Exit 0, not 1. The caller reads this JSON through lib/safe-exec, which
+    // returns its `fallback` on ANY non-zero exit — so exiting 1 threw the
+    // message away and work-hook.js printed "ORCHESTRATOR FAILED: command
+    // returned null" instead. Its `plan.error` branch already prints
+    // `ORCHESTRATOR ERROR: <message>` and exits 0; it was simply unreachable
+    // from here. This is the contract resolve-base-dirs.js describes: the
+    // orchestrators always emit structured JSON and surface `error` in it.
+    process.exit(0);
   }
 }
 

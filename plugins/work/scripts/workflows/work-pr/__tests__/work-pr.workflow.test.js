@@ -8,9 +8,21 @@
 
 const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const WORKFLOW_PATH = path.join(__dirname, '..', 'work-pr.workflow.js');
+
+// The workflow's stateDir IS the tasks base, and lib/config.js no longer
+// derives one from WORKTREES_BASE — so the cases that read stateDir or call
+// onTransition (which builds a tasks dir) need a configured root. They used to
+// run against the derived path without saying so. Point them at a private temp
+// root; the individual onTransition case below still overrides TASKS_BASE with
+// its own fixture.
+if (!process.env.TASKS_BASE) {
+  process.env.TASKS_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'work-pr-wf-tasks-'));
+}
 
 describe('work-pr.workflow.js', () => {
   const wf = require(WORKFLOW_PATH);
