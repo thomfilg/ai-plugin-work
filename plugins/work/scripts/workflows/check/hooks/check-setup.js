@@ -41,11 +41,10 @@ const { isEvidenceStale } = require(
 const { STEPS } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
 
 // TASKS_BASE comes from the SAME resolver check-next.js uses, so both halves of
-// /check land in one directory. `config.tasksDir()` is deliberately NOT used:
-// config.js still derives TASKS_BASE from WORKTREES_BASE when the env is absent
-// (lib/config.js `config.TASKS_BASE = ... path.join(WORKTREES_BASE, 'tasks')`),
-// which is the guess resolve-base-dirs.js was written to refuse — reaching for
-// it here would rebuild the very split this resolves.
+// /check land in one directory. `config.tasksDir()` would now resolve the same
+// value — lib/config.js no longer derives TASKS_BASE from WORKTREES_BASE — but
+// resolvePluginConfig stays, because it also yields the `configError` this file
+// surfaces when nothing configured a tasks root.
 const { resolvePluginConfig } = require(path.join(__dirname, '..', '..', 'lib', 'plugin-config'));
 const { validateTicketIdStructured } = require(
   path.join(__dirname, '..', '..', 'lib', 'ticket-validation')
