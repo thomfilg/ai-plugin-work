@@ -52,24 +52,17 @@ function getTasksDir(ticketId) {
 }
 
 /**
- * The ticket worktree, or throw naming the key to set.
+ * The ticket worktree, or null when WORKTREES_BASE/REPO_NAME cannot resolve it.
  *
- * Never null: this value is handed to `execSync`/`safeExec` as `cwd`, and
- * child_process reads a null cwd as "inherit" — so returning null would run
- * `git rev-parse HEAD`, diffs and state updates against whatever repository
- * the process was launched in. Refusing by name is the same contract
- * getTasksDir() has via requireTasksBase().
+ * Null must never reach a command as `cwd`: child_process reads a null cwd as
+ * "inherit", so `git rev-parse HEAD` would report on whatever repository the
+ * process was launched in. Callers therefore check it — this does NOT throw,
+ * because `onTransition` carries a never-throws contract (pinned by
+ * "does not throw for any step combination") and a workflow definition that
+ * throws from a transition hook takes the engine down with it.
  */
 function getWorktreeDir(ticketId) {
-  const dir = config.worktreeDir(safeTicketId(ticketId));
-  if (!dir) {
-    throw new Error(
-      'Cannot resolve the ticket worktree (<WORKTREES_BASE>/<REPO_NAME>-<TICKET>): ' +
-        `WORKTREES_BASE=${config.WORKTREES_BASE || 'unset'}, REPO_NAME=${process.env.REPO_NAME || 'unset'}. ` +
-        'Set both — a git command with an unresolved cwd would operate on the launch directory.'
-    );
-  }
-  return dir;
+  return config.worktreeDir(safeTicketId(ticketId));
 }
 
 // ─── Step deciders (detectStepState helpers) ────────────────────────────────
@@ -250,6 +243,17 @@ module.exports = {
     if (from === '3_pr_gen' && forwardTargets.includes(to)) {
       const tasksDir = getTasksDir(instanceId);
       const worktreeDir = getWorktreeDir(instanceId);
+      // Skip rather than run git with cwd:null, which child_process reads as
+      // "inherit" — `git rev-parse HEAD` would then record the SHA of whatever
+      // repository the process was launched in, and .pr-update-sha would gate
+      // this ticket on another repo's HEAD.
+      if (!worktreeDir) {
+        process.stderr.write(
+          `[work-pr] onTransition: cannot resolve the worktree for ${instanceId} ` +
+            '(set WORKTREES_BASE and REPO_NAME) — skipping .pr-update-sha write\n'
+        );
+        return;
+      }
       const headSha = safeExec('git rev-parse HEAD', { cwd: worktreeDir });
       if (!headSha) {
         process.stderr.write(

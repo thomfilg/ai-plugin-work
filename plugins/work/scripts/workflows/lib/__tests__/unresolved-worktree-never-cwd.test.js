@@ -13,7 +13,8 @@
  * The rule these tests pin is therefore about VISIBILITY, per site, and it is
  * not uniform — because the pre-PR behaviour was not uniform either:
  *
- *   - work-pr and runDispatchedGate REFUSE by name. Previously an unset
+ *   - runDispatchedGate REFUSES by name, and work-pr SKIPS with a warning
+ *     (its onTransition may not throw). Previously an unset
  *     REPO_NAME produced a `<worktrees>/my-project-<TICKET>` path that did not
  *     exist, so git/the gate command failed loudly. null means "inherit", so
  *     the same misconfiguration would quietly succeed against the wrong repo.
@@ -37,45 +38,51 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const WORKFLOWS = path.join(__dirname, '..', '..');
 
-/** Run a snippet in a child so a null config cannot leak into other suites. */
-function runNode(script, env) {
-  return execFileSync(process.execPath, ['-e', script], {
-    encoding: 'utf8',
-    timeout: 20000,
-    env: { ...process.env, ...env },
-  });
-}
-
 describe('an unresolved worktree refuses instead of falling back to cwd', () => {
-  it('work-pr getWorktreeDir throws naming WORKTREES_BASE and REPO_NAME', () => {
+  it('work-pr onTransition skips the sha write instead of running git in the cwd', () => {
+    // onTransition carries a never-throws contract (pinned by "does not throw
+    // for any step combination"), so this one degrades rather than refuses:
+    // the requirement is that git never runs with cwd:null, not that it throws.
     const tasks = fs.mkdtempSync(path.join(os.tmpdir(), 'unresolved-wt-'));
     try {
       const wf = path.join(WORKFLOWS, 'work-pr', 'work-pr.workflow.js');
-      const out = runNode(
-        `
-        try {
-          const wf = require(${JSON.stringify(wf)});
-          // onTransition reaches getWorktreeDir for the sha-recording step.
-          wf.onTransition('3_pr_gen', '4_screenshot_gate', 'SHA');
-          process.stdout.write('NO_THROW');
-        } catch (e) {
-          process.stdout.write(e.message);
-        }`,
-        { WORKTREES_BASE: '/srv/worktrees', TASKS_BASE: tasks, REPO_NAME: '' }
+      const r = spawnSync(
+        process.execPath,
+        [
+          '-e',
+          `const wf = require(${JSON.stringify(wf)});
+           wf.onTransition('3_pr_gen', '4_screenshot_gate', 'PROJ-1');
+           process.stdout.write('NO_THROW');`,
+        ],
+        {
+          encoding: 'utf8',
+          timeout: 20000,
+          env: {
+            ...process.env,
+            WORKTREES_BASE: '/srv/worktrees',
+            TASKS_BASE: tasks,
+            REPO_NAME: '',
+          },
+        }
       );
 
-      assert.match(out, /REPO_NAME/, `the error must name the key to set, got: ${out}`);
+      assert.equal(r.stdout, 'NO_THROW', `onTransition must not throw; stderr: ${r.stderr}`);
+      assert.match(
+        String(r.stderr || ''),
+        /cannot resolve the worktree/i,
+        'skipping must be reported, not silent'
+      );
       assert.equal(
-        out.includes('NO_THROW'),
+        fs.existsSync(path.join(tasks, 'PROJ-1', '.pr-update-sha')),
         false,
-        'a null worktree must not reach execSync, where cwd:null means "inherit"'
+        'no .pr-update-sha may be written from a HEAD read in an inherited cwd'
       );
     } finally {
       fs.rmSync(tasks, { recursive: true, force: true });

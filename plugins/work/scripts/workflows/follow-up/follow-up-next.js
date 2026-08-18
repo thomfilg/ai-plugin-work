@@ -34,7 +34,7 @@ if (require.main === module) {
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
 const { resolvePluginConfig } = require('../lib/plugin-config');
-const { worktreeDirFrom, configuredRepoName } = require('../lib/resolve-base-dirs');
+const { worktreeDirOrCwd, configuredRepoName } = require('../lib/resolve-base-dirs');
 const { libDir, WORKTREES_BASE, TASKS_BASE, configError } = resolvePluginConfig(
   path.join(__dirname, '..', 'work')
 );
@@ -251,21 +251,7 @@ function getNextInstruction(ticketId, prNumber) {
   const state = loadOrInitState(ticketId, prNumber);
 
   const tasksDir = path.join(TASKS_BASE, ticketId);
-  // cwd is the long-standing fallback for "the ticket worktree is not there —
-  // we are probably already inside it", and it is preserved: before REPO_NAME
-  // stopped defaulting to 'my-project', an unset one produced a path that
-  // never existed and landed here anyway, so this is not a new outcome. What
-  // IS new is that the two reasons are now distinguishable, so say which —
-  // classifying follow-up against the launch directory should never be silent.
-  const candidateWorktree = worktreeDirFrom(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, ticketId);
-  if (!candidateWorktree) {
-    process.stderr.write(
-      'warn: follow-up-next: REPO_NAME is not configured, so the ticket worktree cannot be ' +
-        'resolved; classifying against the current directory instead.\n'
-    );
-  }
-  const worktreeDir =
-    candidateWorktree && fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
+  const worktreeDir = worktreeDirOrCwd(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, ticketId);
 
   // PR #542 cursor[bot]: monitor mutates state._ciAllJobs / _ciFailedLogs /
   // _ciStatus mid-loop, so a ctx built once before the loop hands a stale

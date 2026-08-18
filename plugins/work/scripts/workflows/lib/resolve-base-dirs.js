@@ -139,8 +139,33 @@ function repoDirFrom(worktreesBase, repoName) {
   return path.join(worktreesBase, repoName);
 }
 
+/**
+ * The ticket worktree when it resolves AND exists, else the caller's cwd.
+ *
+ * `/follow-up` has always fallen back to the current directory for "the ticket
+ * worktree is not there — we are probably already inside it", and that stays.
+ * An unconfigured REPO_NAME used to reach the same place by a different route
+ * (it built `<worktrees>/my-project-<TICKET>`, which never existed), so the
+ * outcome is unchanged — but it is now distinguishable from a genuinely absent
+ * worktree, and classifying follow-up against the launch directory should never
+ * be silent. Lives here so the fallback policy is stated once rather than
+ * re-derived at each call site.
+ */
+function worktreeDirOrCwd(worktreesBase, repoName, ticketId) {
+  const candidate = worktreeDirFrom(worktreesBase, repoName, ticketId);
+  if (!candidate) {
+    process.stderr.write(
+      'warn: REPO_NAME is not configured, so the ticket worktree cannot be resolved; ' +
+        'using the current directory instead.\n'
+    );
+    return process.cwd();
+  }
+  return require('fs').existsSync(candidate) ? candidate : process.cwd();
+}
+
 module.exports = {
   resolveBaseDirs,
+  worktreeDirOrCwd,
   tasksBaseNotConfigured,
   configuredRepoName,
   worktreeDirFrom,
