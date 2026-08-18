@@ -53,7 +53,7 @@ function getTasksDir(ticketId) {
 
 function getWorktreeDir(ticketId) {
   const safe = safeTicketId(ticketId);
-  return config.worktreeDir(safe) || path.join(WORKTREES_BASE, `${config.REPO_NAME}-${safe}`);
+  return config.worktreeDir(safe);
 }
 
 // ─── Step deciders (detectStepState helpers) ────────────────────────────────

@@ -34,10 +34,16 @@ if (require.main === module) {
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
 const { resolvePluginConfig } = require('../lib/plugin-config');
+const { worktreeDirFrom, configuredRepoName } = require('../lib/resolve-base-dirs');
 const { libDir, WORKTREES_BASE, TASKS_BASE, configError } = resolvePluginConfig(
   path.join(__dirname, '..', 'work')
 );
-const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
+// REPO_NAME is CONFIGURED. It used to default to the documentation example
+// 'my-project', which was then joined into worktree paths — producing
+// `<worktrees>/my-project-<TICKET>`, a directory named after a placeholder that
+// looks exactly like a real worktree. Empty when unset; worktreeDirFrom()
+// returns null rather than building a path around it.
+const MAIN_WORKTREE_FOLDER = configuredRepoName();
 
 if (!TASKS_BASE) {
   console.log(
@@ -248,7 +254,7 @@ function getNextInstruction(ticketId, prNumber) {
   const state = loadOrInitState(ticketId, prNumber);
 
   const tasksDir = path.join(TASKS_BASE, ticketId);
-  const candidateWorktree = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketId}`);
+  const candidateWorktree = worktreeDirFrom(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, ticketId);
   const worktreeDir = fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
 
   // PR #542 cursor[bot]: monitor mutates state._ciAllJobs / _ciFailedLogs /

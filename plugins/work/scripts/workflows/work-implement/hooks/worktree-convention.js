@@ -11,6 +11,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const { worktreeDirFrom, configuredRepoName } = require(
+  path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs')
+);
 
 /** True when `p` is an existing directory (never throws). */
 function isDirectory(p) {
@@ -24,26 +27,20 @@ function isDirectory(p) {
 /**
  * Resolve `<WORKTREES_BASE>/<repo>-<safeTicketId>` when it exists.
  *
- * Uses config.REPO_NAME as the fallback repo name (the same fallback
- * work-next.js / follow-up-next.js use when CREATING worktrees) so detection
- * does not silently fail when the REPO_NAME env var is unset but worktrees
- * exist as `<base>/my-project-<TICKET>`.
+ * The repo name is the CONFIGURED one. This used to fall back to
+ * `config.REPO_NAME`, whose default is the documentation example 'my-project',
+ * with the rationale that detection should not "silently fail when the
+ * REPO_NAME env var is unset but worktrees exist as
+ * `<base>/my-project-<TICKET>`". Nobody's worktree is called that unless they
+ * were bitten by the same placeholder — probing for it can only match a
+ * directory some other guess created.
  *
  * @param {string} safeTicketId - filesystem-safe ticket id
  * @returns {string|null} resolved directory path, or null when not found
  */
 function conventionWorktreeDir(safeTicketId) {
-  const wbase = process.env.WORKTREES_BASE;
-  let repo = process.env.REPO_NAME;
-  if (!repo) {
-    try {
-      repo = require(path.join(__dirname, '..', '..', 'lib', 'config')).REPO_NAME;
-    } catch {
-      /* config unavailable — skip convention lookup */
-    }
-  }
-  if (!wbase || !repo) return null;
-  const candidate = path.join(wbase, `${repo}-${safeTicketId}`);
+  const candidate = worktreeDirFrom(process.env.WORKTREES_BASE, configuredRepoName(), safeTicketId);
+  if (!candidate) return null;
   return isDirectory(candidate) ? path.resolve(candidate) : null;
 }
 

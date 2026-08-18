@@ -22,6 +22,7 @@ const { enrich, runGate } = require('./step-enrichments');
 const { createDebugLog } = require('./debug-log');
 const { checkVersionSkew } = require('./version-skew');
 const preflight = require('./next-preflight');
+const { worktreeDirFrom } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
 
 const MAX_RECURSION = 10;
 
@@ -48,7 +49,7 @@ function returnInstruction(entry, ctx, log) {
 function buildEnrichCtx(env, loop) {
   const enrichWorktreeDir =
     env.WORKTREES_BASE && env.MAIN_WORKTREE_FOLDER
-      ? path.join(env.WORKTREES_BASE, `${env.MAIN_WORKTREE_FOLDER}-${loop.safeBase}`)
+      ? worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, loop.safeBase)
       : undefined;
   return {
     tasksDir: loop.tasksDir,
@@ -123,7 +124,7 @@ function tryStandardTransitions(env, loop, entry) {
  * but write evidence into ticket B.
  */
 function runDispatchedGate(env, loop, entry) {
-  const worktreeDir = path.join(env.WORKTREES_BASE, `${env.MAIN_WORKTREE_FOLDER}-${loop.safeBase}`);
+  const worktreeDir = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, loop.safeBase);
   const preGateResult = runGate(
     entry.step,
     loop.safeName,

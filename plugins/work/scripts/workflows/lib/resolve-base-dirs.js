@@ -102,4 +102,47 @@ function resolveBaseDirs(getConfig, env = process.env) {
   };
 }
 
-module.exports = { resolveBaseDirs, tasksBaseNotConfigured };
+/**
+ * The repo folder name used to build worktree paths, or '' when unconfigured.
+ *
+ * NOT `process.env.REPO_NAME || 'my-project'`. That placeholder was copied into
+ * five modules and fed straight into `path.join`, so an unset REPO_NAME
+ * produced `<worktrees>/my-project-<TICKET>` — a directory named after the
+ * documentation example. It looks like a real worktree, which is exactly what
+ * makes it dangerous.
+ */
+function configuredRepoName(env = process.env) {
+  return (env && env.REPO_NAME) || '';
+}
+
+/**
+ * `<worktreesBase>/<repoName>-<ticketId>` — the ONE place that naming
+ * convention is written down.
+ *
+ * Seven modules built this string inline (work/engine/inspect.js,
+ * work/engine/plan-generator.js, work/lib/next-preflight.js x2,
+ * work/lib/next-instruction.js x2, follow-up/follow-up-next.js,
+ * work-pr/work-pr.workflow.js). They take their bases through injected
+ * deps/env for testability, so they cannot simply call `config.worktreeDir()`;
+ * they call this instead and the convention stops being duplicated.
+ *
+ * Returns null when any input is missing rather than joining a placeholder.
+ */
+function worktreeDirFrom(worktreesBase, repoName, ticketId) {
+  if (!worktreesBase || !repoName || !ticketId) return null;
+  return path.join(worktreesBase, `${repoName}-${ticketId}`);
+}
+
+/** `<worktreesBase>/<repoName>` — the main worktree. Null when unresolvable. */
+function repoDirFrom(worktreesBase, repoName) {
+  if (!worktreesBase || !repoName) return null;
+  return path.join(worktreesBase, repoName);
+}
+
+module.exports = {
+  resolveBaseDirs,
+  tasksBaseNotConfigured,
+  configuredRepoName,
+  worktreeDirFrom,
+  repoDirFrom,
+};

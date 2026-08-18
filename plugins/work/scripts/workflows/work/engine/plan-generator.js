@@ -9,6 +9,7 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { STEP_PIPELINE } = require('../steps');
+const { worktreeDirFrom } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
 
 /**
  * @param {string|null} ticket
@@ -42,7 +43,8 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
   const t = ticket || '{TICKET}';
   const safeBase = ticket ? tp.sanitizeTicketIdForPath(t, callerProviderCfg) : t;
   const safeName = suffix ? safeBase + '/' + suffix : safeBase;
-  const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${safeBase}`;
+  const worktreeDir =
+    s?.worktreeDir || worktreeDirFrom(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, safeBase);
   const tasksDir = s?.tasksDir || `${TASKS_BASE}/${safeName}`;
 
   // Initialize session guard for workflow locking (skip when explicitly disabled)

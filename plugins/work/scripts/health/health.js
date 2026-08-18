@@ -18,6 +18,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const getConfig = require('../../scripts/workflows/lib/get-config');
+const {
+  worktreeDirFrom,
+  configuredRepoName,
+} = require('../../scripts/workflows/lib/resolve-base-dirs');
 const { listTicketDirs } = require('../stats/lib/ticket-dirs');
 const { statusLine } = require('../stats/lib/report-format');
 const { readStateFile } = require('../stats/lib/state-io');
@@ -32,10 +36,9 @@ const REQUIRED_KEYS = ['ticketId', 'currentStep', 'status', 'stepStatus', 'start
  * @returns {string|null} absolute path, or null when config is missing.
  */
 function worktreePath(ticket) {
-  const base = getConfig('WORKTREES_BASE');
-  const repo = getConfig('REPO_NAME');
-  if (!base || !repo) return null;
-  return path.join(base, `${repo}-${ticket}`);
+  // Through resolve-base-dirs — the one place the `<repo>-<ticket>` convention
+  // is written down. Returns null when either base is unconfigured.
+  return worktreeDirFrom(getConfig('WORKTREES_BASE'), configuredRepoName(), ticket);
 }
 
 /**

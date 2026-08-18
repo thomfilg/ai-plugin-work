@@ -19,6 +19,7 @@ const { parseReportStatus } = require(
 const { phaseLedgerBlocked } = require(path.join(__dirname, '..', 'lib', 'phase-ledger'));
 const { staleEvidenceFiles } = require(path.join(__dirname, '..', 'lib', 'evidence-staleness'));
 const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
+const { worktreeDirFrom } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
 
 // Report-type mapping for the parse-report-status fallback (echo-5219: reviewer
 // agents emit prose verdicts like "## Overall Assessment: ✅ Well-Implemented"
@@ -263,7 +264,7 @@ function inspect(ticket, providerConfig, suffix, deps) {
   const safeBase = tp.sanitizeTicketIdForPath(ticket, providerConfig);
   const safeName = suffix ? safeBase + '/' + suffix : safeBase;
 
-  s.worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`);
+  s.worktreeDir = worktreeDirFrom(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, safeBase);
   s.tasksDir = path.join(TASKS_BASE, safeName);
   s.worktreeExists = fileExists(s.worktreeDir);
   s.tasksDirExists = fileExists(s.tasksDir);
