@@ -19,6 +19,16 @@ const { describe, it, before, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
+// The audit-row case below writes a real .work-actions.json under TASKS_BASE.
+// lib/config.js no longer derives a tasks root from WORKTREES_BASE, so the
+// value it used to land on has to be configured. Use a private temp root
+// rather than whatever the ambient environment happens to point at.
+if (!process.env.TASKS_BASE) {
+  process.env.TASKS_BASE = require('fs').mkdtempSync(
+    path.join(require('os').tmpdir(), 'task-review-tasks-')
+  );
+}
+
 const { STEPS } = require('../../step-registry');
 
 // ─── Test doubles ────────────────────────────────────────────────────────────

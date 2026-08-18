@@ -153,6 +153,21 @@ describe('discoverWorkflows', () => {
 // ─── loadWorkflow ────────────────────────────────────────────────────────────
 
 describe('loadWorkflow', () => {
+  // work-pr is the exemplar of a valid workflow here, and its `stateDir` IS
+  // TASKS_BASE. This used to pass without configuring anything because
+  // lib/config.js derived a TASKS_BASE from WORKTREES_BASE for every process;
+  // the test was silently asserting against that derived path. With the
+  // derivation gone, a tasks root has to be configured — which is the point,
+  // so configure one rather than assert against a value nobody set.
+  const savedTasksBase = process.env.TASKS_BASE;
+  before(() => {
+    process.env.TASKS_BASE = process.env.TASKS_BASE || path.join(TEST_BASE, 'tasks');
+  });
+  after(() => {
+    if (savedTasksBase === undefined) delete process.env.TASKS_BASE;
+    else process.env.TASKS_BASE = savedTasksBase;
+  });
+
   it('loads valid workflow, validates required fields', () => {
     const wf = loadWorkflow('work-pr');
 
