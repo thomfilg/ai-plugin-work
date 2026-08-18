@@ -62,6 +62,22 @@ function addSpecAmendRun(add, ctx, specPath) {
 }
 
 /**
+ * spec.md is on disk — decide between amending it (a retry sent us back),
+ * resuming a mid-flight ledger, and deferring because it is genuinely done.
+ */
+function addSpecPresentAction(add, s, ctx, specPath) {
+  if (s.specPhaseMidFlight) {
+    addSpecResumeRun(add, s, ctx, specPath);
+    return;
+  }
+  if (s.specStale) {
+    addSpecAmendRun(add, ctx, specPath);
+    return;
+  }
+  add(ctx.STEPS.spec, 'DEFER', null, 'spec.md already exists');
+}
+
+/**
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx
@@ -79,16 +95,8 @@ module.exports = function specStep(add, s, ctx) {
     });
     return;
   }
-  if (s?.hasSpec && !s.specPhaseMidFlight && s.specStale) {
-    addSpecAmendRun(add, ctx, specPath);
-    return;
-  }
-  if (s?.hasSpec && !s.specPhaseMidFlight) {
-    add(STEPS.spec, 'DEFER', null, 'spec.md already exists');
-    return;
-  }
   if (s?.hasSpec) {
-    addSpecResumeRun(add, s, ctx, specPath);
+    addSpecPresentAction(add, s, ctx, specPath);
     return;
   }
   addSpecGenerateRun(add, s, ctx, briefPath, specPath);
