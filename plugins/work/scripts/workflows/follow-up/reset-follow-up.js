@@ -31,6 +31,7 @@ const path = require('path');
 
 const libDir = path.join(__dirname, '..', 'lib');
 const getConfig = require(path.join(libDir, 'get-config'));
+const { resolveBaseDirs } = require(path.join(libDir, 'resolve-base-dirs'));
 
 const TICKET_RE = /^[A-Z]+-\d+$/;
 const STATE_FILES = ['.follow-up-state.json', 'follow-up-comments.json'];
@@ -52,16 +53,22 @@ function parseArgs(argv) {
   return { positional, flags };
 }
 
+/**
+ * Through resolve-base-dirs (#788) — this file carried its own copy of the
+ * `|| path.join(WORKTREES_BASE, 'tasks')` guess that module was written to
+ * refuse. It matters more here than most: every path this command unlinks is
+ * containment-checked against the value, so a derived base would have made
+ * assertContained() vouch for the wrong directory.
+ */
 function resolveTasksBase() {
-  const worktreesBase = getConfig('WORKTREES_BASE') || process.env.WORKTREES_BASE;
-  const base = getConfig('TASKS_BASE') || (worktreesBase ? path.join(worktreesBase, 'tasks') : '');
-  if (!base) {
+  const { TASKS_BASE, error } = resolveBaseDirs(getConfig);
+  if (!TASKS_BASE) {
     process.stderr.write(
-      'reset-follow-up: TASKS_BASE not configured (check .envrc / get-config).\n'
+      `reset-follow-up: ${error || 'TASKS_BASE not configured (check .envrc / get-config).'}\n`
     );
     process.exit(1);
   }
-  return base;
+  return TASKS_BASE;
 }
 
 function assertContained(targetPath, baseDir) {

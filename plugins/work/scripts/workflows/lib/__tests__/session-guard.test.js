@@ -492,6 +492,12 @@ describe('session-guard', () => {
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
     const CHECK_TICKET = 'CHECK-777';
 
+    // These cases write /check state to TEMP_TASKS and used to pass
+    // WORKTREES_BASE alone, relying on lib/config.js deriving
+    // `<WORKTREES_BASE>/tasks`. That made the suite an assertion about the
+    // derivation rather than about stop suppression. TASKS_BASE is now passed
+    // explicitly — same directory, but stated instead of inferred.
+
     before(() => {
       fs.mkdirSync(path.join(TEMP_TASKS, CHECK_TICKET), { recursive: true });
     });
@@ -520,44 +526,60 @@ describe('session-guard', () => {
     });
 
     it('allows stop when /check workflow is active', async () => {
-      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      await runCli(['init', CHECK_TICKET, '/work'], {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+      });
       writeCheckState({ status: 'in_progress', currentStep: '1_setup' });
 
       const r = await runHook({ stop_message: '' }, 'Stop', {
         WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
         SESSION_GUARD_TICKET_ID: CHECK_TICKET,
       });
       assert.equal(r.code, 0, 'should allow stop when /check is active');
     });
 
     it('allows stop when /check is active under the legacy .check2-state.json name', async () => {
-      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      await runCli(['init', CHECK_TICKET, '/work'], {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+      });
       writeCheckState({ status: 'in_progress', currentStep: '1_setup' }, '.check2-state.json');
 
       const r = await runHook({ stop_message: '' }, 'Stop', {
         WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
         SESSION_GUARD_TICKET_ID: CHECK_TICKET,
       });
       assert.equal(r.code, 0, 'should allow stop when the legacy check state is active');
     });
 
     it('still blocks stop when /check is NOT active', async () => {
-      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      await runCli(['init', CHECK_TICKET, '/work'], {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+      });
       // No check state written
 
       const r = await runHook({ stop_message: '' }, 'Stop', {
         WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
         SESSION_GUARD_TICKET_ID: CHECK_TICKET,
       });
       assert.equal(r.code, 2, 'should block stop without /check');
     });
 
     it('still blocks stop when /check has completed', async () => {
-      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      await runCli(['init', CHECK_TICKET, '/work'], {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+      });
       writeCheckState({ status: 'complete' });
 
       const r = await runHook({ stop_message: '' }, 'Stop', {
         WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
         SESSION_GUARD_TICKET_ID: CHECK_TICKET,
       });
       assert.equal(r.code, 2, 'should block stop when /check completed');

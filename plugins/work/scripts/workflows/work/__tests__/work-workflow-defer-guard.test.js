@@ -14,6 +14,16 @@ const path = require('path');
 const fs = require('fs');
 
 const HOOK_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
+
+// A tasks root has to be CONFIGURED — lib/config.js no longer derives one from
+// WORKTREES_BASE, so `getConfig.require('TASKS_BASE')` used to succeed here on
+// the derived path (and, in CI where nothing exports TASKS_BASE, that
+// derivation was the only thing supplying a value). Fall back to a private
+// temp root so the suite states its own location instead of inheriting one.
+// The spawned orchestrator picks it up through the inherited env.
+if (!process.env.TASKS_BASE) {
+  process.env.TASKS_BASE = fs.mkdtempSync(path.join(require('os').tmpdir(), 'defer-guard-tasks-'));
+}
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
 const TASKS_BASE = getConfig.require('TASKS_BASE');
 // TEST-* dirs are cleaned globally by scripts/run-tests.sh via test-cleanup.js

@@ -65,6 +65,7 @@ function isNonLegacyRow(row) {
 }
 
 let _tasksBase;
+/** TASKS_BASE or throw — for writers, which cannot record a row without one. */
 function getTasksBase() {
   if (!_tasksBase) _tasksBase = getConfig.require('TASKS_BASE');
   return _tasksBase;
@@ -103,6 +104,14 @@ function actionsFilePath(ticketId) {
  * @returns {Array<object>}
  */
 function loadActions(ticketId) {
+  // No tasks root ⇒ no actions file ⇒ no rows. Resolving the path is part of
+  // "unreadable" as far as this function's contract goes: it promises callers
+  // never see a throw, and getTasksBase() throws when TASKS_BASE is
+  // unconfigured. That branch was unreachable while lib/config.js derived a
+  // TASKS_BASE for every process; with the derivation gone it is live, and
+  // reports.js buildCostReport (via generatePlan) is one caller that took the
+  // documented no-throw guarantee at its word.
+  if (!getConfig('TASKS_BASE')) return [];
   return loadActionsFromFile(actionsFilePath(ticketId));
 }
 

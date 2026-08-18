@@ -14,6 +14,15 @@ const path = require('path');
 const { spawnHook } = require('./_helpers/run-hook');
 
 const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'enforce-step-workflow.js');
+
+// A tasks root has to be CONFIGURED — lib/config.js no longer derives one from
+// WORKTREES_BASE, which is what used to satisfy this require (and, in CI where
+// nothing exports TASKS_BASE, was the only thing supplying a value). Fall back
+// to a private temp root so the suite states its own location; the spawned
+// hook inherits it through the environment.
+if (!process.env.TASKS_BASE) {
+  process.env.TASKS_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'enforce-step-wf-tasks-'));
+}
 const getConfig = require(path.join(__dirname, '..', 'get-config'));
 const TASKS_BASE = getConfig.require('TASKS_BASE');
 // TEST-* dirs are cleaned globally by scripts/run-tests.sh via test-cleanup.js
