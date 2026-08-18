@@ -7,7 +7,6 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 
 /**
  * The Claude session id Claude passes on stdin as `{ session_id }`, or '' when
@@ -23,14 +22,17 @@ function readSessionId() {
 }
 
 /**
- * TASKS_BASE for the current project — direnv exports it into the session env;
- * falls back to <WORKTREES_BASE>/tasks, then '' (render nothing).
+ * TASKS_BASE for the current project — direnv exports it into the session env,
+ * otherwise '' (render nothing).
+ *
+ * The `<WORKTREES_BASE>/tasks` fallback is gone (#788's rule): the two are
+ * separate locations, so the derivation pointed the statusline at a directory
+ * nothing writes to. Rendering nothing is honest; rendering another
+ * directory's state as this project's is not.
  * @returns {string}
  */
 function tasksBase() {
-  if (process.env.TASKS_BASE) return process.env.TASKS_BASE;
-  if (process.env.WORKTREES_BASE) return path.join(process.env.WORKTREES_BASE, 'tasks');
-  return '';
+  return process.env.TASKS_BASE || '';
 }
 
 module.exports = { readSessionId, tasksBase };

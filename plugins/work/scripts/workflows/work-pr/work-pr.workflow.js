@@ -24,7 +24,11 @@ const path = require('path');
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
 const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
 const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
-const TASKS_BASE = getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks');
+// TASKS_BASE is configured, never derived — see lib/config.js. This file used to
+// carry its own `|| path.join(WORKTREES_BASE, 'tasks')` copy of the guess #788
+// removed, which survived even after config.js stopped making it. Fail at load
+// with a named key, exactly as WORKTREES_BASE does on the line above.
+const TASKS_BASE = getConfig.require('TASKS_BASE');
 const { normalizeTicketArg } = require(path.join(__dirname, '..', 'lib', 'ticket-args'));
 const safeTicketId = config.safeTicketId;
 const { safeExec, computeScreenshotHash, buildInspectData } = require(
@@ -35,7 +39,7 @@ const { T, getRuntime } = require(path.join(__dirname, '..', 'lib', 'instruction
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getTasksDir(ticketId) {
-  return config.tasksDir(ticketId) || path.join(TASKS_BASE, safeTicketId(ticketId));
+  return path.join(TASKS_BASE, safeTicketId(ticketId));
 }
 
 function getWorktreeDir(ticketId) {
