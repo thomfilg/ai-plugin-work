@@ -22,45 +22,28 @@ const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 
 // Per-process cache to avoid re-fetching/re-diffing within same invocation
 let _cachedTsxChanges = undefined;
-let _cachedRepoRoot = undefined;
-
-function getRepoRoot() {
-  if (_cachedRepoRoot !== undefined) return _cachedRepoRoot;
-  try {
-    _cachedRepoRoot = execSync('git rev-parse --show-toplevel 2>/dev/null', {
-      encoding: 'utf8',
-    }).trim();
-  } catch {
-    _cachedRepoRoot = null;
-  }
-  return _cachedRepoRoot;
-}
 
 /**
  * Resolve the screenshots dir, or null when nothing configured a tasks root.
  *
- * The configured location comes first. The repo-anchored `<repo-parent>/tasks`
- * fallback stays: it is the legacy layout, and it only fires when neither
- * TASKS_BASE nor WORKTREES_BASE is set. (From a ticket worktree it still
- * resolves to `<worktrees>/tasks` — the split check-setup.js just stopped
- * producing — but it is at least anchored to a real repo.)
+ * Configured only — `config.tasksDir()` or nothing.
  *
- * The old last resort, `process.cwd()/../tasks/<id>/screenshots`, is gone. A
- * hook's cwd is wherever the agent happened to be, so it invented a
- * plausible-looking path with no relationship to the repo — and because the
- * caller read "directory does not exist" as "no screenshots", the guess made
- * the hook BLOCK rather than fail open. Unresolvable now returns null and the
- * callers decline to enforce.
+ * Two fallbacks used to sit here and are both gone. `process.cwd()/../tasks`
+ * went first: a hook's cwd is wherever the agent happened to be, so it invented
+ * a plausible path with no relationship to the repo — and because the caller
+ * read "directory does not exist" as "no screenshots", the guess made the hook
+ * BLOCK rather than fail open. The repo-anchored `<repo-parent>/tasks` was kept
+ * at the time as "at least anchored to a real repo", but that is the same
+ * `<worktrees>/tasks` location the split check-setup.js stopped producing — a
+ * directory nothing writes to. Being anchored to something real does not make a
+ * path correct; it only makes the wrong answer harder to spot.
+ *
+ * Unresolvable returns null and the callers decline to enforce.
  */
 function getScreenshotDir(ticketId) {
   const config = require('../config');
   const tasksDir = config.tasksDir(ticketId);
-  if (tasksDir) return path.join(tasksDir, 'screenshots');
-  const repoRoot = getRepoRoot();
-  if (repoRoot) {
-    return path.join(path.dirname(repoRoot), 'tasks', ticketId, 'screenshots');
-  }
-  return null;
+  return tasksDir ? path.join(tasksDir, 'screenshots') : null;
 }
 
 function getTicketId() {

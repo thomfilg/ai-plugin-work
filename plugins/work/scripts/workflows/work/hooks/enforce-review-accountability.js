@@ -92,8 +92,12 @@ async function main() {
 
   // Check for accountability file
   const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
-  const TASKS_BASE =
-    getConfig('TASKS_BASE') || path.join(getConfig.orExit('WORKTREES_BASE'), 'tasks');
+  // Same guess #788 refuses and #792 removed from lib/config.js: TASKS_BASE is
+  // configured, never derived from WORKTREES_BASE. Unconfigured ⇒ there is no
+  // accountability file to look for, so fail open rather than judge against a
+  // directory that was never located.
+  const TASKS_BASE = getConfig('TASKS_BASE');
+  if (!TASKS_BASE) return;
   let safeTicketId = ticketId;
   try {
     safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(

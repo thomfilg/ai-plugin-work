@@ -25,7 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { resolveTasksBaseWithFallback } = require('../ticket-validation');
+const { requireTasksBase } = require('../ticket-validation');
 const { resolveTicketWorktree } = require('../resolve-ticket-worktree');
 
 let logNextScriptEvent;
@@ -308,7 +308,7 @@ function executePhase(opts, ticket, startedAt) {
     agent: process.env.CLAUDE_CURRENT_AGENT || null,
   });
   const tokenSnap = snapshotCompanionToken(path.basename(phaseStateCliPath), ticket, scriptName);
-  const tasksBase = resolveTasksBaseWithFallback();
+  const tasksBase = requireTasksBase();
   const tasksDir = path.join(tasksBase, ticket);
   if (!fs.existsSync(tasksDir)) die(scriptName, `tasks dir not found: ${tasksDir}`);
   const manifest = readRelatedManifest(tasksDir);

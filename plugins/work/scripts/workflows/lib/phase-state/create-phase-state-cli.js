@@ -35,7 +35,7 @@ const path = require('node:path');
 
 const { consumeToken } = require('../scripts/write-report');
 const { normalizeAgentName } = require('../agent-detection');
-const { resolveTasksBaseWithFallback } = require('../ticket-validation');
+const { requireTasksBase } = require('../ticket-validation');
 
 let configMod;
 try {
@@ -88,7 +88,7 @@ function assertTicketIdShape(ticketId) {
 
 function getStatePath(stateFileName, ticketId) {
   assertTicketIdShape(ticketId);
-  const base = path.resolve(resolveTasksBaseWithFallback());
+  const base = path.resolve(requireTasksBase());
   const safeId = sanitizeId(ticketId);
   const resolved = path.resolve(base, safeId, stateFileName);
   if (!resolved.startsWith(base + path.sep)) {

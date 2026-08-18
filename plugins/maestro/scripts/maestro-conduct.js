@@ -22,6 +22,7 @@ const path = require('path');
 const tmux = require('./lib/maestro-conduct/tmux');
 const state = require('./lib/maestro-conduct/state');
 const workstate = require('./lib/maestro-conduct/workstate');
+const baseDirs = require('./lib/maestro-conduct/shared/base-dirs');
 const { phaseFor, escalationFor } = require('./lib/maestro-conduct/phase-registry');
 const actions = require('./lib/maestro-conduct/actions');
 const alerts = require('./lib/maestro-conduct/alerts');
@@ -104,7 +105,9 @@ function ctxFor(session) {
   const row = skillRegistry.get(skill) || skillRegistry.get('work');
   const snap = row.snapshot(ticket) || { phase: null, step: null };
   const { phase, step } = snap;
-  const worktree = path.join(workstate.WORKTREES_BASE, `${REPO_NAME}-${ticket}`);
+  // Through shared/base-dirs.js — null when WORKTREES_BASE is unconfigured,
+  // rather than `path.join('~/worktrees', …)` inventing a plausible directory.
+  const worktree = baseDirs.worktreeDir(REPO_NAME, ticket);
   const pane = tmux.capture(session);
   const launch = manifest.launchConfigForTask(ticket);
   // WP-09: per-ticket runtime (mixed fleets) + the pane dialect gating every

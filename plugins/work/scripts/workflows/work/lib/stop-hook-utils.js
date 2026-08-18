@@ -116,14 +116,22 @@ function isRecentlyModified(filePath) {
   }
 }
 
-/** Directories that may hold the current task's reports: cwd + main worktree. */
-function reviewDirsToCheck(config, cwd) {
-  const mainWorktree = config.repoDir();
-  const dirsToCheck = [cwd];
-  if (cwd !== mainWorktree) {
-    dirsToCheck.push(mainWorktree);
-  }
-  return dirsToCheck;
+/**
+ * The task folder holding the current task's reports, as a 0-or-1 element list.
+ *
+ * This replaces `reviewDirsToCheck(config, cwd)`, which returned WORKTREE roots
+ * (`cwd` plus `config.repoDir()`) that callers then joined `tasks/<id>` onto —
+ * i.e. it looked for reports in `<cwd>/tasks/<id>` and `<repo>/tasks/<id>`.
+ * Neither is the configured tasks root, so with TASKS_BASE anywhere else these
+ * Stop hooks silently found nothing and never warned. Same defect #791 fixed in
+ * /check: a worktree-relative tasks dir is a guess, not a location.
+ *
+ * Empty when no tasks root is configured — callers then have nothing to check
+ * and fall through, which is the fail-open behaviour Stop hooks require.
+ */
+function reviewTaskFolders(config, taskId) {
+  const folder = taskId ? config.tasksDir(taskId) : null;
+  return folder ? [folder] : [];
 }
 
 module.exports = {
@@ -132,6 +140,6 @@ module.exports = {
   isRecentlyModified,
   loadStopHookConfig,
   readStdin,
-  reviewDirsToCheck,
+  reviewTaskFolders,
   shouldSkipCodexStop,
 };

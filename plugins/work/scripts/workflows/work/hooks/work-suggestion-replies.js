@@ -267,9 +267,8 @@ function blockIfRepliesMissing(currentTaskId, allIssues, replyContent, totalIssu
   process.exit(2);
 }
 
-/** Check one directory's code-review + reply pair; may exit(0) or exit(2). */
-function checkDirectory(dir, currentTaskId) {
-  const taskFolder = path.join(dir, 'tasks', currentTaskId);
+/** Check one task folder's code-review + reply pair; may exit(0) or exit(2). */
+function checkDirectory(taskFolder) {
   const codeReviewPath = path.join(taskFolder, 'code-review.check.md');
   const replyPath = path.join(taskFolder, 'code-review-reply.check.md');
 
@@ -324,8 +323,8 @@ async function main() {
     process.exit(0);
   }
 
-  for (const dir of stopHookUtils.reviewDirsToCheck(config, cwd)) {
-    checkDirectory(dir, currentTaskId);
+  for (const taskFolder of stopHookUtils.reviewTaskFolders(config, currentTaskId)) {
+    checkDirectory(taskFolder);
   }
 
   process.exit(0);

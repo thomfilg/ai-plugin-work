@@ -22,20 +22,17 @@ const { conventionWorktreeDir } = require(path.join(__dirname, 'worktree-convent
  * Shared by checkTddPhase and the R6 path gate.
  */
 function resolveTaskBase() {
-  let taskBase;
+  // Configured only. The `<HOME>/worktrees/tasks` last resort is gone: a
+  // home-anchored path is not the operator's tasks root, it merely looks like
+  // one, and because it looks valid every caller accepted it. Different anchor
+  // from the `<WORKTREES_BASE>/tasks` derivation removed in #792, same failure.
+  // null ⇒ callers fail open (this is a PreToolUse hook).
   try {
     const cfg = require(path.join(__dirname, '..', '..', 'lib', 'config'));
-    taskBase = process.env.TASKS_BASE || cfg.TASKS_BASE || null;
+    return process.env.TASKS_BASE || cfg.TASKS_BASE || null;
   } catch {
-    taskBase = process.env.TASKS_BASE || null;
+    return process.env.TASKS_BASE || null;
   }
-  if (!taskBase) {
-    taskBase =
-      process.env.HOME || process.env.USERPROFILE
-        ? path.join(process.env.HOME || process.env.USERPROFILE, 'worktrees', 'tasks')
-        : null;
-  }
-  return taskBase;
 }
 
 /**

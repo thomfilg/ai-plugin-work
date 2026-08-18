@@ -12,27 +12,19 @@
 const fs = require('fs');
 const path = require('path');
 
-// Find code-review.check.md for a specific task
-function findCodeReviewForTask(config, baseDir, taskId) {
-  if (!taskId) return null;
-
-  const tasksDir = path.join(baseDir, 'tasks');
-  const taskFolder = path.join(tasksDir, config.safeTicketId(taskId));
+// Find code-review.check.md inside an already-resolved task folder.
+// Took `(config, baseDir, taskId)` and built `<baseDir>/tasks/<id>` itself —
+// a worktree-relative guess. The caller now passes the configured folder from
+// stop-hook-utils.reviewTaskFolders(), so this only reads.
+function findCodeReviewForTask(taskFolder) {
+  if (!taskFolder) return null;
   const reviewFile = path.join(taskFolder, 'code-review.check.md');
-
-  if (fs.existsSync(reviewFile)) {
-    return reviewFile;
-  }
-
-  return null;
+  return fs.existsSync(reviewFile) ? reviewFile : null;
 }
 
-// Find QA reports for a specific task
-function findQaReportsForTask(config, baseDir, taskId) {
-  if (!taskId) return [];
-
-  const tasksDir = path.join(baseDir, 'tasks');
-  const taskFolder = path.join(tasksDir, config.safeTicketId(taskId));
+// Find QA reports inside an already-resolved task folder (see above).
+function findQaReportsForTask(taskFolder) {
+  if (!taskFolder) return [];
 
   if (!fs.existsSync(taskFolder)) return [];
 
