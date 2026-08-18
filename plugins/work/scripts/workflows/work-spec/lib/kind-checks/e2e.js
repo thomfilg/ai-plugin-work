@@ -41,10 +41,19 @@ function readGherkin(tasksDir) {
   }
 }
 
+/**
+ * The worktree root, or null when the caller did not supply one.
+ *
+ * The fallback was `path.resolve(ctx.tasksDir, '..', '..')` — "tasksDir is
+ * typically <worktree>/tasks/<TICKET>". That layout assumption is the one
+ * #791 removed: TASKS_BASE is configured independently, so climbing two
+ * levels lands on the parent of TASKS_BASE, an unrelated directory. Selector
+ * files were then resolved against it, missed, and reported as
+ * "declared as existing but the file does not exist" — a FALSE spec error.
+ * Unverifiable is a warning, never an error.
+ */
 function resolveWorktreeRoot(ctx) {
-  if (ctx.worktreeRoot && typeof ctx.worktreeRoot === 'string') return ctx.worktreeRoot;
-  // Fall back: tasksDir is typically <worktree>/tasks/<TICKET>
-  return path.resolve(ctx.tasksDir, '..', '..');
+  return ctx.worktreeRoot && typeof ctx.worktreeRoot === 'string' ? ctx.worktreeRoot : null;
 }
 
 function parseSelectorLines(block) {
@@ -127,6 +136,13 @@ function validate(ctx) {
         continue;
       }
       if (entry.kind === 'existing') {
+        if (!worktreeRoot) {
+          warnings.push(
+            `Cannot verify selector \`${entry.selector}\` in \`${entry.file}\`: no worktree root ` +
+              'was supplied, and one is never inferred from the tasks dir. Pass ctx.worktreeRoot.'
+          );
+          continue;
+        }
         const filePath = path.resolve(worktreeRoot, entry.file);
         let content;
         try {

@@ -35,7 +35,11 @@ const fs = require('fs');
 const path = require('path');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-const SCAN_ROOTS = [path.join(REPO_ROOT, 'plugins')];
+// The whole repo, not just plugins/: `factories/` holds the vendored masters
+// (storeDiscovery is synced from there into three plugins, so a guess
+// introduced in the master would be copied into all of them) and `scripts/`
+// holds the repo-level tooling.
+const SCAN_ROOTS = ['plugins', 'factories', 'scripts'].map((d) => path.join(REPO_ROOT, d));
 
 /** The modules that legitimately own a base-dir convention. */
 const ALLOWED = new Set(

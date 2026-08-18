@@ -220,18 +220,17 @@ function auditArtifacts(tasksDir, manifest) {
     };
   }
 
-  // worktree root = parent of tasksDir if tasks live under <worktree>/tasks
-  // otherwise resolve via the canonical TASKS_BASE → worktree heuristic. We
-  // probe both: the worktree root for the file, and the tasksDir's parent.
+  // The worktree root is whatever the caller supplied — `manifest.worktreeRoot`.
+  // Two climbed candidates used to be appended, `<tasksDir>/../..` and
+  // `<tasksDir>/..`, on the assumption that tasks live under `<worktree>/tasks`.
+  // TASKS_BASE is configured independently (#791), so those resolve to the
+  // parent of TASKS_BASE and its grandparent — arbitrary directories that
+  // happen to exist. A surface file "found" under one of them is a false
+  // positive, which is worse here than finding nothing.
   const candidateRoots = [];
-  // `ctx.worktreeRoot` is the truth, but this is a pure function — caller
-  // passes `manifest`. Use the manifest's optional `worktreeRoot` if set,
-  // otherwise climb from tasksDir.
   if (manifest.worktreeRoot && typeof manifest.worktreeRoot === 'string') {
     candidateRoots.push(manifest.worktreeRoot);
   }
-  candidateRoots.push(path.resolve(tasksDir, '..', '..'));
-  candidateRoots.push(path.resolve(tasksDir, '..'));
 
   function resolveSurfacePath(file) {
     for (const root of candidateRoots) {
