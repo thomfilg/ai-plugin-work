@@ -38,11 +38,8 @@ const { worktreeDirFrom, configuredRepoName } = require('../lib/resolve-base-dir
 const { libDir, WORKTREES_BASE, TASKS_BASE, configError } = resolvePluginConfig(
   path.join(__dirname, '..', 'work')
 );
-// REPO_NAME is CONFIGURED. It used to default to the documentation example
-// 'my-project', which was then joined into worktree paths — producing
-// `<worktrees>/my-project-<TICKET>`, a directory named after a placeholder that
-// looks exactly like a real worktree. Empty when unset; worktreeDirFrom()
-// returns null rather than building a path around it.
+// Configured only — the old `|| 'my-project'` default put the docs placeholder
+// into real worktree paths. See lib/resolve-base-dirs.js.
 const MAIN_WORKTREE_FOLDER = configuredRepoName();
 
 if (!TASKS_BASE) {

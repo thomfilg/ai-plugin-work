@@ -23,45 +23,65 @@ const { worktreeDirFrom } = require(path.join(__dirname, '..', '..', 'lib', 'res
  *   WORKTREES_BASE, TASKS_BASE, MAIN_WORKTREE_FOLDER }
  * @returns {object} plan result
  */
-function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix, deps) {
-  const {
-    tp,
-    TDD_PROTOCOL,
-    TDD_GATED_STEPS,
-    STEPS,
-    parseTasks,
-    buildTaskPrompt,
-    fileExists,
-    run,
-    WORKTREES_BASE,
-    TASKS_BASE,
-    MAIN_WORKTREE_FOLDER,
-  } = deps;
-
-  const plan = [];
-  const mode = rework ? 'rework' : 'resume';
-  const t = ticket || '{TICKET}';
-  const safeBase = ticket ? tp.sanitizeTicketIdForPath(t, callerProviderCfg) : t;
-  const safeName = suffix ? safeBase + '/' + suffix : safeBase;
-  const worktreeDir =
-    s?.worktreeDir || worktreeDirFrom(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, safeBase);
-  const tasksDir = s?.tasksDir || `${TASKS_BASE}/${safeName}`;
-
-  // Initialize session guard for workflow locking (skip when explicitly disabled)
-  if (ticket && process.env.SESSION_GUARD_ENABLED !== '0') {
-    try {
-      const guardPath = path.join(__dirname, '..', '..', 'lib', 'hooks', 'session-guard.js');
-      execFileSync(process.execPath, [guardPath, 'init', safeBase, '/work'], {
-        stdio: 'pipe',
-        timeout: 5000,
-      });
-    } catch {
-      /* fail-open */
-    }
+/** Best-effort session-guard init; never blocks planning. */
+function initSessionGuard(ticket, safeBase) {
+  if (!ticket || process.env.SESSION_GUARD_ENABLED === '0') return;
+  try {
+    const guardPath = path.join(__dirname, '..', '..', 'lib', 'hooks', 'session-guard.js');
+    execFileSync(process.execPath, [guardPath, 'init', safeBase, '/work'], {
+      stdio: 'pipe',
+      timeout: 5000,
+    });
+  } catch {
+    /* fail-open */
   }
+}
 
-  // TDD-augmenting add() wrapper
-  function add(stepName, action, command, reason, extra = {}) {
+/** Comma-separated doc paths from an env var, rendered as a prompt suffix. */
+function docsPromptFor(envVar) {
+  const docs = process.env[envVar] || '';
+  if (!docs.trim()) return '';
+  const paths = docs
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return `\n\nRead these docs before starting (from ${envVar}):\n${paths.map((p) => `- ${p}`).join('\n')}`;
+}
+
+/** Any pre-planning.md files under the tasks dir; [] when absent or racing. */
+function findPrePlanningFiles(tasksDir, deps) {
+  if (!deps.fileExists(tasksDir)) return [];
+  try {
+    const found = deps.run(`find "${tasksDir}" -name "pre-planning.md" -type f 2>/dev/null`);
+    return found ? found.split('\n').filter(Boolean) : [];
+  } catch {
+    return []; /* race */
+  }
+}
+
+/** The "Planning documents" block listing brief/spec/tasks + pre-planning. */
+function buildPlanningContext(tasksDir, deps) {
+  const { fileExists } = deps;
+  const entry = (label, p) =>
+    fileExists(p)
+      ? `- ${label}: ${p}`
+      : `- ${label} (if present after ${label.toLowerCase()} step): ${p}`;
+  const planningDocs = [
+    entry('Brief', path.join(tasksDir, 'brief.md')),
+    entry('Spec', path.join(tasksDir, 'spec.md')),
+    entry('Tasks', path.join(tasksDir, 'tasks.md')),
+    ...findPrePlanningFiles(tasksDir, deps).map((f) => `- Pre-planning: ${f}`),
+  ];
+  return `\n\nPlanning documents — read these if they exist for requirements, test scenarios, reusable components:\n${planningDocs.join('\n')}`;
+}
+
+/**
+ * The TDD-augmenting `add()` the step pipeline calls: appends a plan entry and,
+ * for TDD-gated steps carrying an agentPrompt, resolves the TDD protocol into it.
+ */
+function makeAdd(plan, safeName, deps) {
+  const { TDD_GATED_STEPS, TDD_PROTOCOL } = deps;
+  return function add(stepName, action, command, reason, extra = {}) {
     if (
       TDD_GATED_STEPS.includes(stepName) &&
       extra.agentPrompt &&
@@ -75,45 +95,56 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
       extra.agentPrompt = `${extra.agentPrompt}\n\n${resolvedProtocol}`;
     }
     plan.push({ step: stepName, action, ...(command ? { command } : {}), reason, ...extra });
-  }
+  };
+}
 
-  // Docs injection helper (used by multiple step modules)
-  function getDocsPrompt(envVar) {
-    const docs = process.env[envVar] || '';
-    if (!docs.trim()) return '';
-    const paths = docs
-      .split(',')
-      .map((p) => p.trim())
-      .filter(Boolean);
-    return `\n\nRead these docs before starting (from ${envVar}):\n${paths.map((p) => `- ${p}`).join('\n')}`;
-  }
+/**
+ * The ticket-derived names and directories a plan is built around.
+ *
+ * State wins when it carries them (`s.worktreeDir` / `s.tasksDir`); otherwise
+ * they come from the configured bases via worktreeDirFrom — never from an
+ * inline `<worktrees>/<repo>-<ticket>` join.
+ */
+function resolvePlanPaths(ticket, s, callerProviderCfg, suffix, deps) {
+  const { tp, WORKTREES_BASE, TASKS_BASE, MAIN_WORKTREE_FOLDER } = deps;
+  const t = ticket || '{TICKET}';
+  const safeBase = ticket ? tp.sanitizeTicketIdForPath(t, callerProviderCfg) : t;
+  const safeName = suffix ? safeBase + '/' + suffix : safeBase;
+  return {
+    t,
+    safeBase,
+    safeName,
+    worktreeDir: s?.worktreeDir || worktreeDirFrom(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, safeBase),
+    tasksDir: s?.tasksDir || `${TASKS_BASE}/${safeName}`,
+  };
+}
 
-  // Planning docs discovery
-  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
-  const briefPath = path.join(tasksDir, 'brief.md');
-  const specPath = path.join(tasksDir, 'spec.md');
-  const tasksPath = path.join(tasksDir, 'tasks.md');
-  let prePlanningFiles = [];
-  if (fileExists(tasksDir)) {
-    try {
-      const found = run(`find "${tasksDir}" -name "pre-planning.md" -type f 2>/dev/null`);
-      if (found) prePlanningFiles = found.split('\n').filter(Boolean);
-    } catch {
-      /* race */
-    }
+/** Wrap the plan array in the result envelope, adding suffix fields when present. */
+function buildPlanResult(ticket, description, mode, plan, suffix) {
+  const planResult = { ticket: ticket || `TBD ("${description}")`, mode, plan };
+  if (suffix) {
+    planResult.suffix = suffix;
+    planResult.fullTicket = planResult.ticket + '/' + suffix;
   }
-  const planningDocs = [];
-  if (fileExists(briefPath)) planningDocs.push(`- Brief: ${briefPath}`);
-  else planningDocs.push(`- Brief (if present after brief step): ${briefPath}`);
-  if (fileExists(specPath)) planningDocs.push(`- Spec: ${specPath}`);
-  else planningDocs.push(`- Spec (if present after spec step): ${specPath}`);
-  if (fileExists(tasksPath)) planningDocs.push(`- Tasks: ${tasksPath}`);
-  else planningDocs.push(`- Tasks (if present after tasks step): ${tasksPath}`);
-  prePlanningFiles.forEach((f) => planningDocs.push(`- Pre-planning: ${f}`));
-  const planningContext =
-    planningDocs.length > 0
-      ? `\n\nPlanning documents — read these if they exist for requirements, test scenarios, reusable components:\n${planningDocs.join('\n')}`
-      : '';
+  return planResult;
+}
+
+function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix, deps) {
+  const { tp, STEPS, parseTasks, buildTaskPrompt, fileExists } = deps;
+
+  const plan = [];
+  const mode = rework ? 'rework' : 'resume';
+  const { t, safeBase, safeName, worktreeDir, tasksDir } = resolvePlanPaths(
+    ticket,
+    s,
+    callerProviderCfg,
+    suffix,
+    deps
+  );
+
+  initSessionGuard(ticket, safeBase);
+
+  const add = makeAdd(plan, safeName, deps);
 
   // Shared context for step modules
   const ctx = {
@@ -129,9 +160,9 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
     plan,
     STEPS,
     tp,
-    providerConfig,
-    planningContext,
-    getDocsPrompt,
+    providerConfig: tp.getProviderConfig({ skipPrompt: true }),
+    planningContext: buildPlanningContext(tasksDir, deps),
+    getDocsPrompt: docsPromptFor,
     fileExists,
     path,
     execFileSync,
@@ -149,17 +180,11 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
     stepHandler(add, s, ctx);
   }
 
-  const planResult = { ticket: ticket || `TBD ("${description}")`, mode, plan };
-  if (suffix) {
-    planResult.suffix = suffix;
-    planResult.fullTicket = planResult.ticket + '/' + suffix;
-  }
-
   // Safety net: reject any plan containing SKIP actions (GH-245).
   // All step modules (including spec-gate.js) now emit DEFER instead of SKIP.
   validatePlan(plan);
 
-  return planResult;
+  return buildPlanResult(ticket, description, mode, plan, suffix);
 }
 
 /**

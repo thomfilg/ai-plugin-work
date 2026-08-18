@@ -80,16 +80,10 @@ try {
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 const getConfig = require(path.join(__dirname, '..', 'get-config'));
-// TASKS_BASE is configured, never derived. This carried `path.join(<WORKTREES_BASE>,
-// 'tasks')` — the guess #788 refuses and #792 removed from lib/config.js. Hooks
-// fail open, so an unconfigured tasks root skips enforcement rather than blocking
-// against a directory that was never located; the skip is logged so it is not
-// mistaken for "nothing to enforce".
+// Configured, never derived (#788). Hooks fail open; the skip is logged.
 const TASKS_BASE = getConfig('TASKS_BASE');
 if (!TASKS_BASE) {
-  process.stderr.write(
-    'warn: enforce-step-workflow: TASKS_BASE not configured; skipping enforcement\n'
-  );
+  process.stderr.write('warn: enforce-step-workflow: TASKS_BASE not configured; skipping\n');
   process.exit(0);
 }
 

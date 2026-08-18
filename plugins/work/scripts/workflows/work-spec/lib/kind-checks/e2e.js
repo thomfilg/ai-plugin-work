@@ -84,19 +84,13 @@ function selectorPresent(content, selector) {
   );
 }
 
-function validate(ctx) {
-  const spec = readSpec(ctx.tasksDir);
-  const files = filesInFilesToModify(spec);
-  const errors = [];
-  const warnings = [];
-
+/** Structural spec checks that do not touch the filesystem. */
+function auditSpecShape(spec, files, gherkin, errors, warnings) {
   if (!files.some(isE2eFile)) {
     errors.push(
       'e2e kind but no `tests/e2e/**/*.spec.(ts|tsx)` file listed in `## Files to Create/Modify`.'
     );
   }
-
-  const gherkin = readGherkin(ctx.tasksDir);
   if (gherkin && !/@e2e\b/.test(gherkin)) {
     errors.push('e2e kind but `gherkin.feature` has no scenario tagged `@e2e`.');
   } else if (!gherkin) {
@@ -104,14 +98,41 @@ function validate(ctx) {
       'No gherkin.feature file present — Gherkin coverage will be checked by spec_gate separately.'
     );
   }
-
   if (!/journey|page[-\s]?object/i.test(spec)) {
     warnings.push(
       'spec.md does not mention "journey" or "page object" — confirm reusable helpers are used.'
     );
   }
+}
 
-  // ── Selector audit ──────────────────────────────────────────────────────
+/** One `existing` selector: the file must be readable and contain the selector. */
+function auditExistingSelector(entry, worktreeRoot, errors, warnings) {
+  if (!worktreeRoot) {
+    warnings.push(
+      `Cannot verify selector \`${entry.selector}\` in \`${entry.file}\`: no worktree root ` +
+        'was supplied, and one is never inferred from the tasks dir. Pass ctx.worktreeRoot.'
+    );
+    return;
+  }
+  let content;
+  try {
+    content = fs.readFileSync(path.resolve(worktreeRoot, entry.file), 'utf8');
+  } catch {
+    errors.push(
+      `Selector \`${entry.selector}\` declared as existing in \`${entry.file}\` but the file does not exist.`
+    );
+    return;
+  }
+  if (!selectorPresent(content, entry.selector)) {
+    errors.push(
+      `Selector \`${entry.selector}\` declared as existing in \`${entry.file}\` but not found there ` +
+        '(grep miss). Either the selector name is wrong, or the file changed since spec was drafted.'
+    );
+  }
+}
+
+/** The `## Selectors` audit: presence, format, and per-entry checks. */
+function auditSelectors(ctx, spec, files, errors, warnings) {
   const selectorBlock = sliceSection(spec, /^##\s+Selectors?\b/im);
   if (!selectorBlock.trim()) {
     errors.push(
@@ -120,55 +141,39 @@ function validate(ctx) {
         '(or `new` if this ticket creates the component). Look on siblings tickets for existing selectors and use them if they exist. ' +
         'If no existing selectors are found, create a new selector.'
     );
-  } else {
-    const entries = parseSelectorLines(selectorBlock);
-    if (entries.length === 0) {
+    return;
+  }
+  const entries = parseSelectorLines(selectorBlock);
+  if (entries.length === 0) {
+    errors.push(
+      '`## Selectors` section is empty or no entries matched the required format ' +
+        '(`` `selector` — existing|new — `file` ``).'
+    );
+  }
+  const worktreeRoot = resolveWorktreeRoot(ctx);
+  const filesToModify = new Set(files);
+  for (const entry of entries) {
+    if (entry.malformed) {
+      warnings.push(`Selector line not in canonical format: ${entry.raw}`);
+    } else if (entry.kind === 'existing') {
+      auditExistingSelector(entry, worktreeRoot, errors, warnings);
+    } else if (entry.kind === 'new' && !filesToModify.has(entry.file)) {
       errors.push(
-        '`## Selectors` section is empty or no entries matched the required format ' +
-          '(`` `selector` — existing|new — `file` ``).'
+        `Selector \`${entry.selector}\` declared as new in \`${entry.file}\` but that file is NOT in ` +
+          "`## Files to Create/Modify`. New selectors require an owning file in this PR's scope."
       );
     }
-    const worktreeRoot = resolveWorktreeRoot(ctx);
-    const filesToModify = new Set(files);
-    for (const entry of entries) {
-      if (entry.malformed) {
-        warnings.push(`Selector line not in canonical format: ${entry.raw}`);
-        continue;
-      }
-      if (entry.kind === 'existing') {
-        if (!worktreeRoot) {
-          warnings.push(
-            `Cannot verify selector \`${entry.selector}\` in \`${entry.file}\`: no worktree root ` +
-              'was supplied, and one is never inferred from the tasks dir. Pass ctx.worktreeRoot.'
-          );
-          continue;
-        }
-        const filePath = path.resolve(worktreeRoot, entry.file);
-        let content;
-        try {
-          content = fs.readFileSync(filePath, 'utf8');
-        } catch {
-          errors.push(
-            `Selector \`${entry.selector}\` declared as existing in \`${entry.file}\` but the file does not exist.`
-          );
-          continue;
-        }
-        if (!selectorPresent(content, entry.selector)) {
-          errors.push(
-            `Selector \`${entry.selector}\` declared as existing in \`${entry.file}\` but not found there ` +
-              '(grep miss). Either the selector name is wrong, or the file changed since spec was drafted.'
-          );
-        }
-      } else if (entry.kind === 'new') {
-        if (!filesToModify.has(entry.file)) {
-          errors.push(
-            `Selector \`${entry.selector}\` declared as new in \`${entry.file}\` but that file is NOT in ` +
-              "`## Files to Create/Modify`. New selectors require an owning file in this PR's scope."
-          );
-        }
-      }
-    }
   }
+}
+
+function validate(ctx) {
+  const spec = readSpec(ctx.tasksDir);
+  const files = filesInFilesToModify(spec);
+  const errors = [];
+  const warnings = [];
+
+  auditSpecShape(spec, files, readGherkin(ctx.tasksDir), errors, warnings);
+  auditSelectors(ctx, spec, files, errors, warnings);
 
   return {
     ok: errors.length === 0,
