@@ -54,9 +54,14 @@ if (!tp) process.exit(0);
 const getConfig = require(path.join(libDir, 'get-config'));
 // Shared with lib/plugin-config.js — never guesses TASKS_BASE from
 // WORKTREES_BASE. See lib/resolve-base-dirs.js.
-const { resolveBaseDirs } = require(path.join(libDir, 'resolve-base-dirs'));
+const { resolveBaseDirs, configuredRepoName } = require(path.join(libDir, 'resolve-base-dirs'));
 const { WORKTREES_BASE, TASKS_BASE, error: baseDirsError } = resolveBaseDirs(getConfig);
-const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
+// REPO_NAME is CONFIGURED. It used to default to the documentation example
+// 'my-project', which was then joined into worktree paths — producing
+// `<worktrees>/my-project-<TICKET>`, a directory named after a placeholder that
+// looks exactly like a real worktree. Empty when unset; worktreeDirFrom()
+// returns null rather than building a path around it.
+const MAIN_WORKTREE_FOLDER = configuredRepoName();
 
 if (!WORKTREES_BASE || !TASKS_BASE) {
   console.log(

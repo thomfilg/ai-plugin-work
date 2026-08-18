@@ -19,7 +19,7 @@ const {
   isRecentlyModified,
   loadStopHookConfig,
   readStdin,
-  reviewDirsToCheck,
+  reviewTaskFolders,
   shouldSkipCodexStop,
 } = require(path.join(__dirname, '..', 'lib', 'stop-hook-utils'));
 const { checkCodeReview, checkQaReport, findCodeReviewForTask, findQaReportsForTask } = require(
@@ -170,11 +170,11 @@ function pushReviewWarnings(warnings, taskId, issues, hasReplyFile) {
   }
 }
 
-function collectCodeReviewWarnings(dirsToCheck, taskId) {
+function collectCodeReviewWarnings(taskFolders, taskId) {
   const warnings = [];
-  for (const dir of dirsToCheck) {
+  for (const taskFolder of taskFolders) {
     // Only check the CURRENT task's code-review.md
-    const filePath = findCodeReviewForTask(config, dir, taskId);
+    const filePath = findCodeReviewForTask(taskFolder);
     if (!filePath) continue;
 
     // Only check recently modified files
@@ -213,10 +213,10 @@ function pushQaWarnings(warnings, taskId, fileName, qaIssues) {
 }
 
 // Check QA reports for Playwright verification
-function collectQaWarnings(dirsToCheck, taskId) {
+function collectQaWarnings(taskFolders, taskId) {
   const warnings = [];
-  for (const dir of dirsToCheck) {
-    for (const qaFile of findQaReportsForTask(config, dir, taskId)) {
+  for (const taskFolder of taskFolders) {
+    for (const qaFile of findQaReportsForTask(taskFolder)) {
       if (!isRecentlyModified(qaFile)) continue;
 
       const qaIssues = checkQaReport(qaFile);
@@ -247,7 +247,7 @@ async function main() {
   }
 
   // Check directories for the current task's report
-  const dirsToCheck = reviewDirsToCheck(config, cwd);
+  const dirsToCheck = reviewTaskFolders(config, currentTaskId);
 
   const warnings = [
     ...collectCodeReviewWarnings(dirsToCheck, currentTaskId),

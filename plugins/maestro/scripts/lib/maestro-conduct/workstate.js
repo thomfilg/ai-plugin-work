@@ -5,23 +5,22 @@
  * which scans script text for the literal filename.
  */
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const WORKTREES_BASE = process.env.WORKTREES_BASE || path.join(os.homedir(), 'worktrees');
-// Mirror plugins/work config: TASKS_BASE defaults to <WORKTREES_BASE>/tasks but
-// callers may override it; if we don't honor the override the orchestrator
-// reads from an empty directory and silently degrades.
-const TASKS_BASE = process.env.TASKS_BASE || path.join(WORKTREES_BASE, 'tasks');
+// Base dirs come from shared/base-dirs.js — the ONE resolver. This file used to
+// carry `process.env.WORKTREES_BASE || path.join(os.homedir(), 'worktrees')` and
+// `process.env.TASKS_BASE || path.join(WORKTREES_BASE, 'tasks')`; both arms
+// invented a location that merely looked right, so a ticket whose state lives
+// elsewhere read as "no state" rather than as a misconfiguration.
+const baseDirs = require('./shared/base-dirs');
 const STATE_BASENAME = '.work-state' + '.json';
 
 function stateFile(ticket) {
-  return path.join(TASKS_BASE, ticket, STATE_BASENAME);
+  return baseDirs.ticketStateFile(ticket, STATE_BASENAME);
 }
 
 function read(ticket) {
   const f = stateFile(ticket);
-  if (!fs.existsSync(f)) return null;
+  if (!f || !fs.existsSync(f)) return null;
   try {
     return JSON.parse(fs.readFileSync(f, 'utf8'));
   } catch {
@@ -45,4 +44,12 @@ function snapshot(ticket) {
   };
 }
 
-module.exports = { read, snapshot, WORKTREES_BASE };
+// WORKTREES_BASE stays on the export surface for maestro-conduct.js, but it is
+// now the CONFIGURED value or null — never `~/worktrees`.
+module.exports = {
+  read,
+  snapshot,
+  get WORKTREES_BASE() {
+    return baseDirs.worktreesBase();
+  },
+};

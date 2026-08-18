@@ -214,23 +214,33 @@ function resolveTasksBaseOrNull() {
 }
 
 /**
- * Resolve TASKS_BASE with a default fallback when unset.
+ * Resolve TASKS_BASE, or throw naming the key to set.
  *
- * Preserves the legacy behavior used across per-step phase-state modules
- * (tdd-phase-state, ci-phase-state, spec-phase-state, etc.) that always
- * returned a usable path even outside a configured workspace — historically
- * `~/worktrees/tasks`. Centralized here so all callers share one source of
- * truth instead of redefining the same function in ~30 files.
+ * This used to be `resolveTasksBaseWithFallback`, whose last resort was
+ * `~/worktrees/tasks` — "always returned a usable path even outside a
+ * configured workspace". That is the guess this codebase is burning down: a
+ * home-anchored path is not the operator's tasks root, it just looks like one,
+ * so every caller wrote state somewhere nothing reads it. Different anchor from
+ * the `<WORKTREES_BASE>/tasks` derivation removed in #792, identical failure.
  *
- * @param {string} [fallback] - Path to use when TASKS_BASE is unset.
- *   Defaults to `<HOME>/worktrees/tasks`.
+ * Every caller is a WRITER (tdd-phase-state, phase-runner, phase-state CLIs).
+ * A writer with no tasks root cannot do its job, so it refuses loudly instead
+ * of persisting into an invented directory — the same shape work-state/core.js
+ * uses for `.work-state.json`.
+ *
+ * @param {string} [explicitBase] - A tasks root the caller resolved itself.
+ *   Honored as-is: supplying one is configuration, not a guess.
  * @returns {string} Absolute path
+ * @throws {Error} when nothing configured a tasks root.
  */
-function resolveTasksBaseWithFallback(fallback) {
+function requireTasksBase(explicitBase) {
   const base = tasksBaseFromEnvOrConfig();
-  if (base) return base;
-  if (fallback) return path.resolve(fallback);
-  return path.join(require('os').homedir(), 'worktrees', 'tasks');
+  if (base) return path.resolve(base);
+  if (explicitBase) return path.resolve(explicitBase);
+  throw new Error(
+    'TASKS_BASE is not configured — refusing to guess a tasks root. ' +
+      'Set TASKS_BASE (e.g. in .envrc) and make sure the environment is loaded in this process.'
+  );
 }
 
 /**
@@ -283,7 +293,7 @@ module.exports = {
   sanitizeTicketId,
   resolveTasksBase,
   resolveTasksBaseOrNull,
-  resolveTasksBaseWithFallback,
+  requireTasksBase,
   resolveWorktreeRoot,
   assertPathContainment,
   UNSAFE_TICKET_RE,

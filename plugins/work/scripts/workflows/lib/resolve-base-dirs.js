@@ -102,4 +102,72 @@ function resolveBaseDirs(getConfig, env = process.env) {
   };
 }
 
-module.exports = { resolveBaseDirs, tasksBaseNotConfigured };
+/**
+ * The repo folder name used to build worktree paths, or '' when unconfigured.
+ *
+ * NOT `process.env.REPO_NAME || 'my-project'`. That placeholder was copied into
+ * five modules and fed straight into `path.join`, so an unset REPO_NAME
+ * produced `<worktrees>/my-project-<TICKET>` — a directory named after the
+ * documentation example. It looks like a real worktree, which is exactly what
+ * makes it dangerous.
+ */
+function configuredRepoName(env = process.env) {
+  return (env && env.REPO_NAME) || '';
+}
+
+/**
+ * `<worktreesBase>/<repoName>-<ticketId>` — the ONE place that naming
+ * convention is written down.
+ *
+ * Seven modules built this string inline (work/engine/inspect.js,
+ * work/engine/plan-generator.js, work/lib/next-preflight.js x2,
+ * work/lib/next-instruction.js x2, follow-up/follow-up-next.js,
+ * work-pr/work-pr.workflow.js). They take their bases through injected
+ * deps/env for testability, so they cannot simply call `config.worktreeDir()`;
+ * they call this instead and the convention stops being duplicated.
+ *
+ * Returns null when any input is missing rather than joining a placeholder.
+ */
+function worktreeDirFrom(worktreesBase, repoName, ticketId) {
+  if (!worktreesBase || !repoName || !ticketId) return null;
+  return path.join(worktreesBase, `${repoName}-${ticketId}`);
+}
+
+/** `<worktreesBase>/<repoName>` — the main worktree. Null when unresolvable. */
+function repoDirFrom(worktreesBase, repoName) {
+  if (!worktreesBase || !repoName) return null;
+  return path.join(worktreesBase, repoName);
+}
+
+/**
+ * The ticket worktree when it resolves AND exists, else the caller's cwd.
+ *
+ * `/follow-up` has always fallen back to the current directory for "the ticket
+ * worktree is not there — we are probably already inside it", and that stays.
+ * An unconfigured REPO_NAME used to reach the same place by a different route
+ * (it built `<worktrees>/my-project-<TICKET>`, which never existed), so the
+ * outcome is unchanged — but it is now distinguishable from a genuinely absent
+ * worktree, and classifying follow-up against the launch directory should never
+ * be silent. Lives here so the fallback policy is stated once rather than
+ * re-derived at each call site.
+ */
+function worktreeDirOrCwd(worktreesBase, repoName, ticketId) {
+  const candidate = worktreeDirFrom(worktreesBase, repoName, ticketId);
+  if (!candidate) {
+    process.stderr.write(
+      'warn: REPO_NAME is not configured, so the ticket worktree cannot be resolved; ' +
+        'using the current directory instead.\n'
+    );
+    return process.cwd();
+  }
+  return require('fs').existsSync(candidate) ? candidate : process.cwd();
+}
+
+module.exports = {
+  resolveBaseDirs,
+  worktreeDirOrCwd,
+  tasksBaseNotConfigured,
+  configuredRepoName,
+  worktreeDirFrom,
+  repoDirFrom,
+};

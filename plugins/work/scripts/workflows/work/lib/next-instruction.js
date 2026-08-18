@@ -22,6 +22,7 @@ const { enrich, runGate } = require('./step-enrichments');
 const { createDebugLog } = require('./debug-log');
 const { checkVersionSkew } = require('./version-skew');
 const preflight = require('./next-preflight');
+const { worktreeDirFrom } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
 
 const MAX_RECURSION = 10;
 
@@ -48,7 +49,7 @@ function returnInstruction(entry, ctx, log) {
 function buildEnrichCtx(env, loop) {
   const enrichWorktreeDir =
     env.WORKTREES_BASE && env.MAIN_WORKTREE_FOLDER
-      ? path.join(env.WORKTREES_BASE, `${env.MAIN_WORKTREE_FOLDER}-${loop.safeBase}`)
+      ? worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, loop.safeBase)
       : undefined;
   return {
     tasksDir: loop.tasksDir,
@@ -123,7 +124,19 @@ function tryStandardTransitions(env, loop, entry) {
  * but write evidence into ticket B.
  */
 function runDispatchedGate(env, loop, entry) {
-  const worktreeDir = path.join(env.WORKTREES_BASE, `${env.MAIN_WORKTREE_FOLDER}-${loop.safeBase}`);
+  const worktreeDir = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, loop.safeBase);
+  // Refuse rather than hand the gate a null cwd. An UNRESOLVABLE worktree used
+  // to be a non-existent path, which made the gate's test command fail loudly;
+  // null instead means "inherit", so the same misconfiguration would quietly
+  // run the tests in whichever shell fired the hook — the exact leak the
+  // docstring above says this worktreeDir exists to prevent.
+  if (!worktreeDir) {
+    throw new Error(
+      'Cannot resolve the ticket worktree for the dispatched gate ' +
+        `(WORKTREES_BASE=${env.WORKTREES_BASE || 'unset'}, REPO_NAME=${env.MAIN_WORKTREE_FOLDER || 'unset'}). ` +
+        'Set REPO_NAME — running gate tests from an inherited cwd writes evidence for the wrong ticket.'
+    );
+  }
   const preGateResult = runGate(
     entry.step,
     loop.safeName,

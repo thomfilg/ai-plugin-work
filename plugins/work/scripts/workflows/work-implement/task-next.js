@@ -60,6 +60,7 @@ const {
   scopeEntryAdmitsOnlyTestFiles,
 } = require('../../../skills/split-in-tasks/lib/task-types');
 const { fileMatchesScope } = require('../lib/task-scope');
+const { requireTasksBase } = require('../lib/ticket-validation');
 // GH-653: single strategy→command resolution shared with the implement gate
 // and the enforce-tdd-on-stop hook. All three MUST resolve the same command
 // for a task, or the runner and the gate disagree on what RED/GREEN mean.
@@ -159,15 +160,25 @@ function readFile(p) {
   }
 }
 
+/**
+ * The configured tasks root, or throw naming the key to set.
+ *
+ * Honors TASKS_BASE from env first — matches tdd-phase-state.js and the shared
+ * ticket-validation.requireTasksBase() contract. Task 10 (GH-392 R12
+ * integration scenario): without this, task-next.js invoked outside the user's
+ * main worktree (e.g. an integration-test sandbox with a tmp tasks dir) cannot
+ * find the per-task tasks.md and dies with "tasks dir not found", stranding the
+ * orchestrator path after a synthesized-cycle bypass.
+ *
+ * Two guesses used to sit at the end of this chain and are gone:
+ *   - walking up to 8 levels for ANY directory named `tasks/`, which binds the
+ *     run to whatever unrelated `tasks/` happens to sit above the cwd;
+ *   - `<cwd>/tasks`, the cwd-anchored invention — a hook's cwd is wherever the
+ *     agent happened to be, so it has no relationship to the operator's layout.
+ * Both produced a plausible path that reads and writes in the wrong place.
+ */
 function resolveTasksBase() {
   const cwd = process.cwd();
-  // Honor TASKS_BASE from env first — matches tdd-phase-state.js / the
-  // shared ticket-validation.resolveTasksBaseWithFallback() contract. Task 10
-  // (GH-392 R12 integration scenario): without this, task-next.js invoked
-  // outside the user's main worktree (e.g. an integration-test sandbox with
-  // a tmp tasks dir) cannot find the per-task tasks.md and dies with
-  // "tasks dir not found", stranding the orchestrator path after a
-  // synthesized-cycle bypass.
   if (process.env.TASKS_BASE) {
     return path.resolve(cwd, process.env.TASKS_BASE);
   }
@@ -178,16 +189,7 @@ function resolveTasksBase() {
   if (config && config.TASKS_BASE) {
     return path.resolve(cwd, config.TASKS_BASE);
   }
-  // Fallback: walk up looking for a `tasks/` dir
-  let dir = cwd;
-  for (let i = 0; i < 8; i++) {
-    const cand = path.join(dir, 'tasks');
-    if (fs.existsSync(cand)) return cand;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return path.join(cwd, 'tasks');
+  return requireTasksBase();
 }
 
 // ECHO-5322: resolve the ticket worktree from ticket id + env config

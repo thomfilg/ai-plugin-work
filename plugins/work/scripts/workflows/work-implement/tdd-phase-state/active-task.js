@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveTasksBaseWithFallback } = require('../../lib/ticket-validation');
+const { requireTasksBase } = require('../../lib/ticket-validation');
 const { sanitizeId } = require('./state-path');
 
 let taskTypes;
@@ -118,7 +118,7 @@ function readActiveTaskBlock(ticketId, taskNum) {
     return { type: null, scope: [] };
   }
   try {
-    const base = resolveTasksBaseWithFallback();
+    const base = requireTasksBase();
     const safeId = sanitizeId(ticketId);
     const tasksMdPath = path.resolve(base, safeId, 'tasks.md');
     if (!fs.existsSync(tasksMdPath)) return { type: null, scope: [] };

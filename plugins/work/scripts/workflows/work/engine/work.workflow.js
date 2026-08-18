@@ -43,14 +43,22 @@ const tp = tryRequire(path.join(__dirname, '..', '..', 'lib', 'ticket-provider')
 if (!tp) process.exit(0);
 
 // ─── Configuration ──────────────────────────────────────────────────────────
-const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
 // Through resolve-base-dirs (#788) — this file still carried the verbatim
 // `getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks')` block that
 // module was written to replace, so the /work router kept guessing after every
 // other call site stopped. `baseDirsError` explains a refused TASKS_BASE by
 // naming both values; requirePaths() surfaces it.
-const { resolveBaseDirs } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
+const { resolveBaseDirs, configuredRepoName } = require(
+  path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs')
+);
+// REPO_NAME is CONFIGURED. It used to default to the documentation example
+// 'my-project', which was then joined into worktree paths — producing
+// `<worktrees>/my-project-<TICKET>`, a directory named after a placeholder that
+// looks exactly like a real worktree. Empty when unset; worktreeDirFrom()
+// returns null rather than building a path around it.
+const MAIN_WORKTREE_FOLDER = configuredRepoName();
+
 const { WORKTREES_BASE, TASKS_BASE, error: baseDirsError } = resolveBaseDirs(getConfig);
 
 function requirePaths() {

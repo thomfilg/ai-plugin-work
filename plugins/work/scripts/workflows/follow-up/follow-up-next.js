@@ -34,10 +34,13 @@ if (require.main === module) {
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
 const { resolvePluginConfig } = require('../lib/plugin-config');
+const { worktreeDirOrCwd, configuredRepoName } = require('../lib/resolve-base-dirs');
 const { libDir, WORKTREES_BASE, TASKS_BASE, configError } = resolvePluginConfig(
   path.join(__dirname, '..', 'work')
 );
-const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
+// Configured only — the old `|| 'my-project'` default put the docs placeholder
+// into real worktree paths. See lib/resolve-base-dirs.js.
+const MAIN_WORKTREE_FOLDER = configuredRepoName();
 
 if (!TASKS_BASE) {
   console.log(
@@ -248,8 +251,7 @@ function getNextInstruction(ticketId, prNumber) {
   const state = loadOrInitState(ticketId, prNumber);
 
   const tasksDir = path.join(TASKS_BASE, ticketId);
-  const candidateWorktree = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketId}`);
-  const worktreeDir = fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
+  const worktreeDir = worktreeDirOrCwd(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, ticketId);
 
   // PR #542 cursor[bot]: monitor mutates state._ciAllJobs / _ciFailedLogs /
   // _ciStatus mid-loop, so a ctx built once before the loop hands a stale

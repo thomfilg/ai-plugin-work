@@ -11,7 +11,7 @@
 
 const path = require('path');
 const { execSync } = require('child_process');
-const { resolveTasksBaseWithFallback } = require('../../lib/ticket-validation');
+const { requireTasksBase } = require('../../lib/ticket-validation');
 const { sanitizeId, writeState } = require('./state-path');
 const { errorExit, successOut, getCurrentCycleRecord } = require('./io');
 
@@ -73,7 +73,7 @@ function strategyResolvable(ticketId, taskNum) {
 function resolveActiveTaskStrategy(ticketId, taskNum) {
   if (!strategyResolvable(ticketId, taskNum)) return null;
   try {
-    const base = resolveTasksBaseWithFallback();
+    const base = requireTasksBase();
     const safeId = sanitizeId(ticketId);
     const tasksDir = path.resolve(base, safeId);
     const allTasks = taskParser.parseTasks(tasksDir);

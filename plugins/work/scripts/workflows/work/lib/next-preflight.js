@@ -18,6 +18,7 @@ const { execFileSync } = require('child_process');
 
 const { normalizeTicketBase } = require('./session-conflict');
 const { stampVersionAnchor } = require('./version-skew');
+const { worktreeDirFrom } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
 
 function emptyProgressState(ticket) {
   return {
@@ -81,7 +82,7 @@ function syncSessionGuardFile(env, safeBase) {
       const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
       session.workflow = '/work';
       // Fix cwd to point to the worktree (not the calling cwd)
-      session.cwd = path.join(env.WORKTREES_BASE, `${env.MAIN_WORKTREE_FOLDER}-${safeBase}`);
+      session.cwd = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, safeBase);
       fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
     }
   } catch {
@@ -213,7 +214,15 @@ function readCiPhase(env, safeName) {
  * THIS ticket's state as completed.
  */
 function probePrState(env, safeBase) {
-  const worktreeDir = path.join(env.WORKTREES_BASE, `${env.MAIN_WORKTREE_FOLDER}-${safeBase}`);
+  const worktreeDir = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, safeBase);
+  // Unresolvable and merely-absent both skip the probe, but say which: a null
+  // cwd would make `gh pr view` report on whatever repo the process launched
+  // in, which is the cross-ticket confusion this function guards against.
+  if (!worktreeDir) {
+    throw new Error(
+      'worktree directory unresolved (WORKTREES_BASE/REPO_NAME) — skipping PR-merged probe'
+    );
+  }
   if (!fs.existsSync(worktreeDir)) {
     throw new Error('worktree directory missing — skipping PR-merged probe');
   }

@@ -106,18 +106,20 @@ function signalContextViaInbox(ticket, contextFile) {
  * pointer goes through the inbox instead (design §H grooming row).
  */
 function groomRestartedSession(session, ticket, skill, runtime = 'claude') {
-  const contextFile = path.join(
-    path.dirname(skillRegistry.ticketSkillFile(ticket)),
-    '.maestro-context.md'
-  );
+  // null when TASKS_BASE is unconfigured — shared/base-dirs.js no longer
+  // invents `~/worktrees/tasks`. No tasks root means there is no context file
+  // to point at; grooming is best-effort, so carry on without one rather than
+  // `path.dirname(null)`.
+  const skillFile = skillRegistry.ticketSkillFile(ticket);
+  const contextFile = skillFile ? path.join(path.dirname(skillFile), '.maestro-context.md') : null;
   if (!runtimeProfile.grooming(runtime).rename) {
-    if (fs.existsSync(contextFile)) signalContextViaInbox(ticket, contextFile);
+    if (contextFile && fs.existsSync(contextFile)) signalContextViaInbox(ticket, contextFile);
     return;
   }
   const bootDelay = process.env.MAESTRO_GROOM_DELAY_SEC || '3';
   if (bootDelay !== '0') spawnSync('sleep', [bootDelay]); // let the TUI boot before typing into it
   tmux.sendLine(session, `/rename ${ticket} /${skill} maestro`);
-  if (fs.existsSync(contextFile)) {
+  if (contextFile && fs.existsSync(contextFile)) {
     tmux.sendLine(
       session,
       `[MAESTRO] Read your orchestration context at ${contextFile} before continuing.`

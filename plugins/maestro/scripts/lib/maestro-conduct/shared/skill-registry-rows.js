@@ -16,8 +16,6 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
 const workstate = require('../workstate.js');
 
@@ -31,14 +29,13 @@ const FOLLOW_UP_HEALTHY_STATUSES = new Set(['awaiting_ci', 'awaiting_user', 'com
 const WORK_SILENCE_LIMIT_SEC = 300;
 const FOLLOW_UP_SILENCE_LIMIT_SEC = 1800;
 
-function tasksBase() {
-  const worktrees = process.env.WORKTREES_BASE || path.join(os.homedir(), 'worktrees');
-  return process.env.TASKS_BASE || path.join(worktrees, 'tasks');
-}
+// Through base-dirs.js — this carried its own copy of the `~/worktrees` +
+// `<worktrees>/tasks` guess pair. Returns null when unconfigured.
+const baseDirs = require('./base-dirs');
 
 function readFollowUpState(ticket) {
-  const f = path.join(tasksBase(), ticket, FOLLOW_UP_STATE_BASENAME);
-  if (!fs.existsSync(f)) return null;
+  const f = baseDirs.ticketStateFile(ticket, FOLLOW_UP_STATE_BASENAME);
+  if (!f || !fs.existsSync(f)) return null;
   try {
     return JSON.parse(fs.readFileSync(f, 'utf8'));
   } catch {
