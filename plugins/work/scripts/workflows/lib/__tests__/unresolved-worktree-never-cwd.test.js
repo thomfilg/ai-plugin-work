@@ -89,6 +89,35 @@ describe('an unresolved worktree refuses instead of falling back to cwd', () => 
     }
   });
 
+  it('work-pr inspect runs no git at all when the worktree is unresolved', () => {
+    // buildInspectData passes worktreeDir as cwd to `git rev-parse HEAD`, the
+    // TSX diff, the rebase guard AND config.getBaseBranch (which execSyncs
+    // `git symbolic-ref`). With cwd inherited, every one of those would report
+    // the LAUNCH repository's state as though it were this ticket's. Run from
+    // inside this repo — a real git worktree — so an inherited cwd would
+    // produce a real SHA and a detected base branch, and the assertions below
+    // would catch it.
+    const { buildInspectData } = require(path.join(WORKFLOWS, 'work-pr', 'work-pr-inspect'));
+    const tasks = fs.mkdtempSync(path.join(os.tmpdir(), 'unresolved-wt-inspect-'));
+    try {
+      const data = buildInspectData(tasks, null);
+
+      assert.equal(data.worktreeExists, false);
+      assert.equal(data.headSha, '', 'no HEAD may be read from an inherited cwd');
+      assert.equal(data.hasTsxChanges, false, 'no diff may be taken in an inherited cwd');
+      assert.equal(data.commitsBehindMain, 0, 'the rebase guard needs a worktree it does not have');
+      assert.equal(
+        data.baseBranch,
+        'origin/main',
+        'the base branch must be the static default, not one detected in the launch repo'
+      );
+      // The tasks-dir half still runs, so callers get the same shape.
+      assert.equal(typeof data.contentSha, 'string');
+    } finally {
+      fs.rmSync(tasks, { recursive: true, force: true });
+    }
+  });
+
   it('follow-up-next says so on stderr before classifying against the cwd', () => {
     // cwd is the long-standing fallback for "the worktree is not there", and it
     // is NOT a new outcome: before REPO_NAME stopped defaulting to
