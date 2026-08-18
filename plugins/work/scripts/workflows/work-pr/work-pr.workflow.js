@@ -26,9 +26,18 @@ const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
 const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
 // TASKS_BASE is configured, never derived — see lib/config.js. This file used to
 // carry its own `|| path.join(WORKTREES_BASE, 'tasks')` copy of the guess #788
-// removed, which survived even after config.js stopped making it. Fail at load
-// with a named key, exactly as WORKTREES_BASE does on the line above.
-const TASKS_BASE = getConfig.require('TASKS_BASE');
+// removed, which survived even after config.js stopped making it.
+//
+// Resolved on READ, not at load. This workflow's `stateDir` is the tasks base,
+// so a load-time `getConfig.require` (the shape WORKTREES_BASE uses above)
+// would couple "can this workflow be described" to "is a tasks root
+// configured" — and they are separate questions: name, command, steps and
+// transitions are all answerable without one. Reading `stateDir` or building a
+// tasks dir is where the requirement actually bites, so that is where it
+// refuses, by named key. `loadWorkflow` validates stateDir, so the run path
+// still fails fast and reports err.message through exitUsage; `list` catches
+// per file in describeWorkflowFile.
+const requireTasksBase = () => getConfig.require('TASKS_BASE');
 const { normalizeTicketArg } = require(path.join(__dirname, '..', 'lib', 'ticket-args'));
 const safeTicketId = config.safeTicketId;
 const { safeExec, computeScreenshotHash, buildInspectData } = require(
@@ -39,7 +48,7 @@ const { T, getRuntime } = require(path.join(__dirname, '..', 'lib', 'instruction
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getTasksDir(ticketId) {
-  return path.join(TASKS_BASE, safeTicketId(ticketId));
+  return path.join(requireTasksBase(), safeTicketId(ticketId));
 }
 
 function getWorktreeDir(ticketId) {
@@ -132,7 +141,9 @@ function decidePostPrGen(d, force) {
 module.exports = {
   name: 'work-pr',
   command: '/work-pr',
-  stateDir: path.join(TASKS_BASE),
+  get stateDir() {
+    return path.join(requireTasksBase());
+  },
 
   steps: [
     { id: '1_preflight', name: 'Memory & zombie check', command: 'bash pre-flight script' },

@@ -15,9 +15,25 @@ const path = require('path');
 const getConfig = require(path.join(__dirname, '..', '..', 'get-config'));
 
 let _tasksBase;
+/**
+ * TASKS_BASE, or null when nothing configured one.
+ *
+ * This used to be `getConfig.orExit('TASKS_BASE')`, which was dead while
+ * lib/config.js still derived a value from WORKTREES_BASE. Once the derivation
+ * was removed it became live, and `orExit` exits the WHOLE hook — so an
+ * unconfigured tasks root silently stopped session-guard from blocking
+ * premature stops. That is far too blunt: the session store lives under
+ * SESSION_GUARD_DIR, not TASKS_BASE, and the guard's core job needs no tasks
+ * dir at all. TASKS_BASE is only used to ENRICH a decision (which /work step
+ * is active, whether /check is running).
+ *
+ * Returning null instead lets the two callers below take the "state unknown"
+ * branch they already carry — branches that were unreachable while this
+ * function could only return a value or exit.
+ */
 function getTasksBase() {
   if (_tasksBase) return _tasksBase;
-  _tasksBase = getConfig.orExit('TASKS_BASE');
+  _tasksBase = getConfig('TASKS_BASE') || null;
   return _tasksBase;
 }
 
@@ -207,6 +223,9 @@ function isCheckWorkflowActive(ticketId) {
     if (!ticketId || /[/\\:\0]/.test(ticketId)) return false;
 
     const tasksBase = getTasksBase();
+    // No tasks root ⇒ no /check state to find ⇒ "not active", which keeps the
+    // guard blocking. Fail-safe here means NOT standing down.
+    if (!tasksBase) return false;
     const resolvedBase = path.resolve(tasksBase, safeTicketIdOrRaw(ticketId));
     // Guard against path traversal — resolved path must stay under tasksBase
     if (!resolvedBase.startsWith(path.resolve(tasksBase) + path.sep)) return false;
