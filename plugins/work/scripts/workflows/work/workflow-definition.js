@@ -28,6 +28,15 @@ const { buildArtifactRules } = require(path.join(__dirname, 'workflow-def', 'art
 // matches at least one QA report filename; requiredApprovals requires files
 // to exist AND match an approval pattern.
 const evidenceRequirements = {
+  [STEPS.spec]: {
+    // GH-247: `check` can now retry back to `spec` when the 4b_gherkin_scope
+    // gate finds a declared-scope mismatch — a spec.md defect, not a code
+    // defect. steps/spec.js DEFERs on "spec.md already exists", so without an
+    // invalidation the retry lands on a step that declines to run and the
+    // remediation the gate asked for never happens. Declaring what the step
+    // rewrites lets the backward transition mark it stale instead.
+    refreshedFiles: ['spec.md'],
+  },
   [STEPS.check]: {
     requiredFiles: ['code-review.check.md', 'tests.check.md', 'completion.check.md', 'README.md'],
     qaReportPattern: /^qa-.*\.check\.md$/,

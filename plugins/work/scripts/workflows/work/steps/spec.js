@@ -6,7 +6,11 @@
  *   1. ledger unparseable                                  → RUN AskUserQuestion
  *      escalation (GH-696/PR #718: a corrupt spec-phase.json cannot be
  *      repaired by re-dispatching the writer)
- *   2. hasSpec=true, ledger terminal/absent               → DEFER (artifact already present)
+ *   2. hasSpec=true, ledger terminal/absent, NOT stale    → DEFER (artifact already present)
+ *   2b. hasSpec=true but the spec was invalidated by a retry → RUN the amender
+ *      (GH-247: `check` retries back here when 4b_gherkin_scope finds a
+ *      declared-scope mismatch; DEFERring would re-present the very spec.md
+ *      the gate rejected)
  *   3. hasSpec=true, ledger mid-flight                    → RUN  (GH-696: re-dispatch the
  *      spec-writer — spec-next.js resumes from the recorded phase)
  *   4. hasSpec=false, brief.md on disk OR hasBrief=false   → RUN with briefRef path in prompt
@@ -45,6 +49,35 @@ function addSpecGenerateRun(add, s, ctx, briefPath, specPath) {
 }
 
 /**
+ * Decision 2b: spec.md exists but a backward transition invalidated it — the
+ * workflow was sent back here to AMEND the spec, so re-dispatch the writer
+ * against the existing file rather than reporting the step already done.
+ */
+function addSpecAmendRun(add, ctx, specPath) {
+  const { STEPS, t, getDocsPrompt } = ctx;
+  add(STEPS.spec, 'RUN', 'Task(spec-writer)', 'spec.md was invalidated by a retry — amend it', {
+    agentType: 'spec-writer',
+    agentPrompt: `Amend the technical specification for ticket ${t} at ${specPath}.\n\nA later step sent the workflow back to \`spec\`, which means the existing spec.md is what needs fixing — do NOT regenerate it from scratch and do NOT report the step complete because the file exists.\n\nThe usual reason is the check step's 4b_gherkin_scope gate: the implemented scope does not match the scenarios declared under \`## Test Scenarios (Gherkin)\`. Read that gate's reported mismatch and add or correct the tagged scenarios (@integration / @e2e) so the declared scope covers what was built.\n\n**Run \`node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-spec/spec-next.js ${t}\` and follow its instructions** — it drives the remaining phases and records the transitions. Do NOT edit spec-phase.json directly.${getDocsPrompt('READ_DOCS_ON_SPEC')}`,
+  });
+}
+
+/**
+ * spec.md is on disk — decide between amending it (a retry sent us back),
+ * resuming a mid-flight ledger, and deferring because it is genuinely done.
+ */
+function addSpecPresentAction(add, s, ctx, specPath) {
+  if (s.specPhaseMidFlight) {
+    addSpecResumeRun(add, s, ctx, specPath);
+    return;
+  }
+  if (s.specStale) {
+    addSpecAmendRun(add, ctx, specPath);
+    return;
+  }
+  add(ctx.STEPS.spec, 'DEFER', null, 'spec.md already exists');
+}
+
+/**
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx
@@ -62,12 +95,8 @@ module.exports = function specStep(add, s, ctx) {
     });
     return;
   }
-  if (s?.hasSpec && !s.specPhaseMidFlight) {
-    add(STEPS.spec, 'DEFER', null, 'spec.md already exists');
-    return;
-  }
   if (s?.hasSpec) {
-    addSpecResumeRun(add, s, ctx, specPath);
+    addSpecPresentAction(add, s, ctx, specPath);
     return;
   }
   addSpecGenerateRun(add, s, ctx, briefPath, specPath);

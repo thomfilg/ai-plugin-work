@@ -289,6 +289,10 @@ function inspect(ticket, providerConfig, suffix, deps) {
 
   s.hasBrief = fileExists(path.join(s.tasksDir, 'brief.md'));
   s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
+  // GH-247: spec.md exists but a retry sent the workflow back to `spec` to
+  // amend it. Presence alone would make steps/spec.js DEFER and swallow the
+  // remediation, so the step needs to know the artifact was invalidated.
+  s.specStale = staleEvidenceFiles(s.tasksDir, STEPS.spec, s.workState).length > 0;
   s.hasGherkin = fileExists(path.join(s.tasksDir, 'gherkin.feature'));
   s.hasTasks = fileExists(path.join(s.tasksDir, 'tasks.md'));
 
