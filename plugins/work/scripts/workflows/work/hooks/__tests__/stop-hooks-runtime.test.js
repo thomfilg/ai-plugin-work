@@ -39,7 +39,13 @@ describe('review Stop hooks — dual runtime self-filter', () => {
   before(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stop-hooks-rt-'));
     cwd = path.join(tmp, 'my-project-PROJ-123');
-    const taskDir = path.join(cwd, 'tasks', 'PROJ-123');
+    fs.mkdirSync(cwd, { recursive: true });
+    // The report goes in the CONFIGURED tasks dir. It used to be written to
+    // `<cwd>/tasks/PROJ-123` — this fixture already declared TASKS_BASE below
+    // and then ignored it, because the hooks resolved reports relative to the
+    // worktree instead. That is the guess this change removes, so the fixture
+    // now writes where TASKS_BASE says.
+    const taskDir = path.join(tmp, 'tasks', 'PROJ-123');
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'code-review.check.md'), REVIEW_MD);
     envBase = {

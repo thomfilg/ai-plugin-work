@@ -36,13 +36,18 @@ function freshConfig(env) {
 }
 
 beforeEach(() => {
-  saved = { tasks: process.env.TASKS_BASE, worktrees: process.env.WORKTREES_BASE };
+  saved = {
+    tasks: process.env.TASKS_BASE,
+    worktrees: process.env.WORKTREES_BASE,
+    repo: process.env.REPO_NAME,
+  };
 });
 
 afterEach(() => {
   for (const [k, v] of [
     ['TASKS_BASE', saved.tasks],
     ['WORKTREES_BASE', saved.worktrees],
+    ['REPO_NAME', saved.repo],
   ]) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -82,10 +87,27 @@ describe('config.TASKS_BASE is configured, never derived', () => {
 
   it('leaves WORKTREES_BASE derivation alone — a different, repo-anchored concept', () => {
     // worktreeDir()/repoDir() are genuinely layout-derived; only the tasks root
-    // is a separately configured location. Narrowing this fix to TASKS_BASE is
-    // deliberate, so pin that WORKTREES_BASE still resolves.
-    const config = freshConfig({ WORKTREES_BASE: '/srv/worktrees', TASKS_BASE: undefined });
+    // is a separately configured location. Pin that WORKTREES_BASE still
+    // resolves, with REPO_NAME supplied: this assertion used to read
+    // `path.join('/srv/worktrees', config.REPO_NAME)` and passed because
+    // REPO_NAME defaulted to the documentation example 'my-project', so it was
+    // really asserting that a placeholder reaches a path.
+    const config = freshConfig({
+      WORKTREES_BASE: '/srv/worktrees',
+      TASKS_BASE: undefined,
+      REPO_NAME: 'srv-repo',
+    });
     assert.equal(config.WORKTREES_BASE, '/srv/worktrees');
-    assert.equal(config.repoDir(), path.join('/srv/worktrees', config.REPO_NAME));
+    assert.equal(config.repoDir(), path.join('/srv/worktrees', 'srv-repo'));
+  });
+
+  it('refuses to build a worktree path from an unconfigured REPO_NAME', () => {
+    const config = freshConfig({
+      WORKTREES_BASE: '/srv/worktrees',
+      TASKS_BASE: undefined,
+      REPO_NAME: undefined,
+    });
+    assert.equal(config.repoDir(), null, 'no repo name ⇒ no repo dir, not <worktrees>/my-project');
+    assert.equal(config.worktreeDir('GH-1'), null);
   });
 });

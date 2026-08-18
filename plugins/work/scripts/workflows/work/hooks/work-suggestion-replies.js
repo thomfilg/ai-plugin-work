@@ -268,7 +268,7 @@ function blockIfRepliesMissing(currentTaskId, allIssues, replyContent, totalIssu
 }
 
 /** Check one task folder's code-review + reply pair; may exit(0) or exit(2). */
-function checkDirectory(taskFolder) {
+function checkDirectory(taskFolder, currentTaskId) {
   const codeReviewPath = path.join(taskFolder, 'code-review.check.md');
   const replyPath = path.join(taskFolder, 'code-review-reply.check.md');
 
@@ -324,7 +324,7 @@ async function main() {
   }
 
   for (const taskFolder of stopHookUtils.reviewTaskFolders(config, currentTaskId)) {
-    checkDirectory(taskFolder);
+    checkDirectory(taskFolder, currentTaskId);
   }
 
   process.exit(0);
