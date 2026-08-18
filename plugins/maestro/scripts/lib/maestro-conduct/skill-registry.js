@@ -14,7 +14,6 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const rows = require('./shared/skill-registry-rows.js');
@@ -30,10 +29,9 @@ const REGISTRY = Object.freeze({
   'follow-up': rows.followUpRow(),
 });
 
-function tasksBase() {
-  const worktrees = process.env.WORKTREES_BASE || path.join(os.homedir(), 'worktrees');
-  return process.env.TASKS_BASE || path.join(worktrees, 'tasks');
-}
+// Through shared/base-dirs.js — this carried its own copy of the
+// `~/worktrees` + `<worktrees>/tasks` guess pair. Returns null when unconfigured.
+const baseDirs = require('./shared/base-dirs');
 
 function isValidSkillName(name) {
   return typeof name === 'string' && SKILL_NAME_REGEX.test(name);
@@ -70,7 +68,7 @@ function get(name, opts = {}) {
 }
 
 function ticketSkillFile(ticket) {
-  return path.join(tasksBase(), ticket, TICKET_SKILL_BASENAME);
+  return baseDirs.ticketStateFile(ticket, TICKET_SKILL_BASENAME);
 }
 
 function readTicketSkill(ticket, opts = {}) {
@@ -115,9 +113,15 @@ function writeTicketSkill(ticket, name, opts = {}) {
         `pass {hasOracle:true} for an oracle-backed command)`
     );
   }
-  const dir = path.join(tasksBase(), ticket);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, TICKET_SKILL_BASENAME), `${name}\n`);
+  const file = baseDirs.ticketStateFile(ticket, TICKET_SKILL_BASENAME);
+  if (!file) {
+    throw new Error(
+      'skill-registry: TASKS_BASE is not configured — refusing to guess a tasks root ' +
+        'to write the ticket skill into. Set TASKS_BASE in the environment.'
+    );
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${name}\n`);
 }
 
 module.exports = {

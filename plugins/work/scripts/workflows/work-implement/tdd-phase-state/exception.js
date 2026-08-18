@@ -11,7 +11,7 @@
 
 const path = require('path');
 const { execSync } = require('child_process');
-const { resolveTasksBaseWithFallback } = require('../../lib/ticket-validation');
+const { requireTasksBase } = require('../../lib/ticket-validation');
 const { safeParseTask, parseCategory, errorExit, successOut } = require('./io');
 const { sanitizeId, writeState } = require('./state-path');
 
@@ -55,7 +55,7 @@ function validateCheckpoint(ticketId, taskNum, category) {
     errorExit('Category "checkpoint" requires --task <N> to identify which task is a checkpoint.');
   }
   const { isCheckpointTask } = require('../exception-validator');
-  const resolvedTasksBase = resolveTasksBaseWithFallback();
+  const resolvedTasksBase = requireTasksBase();
   const safeId = sanitizeId(ticketId);
   if (!isCheckpointTask(safeId, taskNum, resolvedTasksBase)) {
     auditException(ticketId, taskNum, category, null, false);

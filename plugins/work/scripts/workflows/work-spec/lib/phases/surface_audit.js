@@ -141,18 +141,21 @@ function normalizeIdentifier(token) {
   return t;
 }
 
+/** The `{siblingId, file}` pairs one related-ticket entry contributes. */
+function surfacesOf(sib) {
+  if (!sib || !sib.id) return [];
+  const surfaces = Array.isArray(sib.surfaces) ? sib.surfaces : [];
+  return surfaces
+    .filter((f) => typeof f === 'string' && f)
+    .map((f) => ({ siblingId: sib.id, file: f }));
+}
+
 function listSurfaceFiles(manifest) {
   if (!manifest) return [];
   const out = [];
   for (const key of ['siblings', 'blockedBy', 'dependsOn', 'relatedTo', 'parent']) {
     const arr = key === 'parent' ? [manifest.parent].filter(Boolean) : manifest[key] || [];
-    for (const sib of arr) {
-      if (!sib || !sib.id) continue;
-      const surfaces = Array.isArray(sib.surfaces) ? sib.surfaces : [];
-      for (const f of surfaces) {
-        if (typeof f === 'string' && f) out.push({ siblingId: sib.id, file: f });
-      }
-    }
+    for (const sib of arr) out.push(...surfacesOf(sib));
   }
   return out;
 }
@@ -197,20 +200,86 @@ function upsertVerifiedSection(specText, block) {
   return specText.slice(0, idx) + block + specText.slice(end);
 }
 
+/**
+ * Resolve a sibling surface file against the caller-supplied worktree root.
+ *
+ * Two climbed candidates used to be tried as well, `<tasksDir>/../..` and
+ * `<tasksDir>/..`, on the assumption that tasks live under `<worktree>/tasks`.
+ * TASKS_BASE is configured independently (#791), so those resolve to the parent
+ * of TASKS_BASE and its grandparent — arbitrary directories that happen to
+ * exist. A surface file "found" under one of them is a false positive, which is
+ * worse here than finding nothing.
+ */
+function makeSurfaceResolver(manifest) {
+  const roots =
+    manifest.worktreeRoot && typeof manifest.worktreeRoot === 'string'
+      ? [manifest.worktreeRoot]
+      : [];
+  return function resolveSurfacePath(file) {
+    for (const root of roots) {
+      const p = path.resolve(root, file);
+      if (fs.existsSync(p)) return p;
+    }
+    return null;
+  };
+}
+
+/** The surface file that defines `id`, or null when none of them does. */
+function findDefiningSurface(id, surfaceFiles, resolveSurfacePath) {
+  for (const sf of surfaceFiles) {
+    const abs = resolveSurfacePath(sf.file);
+    if (!abs) continue;
+    if (fileContainsIdentifier(abs, id)) {
+      return { file: sf.file, identifier: id, siblingId: sf.siblingId };
+    }
+  }
+  return null;
+}
+
+/**
+ * Record an identifier no surface file defines.
+ *
+ * ERROR when the wrapping line explicitly names a sibling-owned file (the
+ * brief/spec tied the identifier to that file and the file does not define it);
+ * WARNING otherwise, since it probably was never meant to come from a sibling.
+ */
+function recordUnresolved(t, id, surfaceFiles, errors, warnings) {
+  const lineRefersToSurface = surfaceFiles.find(
+    (sf) => t.lineText.includes(sf.file) || t.lineText.includes(path.basename(sf.file))
+  );
+  if (lineRefersToSurface) {
+    errors.push(
+      `${t.source}.md mentions \`${id}\` in a bullet that references sibling-owned file \`${lineRefersToSurface.file}\`, but \`${id}\` was not found in that file. Sibling \`${lineRefersToSurface.siblingId}\` does not currently expose this identifier — escalate to the sibling owner before depending on it.`
+    );
+  } else {
+    warnings.push(
+      `${t.source}.md mentions \`${id}\` but no sibling-owned surface file contains it (probably internal — skipping).`
+    );
+  }
+}
+
+/** Every backticked identifier in brief + spec, tagged with its source doc. */
+function candidateTokens(brief, spec) {
+  return [
+    ...extractBacktickIdentifiers(brief).map((t) => ({ ...t, source: 'brief' })),
+    ...extractBacktickIdentifiers(spec || '').map((t) => ({ ...t, source: 'spec' })),
+  ];
+}
+
 function auditArtifacts(tasksDir, manifest) {
   const briefPath = path.join(tasksDir, 'brief.md');
-  const specPath = path.join(tasksDir, 'spec.md');
   const brief = readFile(briefPath);
-  const spec = readFile(specPath);
+  const spec = readFile(path.join(tasksDir, 'spec.md'));
   const errors = [];
   const warnings = [];
   const verified = [];
 
-  const surfaceFiles = listSurfaceFiles(manifest);
   if (!brief) {
     errors.push(`Missing ${briefPath}.`);
     return { errors, warnings, verified };
   }
+
+  const surfaceFiles = listSurfaceFiles(manifest);
   if (surfaceFiles.length === 0) {
     return {
       errors,
@@ -220,82 +289,32 @@ function auditArtifacts(tasksDir, manifest) {
     };
   }
 
-  // worktree root = parent of tasksDir if tasks live under <worktree>/tasks
-  // otherwise resolve via the canonical TASKS_BASE → worktree heuristic. We
-  // probe both: the worktree root for the file, and the tasksDir's parent.
-  const candidateRoots = [];
-  // `ctx.worktreeRoot` is the truth, but this is a pure function — caller
-  // passes `manifest`. Use the manifest's optional `worktreeRoot` if set,
-  // otherwise climb from tasksDir.
-  if (manifest.worktreeRoot && typeof manifest.worktreeRoot === 'string') {
-    candidateRoots.push(manifest.worktreeRoot);
-  }
-  candidateRoots.push(path.resolve(tasksDir, '..', '..'));
-  candidateRoots.push(path.resolve(tasksDir, '..'));
+  auditTokens(candidateTokens(brief, spec), {
+    surfaceFiles,
+    resolveSurfacePath: makeSurfaceResolver(manifest),
+    errors,
+    warnings,
+    verified,
+  });
 
-  function resolveSurfacePath(file) {
-    for (const root of candidateRoots) {
-      const p = path.resolve(root, file);
-      if (fs.existsSync(p)) return p;
-    }
-    return null;
-  }
+  return { errors, warnings, verified };
+}
 
-  // Collect candidate (token, source) pairs from brief + spec.
-  const tokens = [
-    ...extractBacktickIdentifiers(brief).map((t) => ({ ...t, source: 'brief' })),
-    ...extractBacktickIdentifiers(spec || '').map((t) => ({ ...t, source: 'spec' })),
-  ];
-
+/** Every normalized identifier in `tokens`, classified as verified/error/warning. */
+function auditTokens(tokens, sink) {
+  const { surfaceFiles, resolveSurfacePath, errors, warnings, verified } = sink;
   for (const t of tokens) {
     const norm = normalizeIdentifier(t.token);
     if (norm == null) continue;
-    const ids = Array.isArray(norm) ? norm : [norm];
-    for (const id of ids) {
-      // Find which surface file most plausibly contains this id.
-      let hit = null;
-      let missAttempt = null;
-      for (const sf of surfaceFiles) {
-        const abs = resolveSurfacePath(sf.file);
-        if (!abs) {
-          missAttempt = missAttempt || { file: sf.file, reason: 'file-not-resolved' };
-          continue;
-        }
-        if (fileContainsIdentifier(abs, id)) {
-          hit = { file: sf.file, identifier: id, siblingId: sf.siblingId };
-          break;
-        }
-      }
-      if (hit) {
-        // Dedupe verified entries.
-        if (!verified.some((v) => v.file === hit.file && v.identifier === hit.identifier)) {
-          verified.push(hit);
-        }
-        continue;
-      }
-
-      // Heuristic mapping: does the line/bullet that wrapped the token
-      // contain an explicit reference to one of the surface files? If so
-      // it's an ERROR (the brief/spec explicitly tied the identifier to a
-      // sibling-owned file but that file doesn't define it). Otherwise a
-      // WARNING (can't confidently say it was meant to come from a
-      // sibling).
-      const lineRefersToSurface = surfaceFiles.find(
-        (sf) => t.lineText.includes(sf.file) || t.lineText.includes(path.basename(sf.file))
-      );
-      if (lineRefersToSurface) {
-        errors.push(
-          `${t.source}.md mentions \`${id}\` in a bullet that references sibling-owned file \`${lineRefersToSurface.file}\`, but \`${id}\` was not found in that file. Sibling \`${lineRefersToSurface.siblingId}\` does not currently expose this identifier — escalate to the sibling owner before depending on it.`
-        );
-      } else {
-        warnings.push(
-          `${t.source}.md mentions \`${id}\` but no sibling-owned surface file contains it (probably internal — skipping).`
-        );
+    for (const id of Array.isArray(norm) ? norm : [norm]) {
+      const hit = findDefiningSurface(id, surfaceFiles, resolveSurfacePath);
+      if (!hit) {
+        recordUnresolved(t, id, surfaceFiles, errors, warnings);
+      } else if (!verified.some((v) => v.file === hit.file && v.identifier === hit.identifier)) {
+        verified.push(hit); // dedupe
       }
     }
   }
-
-  return { errors, warnings, verified };
 }
 
 function writeVerifiedSection(tasksDir, verified) {

@@ -1377,12 +1377,21 @@ describe('work-orchestrator.js', () => {
     const TICKET = 'TEST-8888';
     let integGitDir;
     const envOpts = {};
+    const INTEG_REPO_NAME = 'integ-repo';
 
     before(() => {
       fs.mkdirSync(TEMP_TASKS, { recursive: true });
       const { gitDir } = prepareVerifyEnv(TICKET, TEMP_TASKS);
       integGitDir = gitDir;
-      envOpts.env = { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS };
+      // REPO_NAME is explicit: the worktree fixtures below are created at
+      // `<TEMP_WB>/<REPO_NAME>-<TICKET>`, and the orchestrator no longer falls
+      // back to the documentation placeholder 'my-project' when building that
+      // path — so the suite has to name the repo it is simulating.
+      envOpts.env = {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+        REPO_NAME: INTEG_REPO_NAME,
+      };
       envOpts.cwd = integGitDir;
     });
     after(() => {
@@ -1512,8 +1521,7 @@ describe('work-orchestrator.js', () => {
 
     it('should RUN implement when hasDiffVsMain but implement not previously completed (GH-130)', async () => {
       const { execSync } = require('child_process');
-      const REPO_NAME = process.env.REPO_NAME || 'my-project';
-      const worktreeDir = path.join(TEMP_WB, `${REPO_NAME}-${TICKET}`);
+      const worktreeDir = path.join(TEMP_WB, `${INTEG_REPO_NAME}-${TICKET}`);
 
       // Create a mock git repo that has a diff vs origin/main
       const gitCmd = (cmd) => execSync(cmd, { cwd: worktreeDir, stdio: 'pipe' });
@@ -1552,8 +1560,7 @@ describe('work-orchestrator.js', () => {
 
     it('should DEFER implement when previously completed AND hasDiffVsMain (GH-130)', async () => {
       const { execSync } = require('child_process');
-      const REPO_NAME = process.env.REPO_NAME || 'my-project';
-      const worktreeDir = path.join(TEMP_WB, `${REPO_NAME}-${TICKET}`);
+      const worktreeDir = path.join(TEMP_WB, `${INTEG_REPO_NAME}-${TICKET}`);
 
       // Create a mock git repo that has a diff vs origin/main
       const gitCmd = (cmd) => execSync(cmd, { cwd: worktreeDir, stdio: 'pipe' });

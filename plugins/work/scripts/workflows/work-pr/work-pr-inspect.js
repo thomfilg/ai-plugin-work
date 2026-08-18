@@ -186,8 +186,29 @@ function buildInspectData(tasksDir, worktreeDir) {
     tasksDir,
     tasksDirExists: fs.existsSync(tasksDir),
     worktreeDir,
-    worktreeExists: fs.existsSync(worktreeDir),
+    worktreeExists: !!worktreeDir && fs.existsSync(worktreeDir),
   };
+
+  // Every git probe below passes worktreeDir as `cwd`, and child_process reads
+  // a null cwd as "inherit" — so an unresolved worktree (WORKTREES_BASE or
+  // REPO_NAME unset) would report the HEAD, base branch, TSX diff and rebase
+  // distance of whatever repository the process was launched in, as though
+  // they were this ticket's. Report "no worktree" instead: the fields keep the
+  // same shapes their existing `worktreeExists === false` path produces.
+  if (!worktreeDir) {
+    data.headSha = '';
+    data.prShaFile = path.join(tasksDir, '.pr-update-sha');
+    data.lastPrSha = readShaFile(data.prShaFile);
+    data.tsxChanged = '';
+    data.hasTsxChanges = false;
+    // NOT resolveBaseBranch(): that calls config.getBaseBranch({cwd}), which
+    // execSyncs `git symbolic-ref` — with an undefined cwd it would inherit the
+    // launch directory, which is the very thing this branch exists to avoid.
+    // 'origin/main' is the same default resolveBaseBranch falls back to.
+    data.baseBranch = 'origin/main';
+    data.commitsBehindMain = 0; // rebase guard needs a worktree; it has none
+    return finishInspectData(data, tasksDir);
+  }
 
   // Current HEAD SHA (from ticket worktree)
   data.headSha = safeExec('git rev-parse HEAD', { cwd: worktreeDir });
@@ -211,7 +232,16 @@ function buildInspectData(tasksDir, worktreeDir) {
     data.commitsBehindMainCapped = guard.commitsBehindMainCapped;
   }
 
-  // Screenshots
+  return finishInspectData(data, tasksDir);
+}
+
+/**
+ * The tasks-dir half of the inspection: screenshots, gating keys and content
+ * SHAs. Reads no git state, so it runs identically whether or not a worktree
+ * resolved — which is what lets the unresolved branch above return the same
+ * shape instead of a truncated object.
+ */
+function finishInspectData(data, tasksDir) {
   const screenshotDir = path.join(tasksDir, 'screenshots');
   data.screenshotDir = screenshotDir;
   data.screenshotCount = countScreenshots(screenshotDir);

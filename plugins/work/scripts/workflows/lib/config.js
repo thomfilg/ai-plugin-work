@@ -205,13 +205,18 @@ config.ticketBrowseUrl = (ticketId) => {
   return config.jiraBrowseUrl(ticketId);
 };
 
-config.worktreeDir = (ticketId) =>
-  config.WORKTREES_BASE
-    ? path.join(config.WORKTREES_BASE, `${config.REPO_NAME}-${ticketId}`)
-    : null;
+// Both go through resolve-base-dirs.js, the one place the `<worktrees>/
+// <repo>-<ticket>` convention is written down, and both use the CONFIGURED
+// repo name rather than `config.REPO_NAME`. That field still defaults to the
+// documentation example 'my-project' for display and back-compat, but joining
+// a placeholder into a path yields `<worktrees>/my-project-<TICKET>` — a
+// directory that looks exactly like a real worktree. Null instead.
+const { configuredRepoName, worktreeDirFrom, repoDirFrom } = require('./resolve-base-dirs');
 
-config.repoDir = () =>
-  config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, config.REPO_NAME) : null;
+config.worktreeDir = (ticketId) =>
+  worktreeDirFrom(config.WORKTREES_BASE, configuredRepoName(), ticketId);
+
+config.repoDir = () => repoDirFrom(config.WORKTREES_BASE, configuredRepoName());
 
 /**
  * Sanitize ticket ID for file-system paths (#N → GH-N for GitHub Issues).

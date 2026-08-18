@@ -80,12 +80,12 @@ try {
 // ─── Configuration ──────────────────────────────────────────────────────────
 
 const getConfig = require(path.join(__dirname, '..', 'get-config'));
-const TASKS_BASE =
-  getConfig('TASKS_BASE') ||
-  (() => {
-    const wb = getConfig.orExit('WORKTREES_BASE'); // only required if TASKS_BASE isn't set
-    return path.join(wb, 'tasks');
-  })();
+// Configured, never derived (#788). Hooks fail open; the skip is logged.
+const TASKS_BASE = getConfig('TASKS_BASE');
+if (!TASKS_BASE) {
+  process.stderr.write('warn: enforce-step-workflow: TASKS_BASE not configured; skipping\n');
+  process.exit(0);
+}
 
 function safeTicketPath(ticketId) {
   try {

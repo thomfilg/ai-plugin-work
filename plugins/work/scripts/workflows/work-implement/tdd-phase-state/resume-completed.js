@@ -47,7 +47,7 @@ const { writeState, sanitizeId } = require('./state-path');
 const { readActiveTaskBlock } = require('./active-task');
 const { requireState, isEmptyTestOutput, rejectAllSkipped } = require('./record-helpers');
 const { fileInTaskScope } = require('../../lib/task-scope');
-const { resolveTasksBaseWithFallback } = require('../../lib/ticket-validation');
+const { requireTasksBase } = require('../../lib/ticket-validation');
 
 const REJECT_PREFIX = 'Rejected --resume-completed: ';
 
@@ -162,7 +162,7 @@ function _resolveExpectedCommand(ticketId, taskNum, repoRoot) {
     const {
       resolveTaskTestExecution,
     } = require('../../work/lib/step-enrichments/implement-gate/test-command');
-    const tasksDir = path.resolve(resolveTasksBaseWithFallback(), sanitizeId(ticketId));
+    const tasksDir = path.resolve(requireTasksBase(), sanitizeId(ticketId));
     command = resolveTaskTestExecution(tasksDir, taskNum, repoRoot).command;
   } catch {
     command = null;

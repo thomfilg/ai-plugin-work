@@ -13,7 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveTasksBaseWithFallback } = require('../../lib/ticket-validation');
+const { requireTasksBase } = require('../../lib/ticket-validation');
 const { writeJsonAtomic } = require('../../lib/safeIO');
 
 function sanitizeId(ticketId) {
@@ -135,7 +135,7 @@ function getStatePath(ticketId, opts) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
   }
   rejectMalformedTicketId(ticketId);
-  const base = resolveTasksBaseWithFallback();
+  const base = requireTasksBase();
   const safeId = sanitizeId(ticketId);
   const taskNum = opts && opts.taskNum;
 

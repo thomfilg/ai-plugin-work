@@ -125,6 +125,36 @@ JSDoc header sections — "The six identity questions", "The #665 rule",
 "Fail directions", and "Observability" — are the authoritative contract this
 paragraph points at.
 
+### Base Directories (no path guesses)
+
+Base directories are **configured, never derived**. `WORKTREES_BASE` and
+`TASKS_BASE` come from the environment; nothing invents one from the other,
+from `$HOME`, from `process.cwd()`, or from the repo root. A wrong-but-plausible
+path is worse than no path: it looks valid, so every caller accepts it and the
+failure surfaces far from its cause (the canonical symptom was
+`Missing report: tests.check.md` for files that exist one directory over).
+
+Resolve through these, never inline:
+
+| Need | Use |
+|---|---|
+| `<TASKS_BASE>/<ticket>` | `config.tasksDir(ticketId)` — null when unconfigured |
+| Tasks root + an explanation to surface | `resolveBaseDirs(getConfig)` → `{WORKTREES_BASE, TASKS_BASE, error}` |
+| Tasks root in a WRITER | `ticket-validation.requireTasksBase()` — throws, naming the key |
+| `<worktrees>/<repo>-<ticket>` | `config.worktreeDir(id)`, or `worktreeDirFrom(base, repo, id)` when bases arrive via injected deps |
+| `<worktrees>/<repo>` | `config.repoDir()` / `repoDirFrom(base, repo)` |
+| The repo folder name | `configuredRepoName()` — **not** `REPO_NAME \|\| 'my-project'`, which is the docs placeholder |
+
+`lib/resolve-base-dirs.js` is the single source of truth for `plugins/work`;
+`plugins/maestro` has its own one-file equivalent at
+`scripts/lib/maestro-conduct/shared/base-dirs.js`. Readers degrade (null ⇒
+"no state"), hooks fail open with a logged skip, writers refuse by name.
+
+`lib/__tests__/no-path-guesses.test.js` is a grep-guard that fails the build on
+a new `path.join(<x>, 'tasks')`, an inline `` `${repo}-${ticket}` ``, a
+`'my-project'` literal, or a `$HOME`-derived base. Its `ALLOWED` list names the
+resolvers themselves; adding to it needs a reason in review.
+
 ### Security
 - All ticket-ID-to-path conversions validated against directory traversal.
 - `protect-state-files.js` guards `.work-state.json` etc. from direct edits.
