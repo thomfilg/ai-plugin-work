@@ -68,7 +68,14 @@ function requirePaths() {
           `${missing.join(', ')} not set. Set in env or ensure lib/config.js is loadable.`,
       })
     );
-    process.exit(1);
+    // Exit 0, not 1. The caller reads this JSON through lib/safe-exec, which
+    // returns its `fallback` on ANY non-zero exit — so exiting 1 threw the
+    // message away and work-hook.js printed "ORCHESTRATOR FAILED: command
+    // returned null" instead. Its `plan.error` branch already prints
+    // `ORCHESTRATOR ERROR: <message>` and exits 0; it was simply unreachable
+    // from here. This is the contract resolve-base-dirs.js describes: the
+    // orchestrators always emit structured JSON and surface `error` in it.
+    process.exit(0);
   }
 }
 
