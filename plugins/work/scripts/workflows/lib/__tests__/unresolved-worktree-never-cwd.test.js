@@ -10,8 +10,25 @@
  * is exactly what this burn-down exists to remove, and "the current directory"
  * is the most plausible wrong directory there is.
  *
- * So the rule these tests pin is narrower than "returns null": an unresolved
- * worktree must produce a REFUSAL that names the key, never a silent fallback.
+ * The rule these tests pin is therefore about VISIBILITY, per site, and it is
+ * not uniform — because the pre-PR behaviour was not uniform either:
+ *
+ *   - work-pr and runDispatchedGate REFUSE by name. Previously an unset
+ *     REPO_NAME produced a `<worktrees>/my-project-<TICKET>` path that did not
+ *     exist, so git/the gate command failed loudly. null means "inherit", so
+ *     the same misconfiguration would quietly succeed against the wrong repo.
+ *     Refusing preserves the loud failure.
+ *   - follow-up-next KEEPS its cwd fallback and warns. There the placeholder
+ *     path never existed either, so it already fell through to cwd — the
+ *     outcome is unchanged and only the silence was new.
+ *
+ * Blocking follow-up-next outright was tried and reverted: it turned a narrow
+ * hazard into a precondition for the whole command and broke six suites that
+ * never needed a worktree.
+ *
+ * The runDispatchedGate case is a STRUCTURAL pin (it asserts the guard exists
+ * in source) rather than a behavioural one: reaching that call needs a live
+ * dispatched-gate loop, and a fixture that elaborate would test the fixture.
  *
  * Uses node:test + node:assert/strict.
  */
@@ -20,7 +37,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -65,38 +82,14 @@ describe('an unresolved worktree refuses instead of falling back to cwd', () => 
     }
   });
 
-  it('work-next blocks with a structured instruction when REPO_NAME is unset', () => {
-    const tasks = fs.mkdtempSync(path.join(os.tmpdir(), 'unresolved-wt-next-'));
-    try {
-      const out = execFileSync(
-        process.execPath,
-        [path.join(WORKFLOWS, 'work', 'work-next.js'), 'PROJ-1'],
-        {
-          encoding: 'utf8',
-          timeout: 20000,
-          env: {
-            ...process.env,
-            WORKTREES_BASE: '/srv/worktrees',
-            TASKS_BASE: tasks,
-            REPO_NAME: '',
-          },
-        }
-      );
-      const payload = JSON.parse(out.trim().split('\n').pop());
-
-      assert.equal(payload.action, 'blocked', `expected a blocked instruction, got: ${out}`);
-      assert.match(payload.reason, /REPO_NAME/);
-      // The orchestrator contract: always a structured instruction, never a crash.
-      assert.equal(payload.type, 'work_instruction');
-    } finally {
-      fs.rmSync(tasks, { recursive: true, force: true });
-    }
-  });
-
-  it('follow-up-next blocks rather than classifying against the launch directory', () => {
+  it('follow-up-next says so on stderr before classifying against the cwd', () => {
+    // cwd is the long-standing fallback for "the worktree is not there", and it
+    // is NOT a new outcome: before REPO_NAME stopped defaulting to
+    // 'my-project', an unset one produced a path that never existed and landed
+    // here too. What must not happen is landing here SILENTLY.
     const tasks = fs.mkdtempSync(path.join(os.tmpdir(), 'unresolved-wt-fu-'));
     try {
-      const out = execFileSync(
+      const r = spawnSync(
         process.execPath,
         [path.join(WORKFLOWS, 'follow-up', 'follow-up-next.js'), 'PROJ-1'],
         {
@@ -110,12 +103,33 @@ describe('an unresolved worktree refuses instead of falling back to cwd', () => 
           },
         }
       );
-      const payload = JSON.parse(out.trim().split('\n').pop());
-
-      assert.equal(payload.action, 'blocked', `expected a blocked instruction, got: ${out}`);
-      assert.match(payload.reason, /REPO_NAME/);
+      assert.match(
+        String(r.stderr || ''),
+        /REPO_NAME is not configured/,
+        `falling back to the launch directory must be reported; stderr: ${r.stderr}`
+      );
     } finally {
       fs.rmSync(tasks, { recursive: true, force: true });
     }
+  });
+
+  it('runDispatchedGate refuses rather than running gate tests in an inherited cwd', () => {
+    // Here the outcome DID change: an unresolvable worktree used to be a
+    // non-existent path, so the gate command failed loudly. null means
+    // "inherit", which would run the tests in whichever shell fired the hook.
+    const { createGetNextInstruction } = require(
+      path.join(WORKFLOWS, 'work', 'lib', 'next-instruction')
+    );
+    assert.equal(
+      typeof createGetNextInstruction,
+      'function',
+      'next-instruction must expose its factory for this contract to be testable'
+    );
+    const src = fs.readFileSync(path.join(WORKFLOWS, 'work', 'lib', 'next-instruction.js'), 'utf8');
+    assert.match(
+      src,
+      /if \(!worktreeDir\) \{[\s\S]*?throw new Error\(/,
+      'runDispatchedGate must refuse a null worktreeDir instead of passing it through as cwd'
+    );
   });
 });

@@ -125,6 +125,18 @@ function tryStandardTransitions(env, loop, entry) {
  */
 function runDispatchedGate(env, loop, entry) {
   const worktreeDir = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, loop.safeBase);
+  // Refuse rather than hand the gate a null cwd. An UNRESOLVABLE worktree used
+  // to be a non-existent path, which made the gate's test command fail loudly;
+  // null instead means "inherit", so the same misconfiguration would quietly
+  // run the tests in whichever shell fired the hook — the exact leak the
+  // docstring above says this worktreeDir exists to prevent.
+  if (!worktreeDir) {
+    throw new Error(
+      'Cannot resolve the ticket worktree for the dispatched gate ' +
+        `(WORKTREES_BASE=${env.WORKTREES_BASE || 'unset'}, REPO_NAME=${env.MAIN_WORKTREE_FOLDER || 'unset'}). ` +
+        'Set REPO_NAME — running gate tests from an inherited cwd writes evidence for the wrong ticket.'
+    );
+  }
   const preGateResult = runGate(
     entry.step,
     loop.safeName,
