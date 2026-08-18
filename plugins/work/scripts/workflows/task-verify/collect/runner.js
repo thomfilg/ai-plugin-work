@@ -113,6 +113,43 @@ const REPORTER_FLAG = {
   'node-test': '--test-reporter=tap',
 };
 
+/**
+ * Shell syntax that means a flag appended to the END of the template would not
+ * reach the test runner: pipelines, chains, redirects, command substitution.
+ * `$VAR` is deliberately absent — templates routinely reference $CHANGED_FILES.
+ */
+const CHAINED_SYNTAX = /[|&;<>]|\$\(|`/;
+
+/** Leading strict-mode wrapper (`set -euo pipefail; …`) — see withReporterFlag. */
+const STRICT_PREFIX = /^\s*set\s+[-+][^;]*;\s*/;
+
+/**
+ * Append the structured-reporter flag only when it will actually land on the
+ * test runner.
+ *
+ * The flag is appended to the whole template, so it reaches whatever command
+ * comes LAST. For `pnpm test:unit` — or `set -euo pipefail; pnpm test:unit`,
+ * where the wrapper is a prefix and the runner is still last — that is the
+ * runner. For `pnpm test:unit | tee run.log` it is `tee`, which exits non-zero
+ * on an unknown option:
+ *
+ *     tee: unrecognized option '--reporter=json'
+ *
+ * Under the `pipefail` these templates carry, that fails the whole run and the
+ * verifier reads it as "tests do not pass on head" — the same false
+ * contradiction this feature removes, reintroduced by its own instrumentation.
+ *
+ * So when the template chains, the command runs VERBATIM and unflagged. The
+ * run is still the repo's own — which is the point — and interpretRun's
+ * `reporterKind: 'exit-code-only'` path already grades it honestly instead of
+ * inventing counts.
+ */
+function withReporterFlag(template, flag) {
+  if (!flag) return template;
+  if (CHAINED_SYNTAX.test(template.replace(STRICT_PREFIX, ''))) return template;
+  return `${template} ${flag}`;
+}
+
 /** Package-manager subcommands that are not script names. */
 const PM_SUBCOMMANDS = new Set(['exec', 'dlx', 'x', 'run-script']);
 
@@ -159,7 +196,7 @@ function configuredCommand(files, runner, cwd) {
   const template = process.env.TEST_UNIT_COMMAND || process.env.TEST_COMMAND;
   if (!template || !template.trim()) return null;
   if (!repoCanRunTemplate(cwd, template)) return null;
-  const flag = REPORTER_FLAG[runner];
+  const command = withReporterFlag(template, REPORTER_FLAG[runner]);
   return {
     // `bash -lc`, NOT `sh -c` — the same invocation tdd-phase-state/io.js and
     // task-next.js runTest() use, for the reason spelled out there: /bin/sh is
@@ -171,7 +208,7 @@ function configuredCommand(files, runner, cwd) {
     // than pinned to /bin/bash so hosts that keep it elsewhere (NixOS, macOS
     // homebrew) resolve the same binary as the rest of the pipeline.
     cmd: 'bash',
-    args: ['-lc', flag ? `${template} ${flag}` : template],
+    args: ['-lc', command],
     // `$CHANGED_FILES` in the template expands from env (set by the caller).
     parse: runner === 'node-test' ? parseNodeTestSummary : parseJsonReporter,
     changedFiles: files.join(' '),
@@ -306,6 +343,7 @@ module.exports = {
   scrubTestFlags,
   parseNodeTestSummary,
   parseJsonReporter,
+  withReporterFlag,
   configuredCommand,
   runDerivedTests,
   DEFAULT_TIMEOUT_MS,

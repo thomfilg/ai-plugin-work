@@ -24,7 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { configuredCommand } = require('../collect/runner');
+const { configuredCommand, withReporterFlag } = require('../collect/runner');
 
 const STRICT = 'set -euo pipefail; pnpm test:unit';
 
@@ -99,5 +99,59 @@ describe('configuredCommand shell parity (GH-755)', () => {
   it('still falls back when the repo does not declare the script', () => {
     process.env.TEST_UNIT_COMMAND = 'pnpm test:not-declared';
     assert.equal(configuredCommand(['a.test.ts'], 'vitest', repo), null);
+  });
+});
+
+describe('reporter flag placement (GH-755)', () => {
+  const FLAG = '--reporter=json';
+
+  it('appends to a plain command — the flag reaches the runner', () => {
+    assert.equal(withReporterFlag('pnpm test:unit', FLAG), 'pnpm test:unit --reporter=json');
+  });
+
+  it('appends past a strict-mode prefix, where the runner is still last', () => {
+    assert.equal(
+      withReporterFlag('set -euo pipefail; pnpm test:unit', FLAG),
+      'set -euo pipefail; pnpm test:unit --reporter=json'
+    );
+  });
+
+  it('does NOT append when a pipeline would hand the flag to another command', () => {
+    // `tee: unrecognized option '--reporter=json'` exits non-zero, and under the
+    // pipefail these templates carry that fails the whole run — the verifier
+    // would report "tests do not pass on head" for a green suite.
+    const t = 'pnpm test:unit | tee run.log';
+    assert.equal(withReporterFlag(t, FLAG), t);
+  });
+
+  it('does NOT append across a chain or a redirect', () => {
+    for (const t of [
+      'set -euo pipefail; pnpm test:unit && pnpm lint',
+      'pnpm test:unit > run.log',
+      'pnpm test:unit; echo done',
+      'pnpm test:unit $(cat args)',
+    ]) {
+      assert.equal(withReporterFlag(t, FLAG), t, `must not flag: ${t}`);
+    }
+  });
+
+  it('still appends when the template only expands a variable', () => {
+    // $CHANGED_FILES is how these templates address the derived files — it must
+    // not be mistaken for shell chaining.
+    assert.equal(
+      withReporterFlag('vitest run $CHANGED_FILES', FLAG),
+      'vitest run $CHANGED_FILES --reporter=json'
+    );
+  });
+
+  it('returns the template untouched when the runner has no reporter flag', () => {
+    assert.equal(withReporterFlag('pnpm test:unit', undefined), 'pnpm test:unit');
+  });
+
+  it('a chained template reaches configuredCommand unflagged', () => {
+    process.env.TEST_UNIT_COMMAND = 'pnpm test:unit | tee run.log';
+    const run = configuredCommand(['a.test.ts'], 'vitest', repo);
+    assert.equal(run.args[1], 'pnpm test:unit | tee run.log');
+    assert.ok(!run.args[1].includes(FLAG));
   });
 });
