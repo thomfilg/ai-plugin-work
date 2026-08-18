@@ -91,7 +91,21 @@ jobs:
             exit 0
           fi
           echo "Running ${#FILES[@]} test files from touched plugins."
-          node --test "${FILES[@]}"
+          # Through the repo's own runner, NOT a bare `node --test`. run-tests.sh
+          # takes a positional file list (GH-776) and applies three things this
+          # step silently dropped:
+          #   - `.test-skip`, which excludes enforce-screenshot-requirement.test.js.
+          #     That hook shells `git fetch origin --depth=1`, so running its test
+          #     against the checkout turns the runner's clone SHALLOW mid-suite and
+          #     any test that needs real history then fails, nondeterministically.
+          #   - `--test-concurrency=1`, which the suite requires: these tests spawn
+          #     hook subprocesses sharing TASKS_BASE and lose read/write coherence
+          #     under contention (GH-452).
+          #   - the temp-artifact/session-lock cleanup trap, so an interrupted run
+          #     cannot leak locks that block later runs.
+          # Only the full-suite path (`npm test`) honored any of this, so a
+          # plugins-only PR was graded under different rules than every other one.
+          bash plugins/work/scripts/run-tests.sh "${FILES[@]}"
 
       - name: Run tests (full suite)
         if: steps.scope.outputs.non_plugin != '' || steps.scope.outputs.plugins == ''
