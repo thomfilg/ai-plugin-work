@@ -56,6 +56,26 @@ function markResetEvidenceStale(ctx, stepsToReset, tasksDir) {
   }
 }
 
+/**
+ * GH-247: the DESTINATION of a backward transition is the step being sent back
+ * to be redone — that is what a retry edge is for — so its evidence is stale
+ * too. Without this the plan lands on a step whose artifact still exists and
+ * DEFERs ("spec.md already exists", "RESUME: All 3 reports PASS"), silently
+ * swallowing the rollback: the gate that demanded the retry is re-evaluated
+ * against exactly the artifact it rejected.
+ *
+ * Skipped when the check-drift gate produced the redirect — it has already
+ * marked `check` with its own audit reason.
+ */
+function markDestinationEvidenceStale(ctx, tasksDir) {
+  const { ws, targetStep, deps } = ctx;
+  if (ctx.checkDriftDetected) return;
+  const refreshed = deps.evidenceRequirements?.[targetStep]?.refreshedFiles;
+  if (markEvidenceStale(ws, targetStep, tasksDir, refreshed, 'retry target')) {
+    deps.appendAction(ctx.safeTicket, { step: targetStep, what: 'evidence marked stale' });
+  }
+}
+
 /** Going backward (retry loop): reset intermediates + archive their artifacts. */
 function resetIntermediateSteps(ctx, currentIdx, targetIdx) {
   const { ws, currentStep, safeTicket, deps } = ctx;
@@ -78,6 +98,7 @@ function resetIntermediateSteps(ctx, currentIdx, targetIdx) {
   // instead. The reports stay readable; the check gate refuses them until
   // /check rewrites them.
   markResetEvidenceStale(ctx, stepsToReset, tasksDir);
+  markDestinationEvidenceStale(ctx, tasksDir);
   ws.deferredSteps = [];
   ws.lastPlanTimestamp = null;
 }
