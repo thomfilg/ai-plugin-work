@@ -22,23 +22,12 @@ const { makeFailure } = require('../failure-record');
 const { appendForCheckType } = require('../failure-store');
 const { escapeRegex } = require('../../../lib/parse-completion-status');
 const config = require('../../../lib/config');
+const { normalizeRepoPath } = require('../../../lib/repo-path');
 
 const SUFFIX_RE = /([A-Z][a-z0-9]+)$/;
 
-// GH-607: canonicalize a repo-relative path so spec-declared spellings
-// (`./hooks.json`, `foo//bar.json`, a leading `/`) compare equal to git's
-// `--name-only` output (repo-relative, no `./`, single separators). Conservative:
-// a `..` segment is left intact so an out-of-tree path can't silently normalize
-// onto a matching in-tree one.
-function normalizeRepoPath(p) {
-  if (typeof p !== 'string' || p.length === 0) return p;
-  let out = p
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '')
-    .replace(/\/{2,}/g, '/');
-  while (out.startsWith('./')) out = out.slice(2);
-  return out.replace(/\/$/, '');
-}
+// GH-607 path canonicalization, incl. stripping a `:58` line citation — see
+// lib/repo-path.js for the full contract and why the suffix breaks two consumers.
 
 /**
  * Extract candidate tokens from `diffContent` that share `symbol`'s
@@ -163,7 +152,7 @@ const JS_TS_EXTENSIONS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'])
 
 function isConfigPath(p) {
   if (!p || typeof p !== 'string') return false;
-  const ext = path.extname(p).toLowerCase();
+  const ext = path.extname(normalizeRepoPath(p)).toLowerCase(); // strips any :line citation
   if (ext === '') return true; // extensionless (Dockerfile/Makefile/dotfile) → config, not importable
   return !JS_TS_EXTENSIONS.has(ext);
 }

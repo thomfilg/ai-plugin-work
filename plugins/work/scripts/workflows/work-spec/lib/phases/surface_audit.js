@@ -236,6 +236,13 @@ function findDefiningSurface(id, surfaceFiles, resolveSurfacePath) {
   return null;
 }
 
+// A glob surface (`components/pulse/**`) has basename `**`, which would other-
+// wise match every bold markdown line. Only match a plausible filename.
+function basenameMatch(lineText, file) {
+  const bn = path.basename(file);
+  return bn.length > 3 && (bn.includes('.') || bn.includes('/')) && lineText.includes(bn);
+}
+
 /**
  * Record an identifier no surface file defines.
  *
@@ -245,7 +252,7 @@ function findDefiningSurface(id, surfaceFiles, resolveSurfacePath) {
  */
 function recordUnresolved(t, id, surfaceFiles, errors, warnings) {
   const lineRefersToSurface = surfaceFiles.find(
-    (sf) => t.lineText.includes(sf.file) || t.lineText.includes(path.basename(sf.file))
+    (sf) => t.lineText.includes(sf.file) || basenameMatch(t.lineText, sf.file)
   );
   if (lineRefersToSurface) {
     errors.push(
