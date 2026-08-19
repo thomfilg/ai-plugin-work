@@ -97,20 +97,36 @@ function classifyChanges(files) {
 /** Any `<path>.feature` reference in the spec — markdown link or bare mention. */
 const FEATURE_REF_RE = /([\w./-]+\.feature)\b/g;
 
+/** Add every scenario tag in a parse result to `tags`, lower-cased. */
+function collectTags(parsed, tags) {
+  for (const feature of parsed.features) {
+    for (const scenario of feature.scenarios) {
+      for (const tag of scenario.tags) tags.add(tag.toLowerCase());
+    }
+  }
+}
+
+/** Absolute path for a referenced feature file, or null when it escapes `root`. */
+function resolveFeatureRef(root, rel) {
+  const abs = path.resolve(root, rel);
+  if (abs !== root && !abs.startsWith(root + path.sep)) return null;
+  return abs;
+}
+
+/** File contents, or null when unreadable (missing file must not throw). */
+function readFeatureFile(abs) {
+  try {
+    return fs.readFileSync(abs, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Collect scenario tags from `.feature` files the spec REFERENCES rather than
- * inlines.
- *
- * The spec phase legitimately emits a pointer instead of a copy —
- * `See [gherkin.feature](./gherkin.feature) for test scenarios.` — and the
- * tasks phase then treats that file as canonical: it writes the `@task:` /
- * `@test:` ownership tags there and `gherkin-task-refs.js` validates it there.
- * Parsing only spec.md therefore sees zero tags and BLOCKs a ticket whose
- * coverage is complete, correctly tagged and passing.
- *
- * Reads are confined to `specDir` — a spec is not a license to read arbitrary
- * paths — and every failure is swallowed, so a missing or malformed file
- * degrades to "no extra tags" rather than breaking the check.
+ * Tags from `.feature` files the spec REFERENCES rather than inlines. The spec
+ * phase emits a pointer and the tasks phase then owns that file as canonical,
+ * so parsing spec.md alone sees zero tags and blocks a fully-covered ticket.
+ * Reads are confined to `specDir`; anything unreadable yields no extra tags.
  *
  * @param {string} specText
  * @param {string|null|undefined} specDir directory spec.md was read from
@@ -125,21 +141,11 @@ function referencedFeatureTags(specText, specDir) {
     const rel = match[1];
     if (seen.has(rel)) continue;
     seen.add(rel);
-    const abs = path.resolve(root, rel);
-    if (abs !== root && !abs.startsWith(root + path.sep)) continue;
-    let text;
-    try {
-      text = fs.readFileSync(abs, 'utf8');
-    } catch {
-      continue;
-    }
+    const abs = resolveFeatureRef(root, rel);
+    const text = abs === null ? null : readFeatureFile(abs);
     // parseRaw, NOT parse: a standalone .feature file has no `## Test
     // Scenarios` heading, and parse() returns zero features without one.
-    for (const feature of parseGherkin.parseRaw(text).features) {
-      for (const scenario of feature.scenarios) {
-        for (const tag of scenario.tags) tags.add(tag.toLowerCase());
-      }
-    }
+    if (text !== null) collectTags(parseGherkin.parseRaw(text), tags);
   }
   return tags;
 }
@@ -161,12 +167,7 @@ function declaredScope(specText, specDir) {
   }
   const skip = parseGherkin.hasSkipOverride(specText);
   const tags = new Set();
-  const parsed = parseGherkin.parse(specText);
-  for (const feature of parsed.features) {
-    for (const scenario of feature.scenarios) {
-      for (const tag of scenario.tags) tags.add(tag.toLowerCase());
-    }
-  }
+  collectTags(parseGherkin.parse(specText), tags);
   for (const tag of referencedFeatureTags(specText, specDir)) tags.add(tag);
   return { hasSpec: true, skip, tags };
 }
