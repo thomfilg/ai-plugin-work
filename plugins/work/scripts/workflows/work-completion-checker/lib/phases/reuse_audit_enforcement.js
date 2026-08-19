@@ -30,20 +30,14 @@ const SUFFIX_RE = /([A-Z][a-z0-9]+)$/;
 // `--name-only` output (repo-relative, no `./`, single separators). Conservative:
 // a `..` segment is left intact so an out-of-tree path can't silently normalize
 // onto a matching in-tree one.
-// Spec reuse declarations routinely cite a location, not just a file —
-// `components/shell/sidebar/sidebar.tsx:58` (optionally `:58:12`). Left in
-// place the suffix breaks BOTH consumers of a declared path: `path.extname`
-// returns '.tsx:58' (so isConfigPath misroutes an importable module to the
-// config branch) and the `changedSet` lookup can never match a real file.
-const LINE_SUFFIX_RE = /:\d+(?::\d+)?$/;
-
+// Also strips a trailing `:58`/`:58:12` citation (else extname yields '.tsx:58').
 function normalizeRepoPath(p) {
   if (typeof p !== 'string' || p.length === 0) return p;
   let out = p
     .replace(/\\/g, '/')
     .replace(/^\/+/, '')
     .replace(/\/{2,}/g, '/')
-    .replace(LINE_SUFFIX_RE, '');
+    .replace(/:\d+(?::\d+)?$/, '');
   while (out.startsWith('./')) out = out.slice(2);
   return out.replace(/\/$/, '');
 }
@@ -171,10 +165,7 @@ const JS_TS_EXTENSIONS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'])
 
 function isConfigPath(p) {
   if (!p || typeof p !== 'string') return false;
-  // Normalize first: a `file.tsx:58` citation would otherwise yield the
-  // extension '.tsx:58', which is in no extension set, so an importable module
-  // would be routed to the config branch and could never be found.
-  const ext = path.extname(normalizeRepoPath(p)).toLowerCase();
+  const ext = path.extname(normalizeRepoPath(p)).toLowerCase(); // strips any :line citation
   if (ext === '') return true; // extensionless (Dockerfile/Makefile/dotfile) → config, not importable
   return !JS_TS_EXTENSIONS.has(ext);
 }
