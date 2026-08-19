@@ -156,3 +156,62 @@ test('no manifest → validate auto-passes (no siblings to check)', () => {
   assert.equal(r.ok, true);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// ─── Glob-surface basename must not match every bold markdown line ──────────
+//
+// A sibling surface is often declared as a glob (`components/pulse/**`). Its
+// basename is `**`, so a naive `lineText.includes(basename)` matched ANY line
+// containing bold markdown and reported ordinary prose as a sibling-file
+// reference — hard-blocking the spec phase.
+
+const GLOB_SURF = 'components/pulse/pulse-content/**';
+const REAL_SURF = 'lib/explore/explore.schemas.ts';
+
+test('bold markdown does not count as a reference to a glob-declared surface', () => {
+  const { root, tasksDir } = makeFixture({
+    briefContent: ['# Brief', '', '**Goal:** expose `PulseNavRow` in the sidebar.', ''].join('\n'),
+    specContent: null,
+    surfaceFilePath: null,
+    surfaceFileContent: null,
+  });
+  const manifest = { worktreeRoot: root, siblings: [{ id: 'ECHO-5689', surfaces: [GLOB_SURF] }] };
+  const { errors, warnings } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.deepEqual(errors, [], `bold prose must not block, got: ${JSON.stringify(errors)}`);
+  assert.ok(
+    warnings.some((w) => w.includes('PulseNavRow')),
+    `expected a warning for the unresolved identifier, got: ${JSON.stringify(warnings)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a genuine sibling-file reference still BLOCKS alongside a glob surface', () => {
+  // Both surfaces present: the glob must stay inert while the concrete path
+  // still produces a blocking error. A fix that merely disabled the gate would
+  // fail this half.
+  const { root, tasksDir } = makeFixture({
+    briefContent: [
+      '# Brief',
+      '',
+      '**Goal:** ship the thing.',
+      '',
+      `- Project \`workbookId\` from \`${REAL_SURF}\` (P0).`,
+      '',
+    ].join('\n'),
+    specContent: null,
+    surfaceFilePath: REAL_SURF,
+    surfaceFileContent: 'export const exploreItemSchema = {};\n',
+  });
+  const manifest = {
+    worktreeRoot: root,
+    siblings: [
+      { id: 'ECHO-5689', surfaces: [GLOB_SURF] },
+      { id: 'ECHO-4470', surfaces: [REAL_SURF] },
+    ],
+  };
+  const { errors } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.ok(
+    errors.some((e) => e.includes('workbookId') && e.includes(REAL_SURF)),
+    `expected a blocking error naming the real surface, got: ${JSON.stringify(errors)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});

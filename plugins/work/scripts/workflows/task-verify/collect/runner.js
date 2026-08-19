@@ -52,19 +52,49 @@ function parseNodeTestSummary(output) {
   };
 }
 
+/**
+ * Counts from a Playwright `--reporter=json` document.
+ *
+ *     {"suites": [...], "errors": [], "stats": {
+ *        "expected": 7, "unexpected": 0, "flaky": 0, "skipped": 0}}
+ *
+ * Playwright has no `numTotalTests`, so the vitest/jest shape check in
+ * tryReporterDoc rejects it and the run degrades to
+ * `reporterKind: 'exit-code-only'` with no test count — which the verdict
+ * engine reads as I4 "tests do not pass on head (no structured reporter
+ * output)" for EVERY e2e-lane task, against a suite that is green.
+ *
+ * `expected` counts tests that passed, `unexpected` those that failed.
+ * `flaky` passed on retry, so it is counted as run but NOT as a failure.
+ * Returns null for any non-Playwright document, so a foreign shape still
+ * falls through to the caller's remaining strategies.
+ */
+function playwrightCounts(doc) {
+  const stats = doc && doc.stats;
+  if (!stats) return null;
+  if (typeof stats.expected !== 'number' || typeof stats.unexpected !== 'number') return null;
+  const flaky = typeof stats.flaky === 'number' ? stats.flaky : 0;
+  return {
+    testsRan: stats.expected + stats.unexpected + flaky,
+    failures: stats.unexpected,
+  };
+}
+
 /** Try one candidate JSON slice for reporter counts. */
 function tryReporterDoc(candidate) {
   try {
     const doc = JSON.parse(candidate);
-    if (typeof doc.numTotalTests !== 'number') return null;
-    return { testsRan: doc.numTotalTests, failures: doc.numFailedTests || 0 };
+    if (typeof doc.numTotalTests === 'number') {
+      return { testsRan: doc.numTotalTests, failures: doc.numFailedTests || 0 };
+    }
+    return playwrightCounts(doc);
   } catch {
     return null;
   }
 }
 
 /**
- * Parse vitest/jest --json output. Returns null when unparseable.
+ * Parse vitest/jest/playwright --json output. Returns null when unparseable.
  * Runners occasionally print warnings (which may contain `{`) before the
  * JSON blob, so anchoring on the FIRST `{` is not enough: fall back to
  * scanning lines from the END for the JSON document.
@@ -74,6 +104,15 @@ function parseJsonReporter(output) {
   if (start !== -1) {
     const fromFirst = tryReporterDoc(output.slice(start));
     if (fromFirst) return fromFirst;
+    // Pretty-printed reporters (Playwright) emit a multi-line document that
+    // no single line can hold, and interpretRun appends stderr AFTER stdout —
+    // so slicing to end-of-string can trail non-JSON. Bound it at the last
+    // closing brace before falling through to the per-line scan.
+    const end = output.lastIndexOf('}');
+    if (end > start) {
+      const bounded = tryReporterDoc(output.slice(start, end + 1));
+      if (bounded) return bounded;
+    }
   }
   const lines = output.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {

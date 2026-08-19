@@ -30,6 +30,7 @@
 
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
@@ -93,23 +94,81 @@ function classifyChanges(files) {
 
 // ─── Declared scope (spec.md) ───────────────────────────────────────────────
 
-/**
- * Extract the declared Gherkin scope from spec.md text.
- * @param {string|null|undefined} specText
- * @returns {{ hasSpec: boolean, skip: {skip: boolean, reason?: string}, tags: Set<string> }}
- */
-function declaredScope(specText) {
-  if (!specText || !specText.trim()) {
-    return { hasSpec: false, skip: { skip: false }, tags: new Set() };
-  }
-  const skip = parseGherkin.hasSkipOverride(specText);
-  const tags = new Set();
-  const parsed = parseGherkin.parse(specText);
+/** Any `<path>.feature` reference in the spec — markdown link or bare mention. */
+const FEATURE_REF_RE = /([\w./-]+\.feature)\b/g;
+
+/** Add every scenario tag in a parse result to `tags`, lower-cased. */
+function collectTags(parsed, tags) {
   for (const feature of parsed.features) {
     for (const scenario of feature.scenarios) {
       for (const tag of scenario.tags) tags.add(tag.toLowerCase());
     }
   }
+}
+
+/** Absolute path for a referenced feature file, or null when it escapes `root`. */
+function resolveFeatureRef(root, rel) {
+  const abs = path.resolve(root, rel);
+  if (abs !== root && !abs.startsWith(root + path.sep)) return null;
+  return abs;
+}
+
+/** File contents, or null when unreadable (missing file must not throw). */
+function readFeatureFile(abs) {
+  try {
+    return fs.readFileSync(abs, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tags from `.feature` files the spec REFERENCES rather than inlines. The spec
+ * phase emits a pointer and the tasks phase then owns that file as canonical,
+ * so parsing spec.md alone sees zero tags and blocks a fully-covered ticket.
+ * Reads are confined to `specDir`; anything unreadable yields no extra tags.
+ *
+ * @param {string} specText
+ * @param {string|null|undefined} specDir directory spec.md was read from
+ * @returns {Set<string>} lower-cased tags, empty when nothing resolves
+ */
+function referencedFeatureTags(specText, specDir) {
+  const tags = new Set();
+  if (!specDir) return tags;
+  const root = path.resolve(specDir);
+  const seen = new Set();
+  for (const match of specText.matchAll(FEATURE_REF_RE)) {
+    const rel = match[1];
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    const abs = resolveFeatureRef(root, rel);
+    const text = abs === null ? null : readFeatureFile(abs);
+    // parseRaw, NOT parse: a standalone .feature file has no `## Test
+    // Scenarios` heading, and parse() returns zero features without one.
+    if (text !== null) collectTags(parseGherkin.parseRaw(text), tags);
+  }
+  return tags;
+}
+
+/**
+ * Extract the declared Gherkin scope from spec.md text.
+ *
+ * `specDir` is optional and additive: when given, tags from any `.feature`
+ * file the spec links to are unioned in. Omitting it preserves the previous
+ * spec-text-only behaviour exactly.
+ *
+ * @param {string|null|undefined} specText
+ * @param {string|null|undefined} [specDir] directory spec.md was read from
+ * @returns {{ hasSpec: boolean, skip: {skip: boolean, reason?: string}, tags: Set<string> }}
+ */
+function declaredScope(specText, specDir) {
+  if (!specText || !specText.trim()) {
+    return { hasSpec: false, skip: { skip: false }, tags: new Set() };
+  }
+  const skip = parseGherkin.hasSkipOverride(specText);
+  const tags = new Set();
+  collectTags(parseGherkin.parse(specText), tags);
+  for (const tag of referencedFeatureTags(specText, specDir)) tags.add(tag);
   return { hasSpec: true, skip, tags };
 }
 
@@ -191,9 +250,9 @@ function formatViolationReason(v) {
   return `spec scope mismatch: ${v.requiredTag.slice(1)} scenarios required — ${v.why}: ${v.files.join(', ')}`;
 }
 
-function evaluateGherkinScope({ specText, files }) {
+function evaluateGherkinScope({ specText, files, specDir }) {
   const buckets = classifyChanges(files);
-  const declared = declaredScope(specText);
+  const declared = declaredScope(specText, specDir);
   const base = { buckets, declared, violations: [] };
 
   const early = earlyScopeVerdict(files, buckets, declared, base);
@@ -296,7 +355,7 @@ function committedChangedFiles(worktree, baseRef) {
  * Fail-open on unresolvable git state (verdict WARN, never BLOCK).
  * @param {{ specText: string|null, cwd?: string, ticketId?: string }} input
  */
-function runGherkinScopeCheck({ specText, cwd, ticketId }) {
+function runGherkinScopeCheck({ specText, cwd, ticketId, specDir }) {
   const worktree = resolveWorktreeRoot(cwd, ticketId);
   if (!worktree) {
     return {
@@ -304,7 +363,7 @@ function runGherkinScopeCheck({ specText, cwd, ticketId }) {
       reasons: ['Worktree unresolvable (not a git repo?) — Gherkin scope not validated.'],
       violations: [],
       buckets: classifyChanges([]),
-      declared: declaredScope(specText),
+      declared: declaredScope(specText, specDir),
       worktree: null,
       baseRef: null,
       files: [],
@@ -317,14 +376,14 @@ function runGherkinScopeCheck({ specText, cwd, ticketId }) {
       reasons: ['Base ref unresolvable (no origin/main|master|dev) — Gherkin scope not validated.'],
       violations: [],
       buckets: classifyChanges([]),
-      declared: declaredScope(specText),
+      declared: declaredScope(specText, specDir),
       worktree,
       baseRef: null,
       files: [],
     };
   }
   const files = committedChangedFiles(worktree, baseRef);
-  return { ...evaluateGherkinScope({ specText, files }), worktree, baseRef, files };
+  return { ...evaluateGherkinScope({ specText, files, specDir }), worktree, baseRef, files };
 }
 
 module.exports = {

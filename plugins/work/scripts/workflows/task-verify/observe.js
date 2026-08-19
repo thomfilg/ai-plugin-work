@@ -26,14 +26,10 @@ const { ensureBaseWorktree, overlayFiles } = require('./collect/base-worktree');
 const { detectRunner, runDerivedTests } = require('./collect/runner');
 const { resolveAttribution } = require('./collect/attribution');
 const { profileFor } = require('./kind-profiles');
+// Shared `(NEW)`/`(DELETE)` normaliser — one definition for all consumers.
+const { normalizeScope } = require('../lib/scope-markers');
 
-const NEW_MARKER_RE = /\s*\((?:NEW|new)\)\s*$/;
 const GLOB_CHARS_RE = /[*?{[]/;
-
-/** Normalize scope entries: strip the `(NEW)` annotation (GH-725 class). */
-function normalizeScope(scopeGlobs) {
-  return (scopeGlobs || []).map((s) => String(s).replace(NEW_MARKER_RE, '').trim()).filter(Boolean);
-}
 
 /** Concrete (non-glob) scope entries are the task's promised deliverables. */
 function promisedDeliverables(scopeGlobs) {

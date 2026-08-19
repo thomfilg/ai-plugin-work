@@ -8,6 +8,7 @@ const {
   isTestFilePath,
   scopeEntryAdmitsOnlyTestFiles,
 } = require('./task-types');
+const { stripScopeMarkersInText } = require('../../../scripts/workflows/lib/scope-markers');
 
 // Types that legitimately have no RED/GREEN cycle (exempt from TDD).
 // Used to determine when a docs-exemption phrase aligns with the declared Type.
@@ -99,11 +100,9 @@ function parseFilesInScope(section) {
     const bullet = trimmed.match(/^[-*+]\s+(.*)$/);
     if (!bullet) continue;
     const cleaned = bullet[1].replace(/`/g, '').trim();
-    // Drop the documented "(NEW)" / "(DELETE)" markers before classifying:
-    // scopeEntryAdmitsOnlyTestFiles anchors at end-of-string, so an un-stripped
-    // `x.test.ts (NEW)` fails the hasTest half while `x.ts (NEW)` still passes
-    // hasSource (that half is a negation).
-    const withoutMarker = cleaned.replace(/\s*\((?:NEW|DELETE)\)\s*/gi, ' ').trim();
+    // Drop markers before classifying: scopeEntryAdmitsOnlyTestFiles anchors at
+    // end-of-string, so an un-stripped `x.test.ts (NEW)` fails its hasTest half.
+    const withoutMarker = stripScopeMarkersInText(cleaned);
     // Drop trailing comments " # owned by …".
     const withoutComment = withoutMarker.replace(/\s+#.*$/, '').trim();
     if (withoutComment) out.push(withoutComment);

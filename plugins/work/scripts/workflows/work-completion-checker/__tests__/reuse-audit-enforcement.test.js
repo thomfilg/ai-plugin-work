@@ -397,6 +397,24 @@ test.describe('GH-607 Task 2 — pure helpers (2.1)', () => {
     assert.equal(phase.isConfigPath(''), false, 'empty string is not a config path');
   });
 
+  test('isConfigPath: a file:line citation still resolves to its real extension', () => {
+    // Spec reuse declarations cite a location, not just a file. Unstripped,
+    // path.extname('sidebar.tsx:58') is '.tsx:58' — in no extension set — so an
+    // importable module was routed to the config branch and the subsequent
+    // `git diff -- 'sidebar.tsx:58'` returned empty for a path that cannot exist,
+    // reporting every such MUST-reuse symbol as missing.
+    for (const cited of [
+      'components/shell/sidebar/sidebar.tsx:58',
+      'components/shell/sidebar/sidebar.tsx:58:12',
+      'lib/branding/branding-context.ts:24',
+    ]) {
+      assert.equal(phase.isConfigPath(cited), false, `${cited} must resolve as importable JS/TS`);
+    }
+    // The same stripping must not reclassify genuine config files.
+    assert.equal(phase.isConfigPath('hooks.json:12'), true, 'cited .json is still config');
+    assert.equal(phase.isConfigPath('Dockerfile:3'), true, 'cited extensionless is still config');
+  });
+
   test('symbolPresentInBlobsScoped: matches only in the blob whose rel === relPath', () => {
     assert.equal(
       typeof phase.symbolPresentInBlobsScoped,
