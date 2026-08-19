@@ -224,6 +224,9 @@ module.exports = function registerGherkinScope(register) {
     try {
       result = runGherkinScopeCheck({
         specText: readSpecText(ctx.tasksDir),
+        // Resolves `.feature` files the spec links to instead of inlining —
+        // the tasks phase treats gherkin.feature as canonical.
+        specDir: ctx.tasksDir,
         // Cwd-independent worktree resolution (PR #669 review): the ticket id
         // resolves the worktree via the shared WORKTREES_BASE/REPO_NAME
         // convention, so an orchestrator running outside the ticket worktree

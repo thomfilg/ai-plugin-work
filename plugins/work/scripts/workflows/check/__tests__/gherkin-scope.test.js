@@ -174,6 +174,83 @@ describe('classifyChanges / declaredScope helpers', () => {
     assert.equal(s.skip.skip, true);
     assert.equal(s.skip.reason, 'docs-only');
   });
+
+  describe('specs that reference gherkin.feature instead of inlining it', () => {
+    // The spec phase legitimately emits a pointer and the tasks phase then owns
+    // gherkin.feature as canonical. Parsing spec.md alone saw zero tags and
+    // BLOCKed tickets whose coverage was complete and passing.
+    /** A spec whose Gherkin section is a pointer at `target` and nothing else. */
+    const pointerSpec = (target) =>
+      [
+        '# Spec',
+        '',
+        '## Test Scenarios (Gherkin)',
+        '',
+        `See [the feature file](${target}).`,
+        '',
+      ].join('\n');
+
+    const POINTER_SPEC = pointerSpec('./gherkin.feature');
+
+    const FEATURE = [
+      'Feature: Sidebar entry',
+      '',
+      '  @integration',
+      '  Scenario: renders the row',
+      '    Given the sidebar is rendered',
+      '    Then the row is present',
+      '',
+      '  @e2e',
+      '  Scenario: user clicks through',
+      '    Given a signed-in user',
+      '    When they click the row',
+      '    Then they land on the page',
+      '',
+    ].join('\n');
+
+    let dir;
+    before(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gherkin-ref-'));
+      fs.writeFileSync(path.join(dir, 'gherkin.feature'), FEATURE);
+    });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    it('unions tags from the referenced feature file when specDir is given', () => {
+      const d = declaredScope(POINTER_SPEC, dir);
+      assert.deepEqual([...d.tags].sort(), ['@e2e', '@integration']);
+    });
+
+    it('preserves the old text-only behaviour when specDir is omitted', () => {
+      assert.equal(declaredScope(POINTER_SPEC).tags.size, 0);
+    });
+
+    it('does not block a UI change once the referenced @e2e scenario is seen', () => {
+      const files = ['components/shell/sidebar/sidebar.tsx'];
+      assert.equal(evaluateGherkinScope({ specText: POINTER_SPEC, files }).verdict, 'BLOCK');
+      assert.equal(
+        evaluateGherkinScope({ specText: POINTER_SPEC, files, specDir: dir }).verdict,
+        'PASS'
+      );
+    });
+
+    it('degrades quietly when the referenced file is missing', () => {
+      assert.equal(declaredScope(pointerSpec('./absent.feature'), dir).tags.size, 0);
+    });
+
+    it('refuses to read a .feature path outside specDir', () => {
+      // Planted OUTSIDE the spec dir and fully tagged: if containment were not
+      // enforced this would resolve and contribute @e2e.
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'gherkin-outside-'));
+      try {
+        fs.writeFileSync(path.join(outside, 'escaped.feature'), FEATURE);
+        const rel = path.relative(dir, path.join(outside, 'escaped.feature'));
+        assert.ok(rel.startsWith('..'), 'fixture must actually be outside specDir');
+        assert.equal(declaredScope(pointerSpec(rel), dir).tags.size, 0);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  });
 });
 
 // ─── Step wiring (4b_gherkin_scope) against a real temp git repo ────────────
