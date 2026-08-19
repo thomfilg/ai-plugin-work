@@ -18,6 +18,8 @@
 const fs = require('fs');
 const path = require('path');
 const { requireTasksBase } = require('../../lib/ticket-validation');
+// Shared `(NEW)`/`(DELETE)` normaliser — one definition for all consumers.
+const { stripScopeMarker } = require('../../lib/scope-markers');
 const { sanitizeId } = require('./state-path');
 
 let taskTypes;
@@ -69,8 +71,12 @@ function readTypeValue(lines, from, end) {
 
 /**
  * Collect the bullet list under a `### Files in scope` heading until the
- * next heading. Each bullet is stripped of backticks and trailing `# ...`
- * comments. Mutates `scope` in place.
+ * next heading. Each bullet is stripped of backticks, trailing `# ...`
+ * comments, and any `(NEW)`/`(DELETE)` marker. Mutates `scope` in place.
+ *
+ * The marker strip is load-bearing: `scope_exists` REQUIRES the annotation on
+ * a path not yet on disk, so leaving it attached hands the gate a path that
+ * can never resolve and makes its conditions unsatisfiable (GH-725 class).
  */
 function collectScopeBullets(lines, from, end, scope) {
   for (let j = from; j < end; j += 1) {
@@ -79,10 +85,7 @@ function collectScopeBullets(lines, from, end, scope) {
     if (/^###\s+/.test(next) || /^##\s+/.test(next)) break;
     const bullet = next.match(/^[-*+]\s+(.*)$/);
     if (!bullet) continue;
-    const cleaned = bullet[1]
-      .replace(/`/g, '')
-      .replace(/\s+#.*$/, '')
-      .trim();
+    const cleaned = stripScopeMarker(bullet[1].replace(/`/g, '').replace(/\s+#.*$/, ''));
     if (cleaned) scope.push(cleaned);
   }
 }
