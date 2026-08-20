@@ -18,7 +18,8 @@ const lockStorePath = path.resolve(__dirname, '..', 'lock-store');
 const guardPath = path.resolve(__dirname, '..', 'guard');
 
 const lockStore = require(lockStorePath);
-const { MARKER, FOLDER, SHARED_FOLDER, discoverStores, readConfig, writeConfig } = lockStore;
+const { MARKER, ROOT_DIR, FOLDER, SHARED_FOLDER, discoverStores, readConfig, writeConfig } =
+  lockStore;
 const { buildEntries } = require(guardPath);
 
 let originalHome;
@@ -32,7 +33,7 @@ before(() => {
   fakeHome = path.join(base, 'home');
   fs.mkdirSync(fakeHome, { recursive: true });
   process.env.HOME = fakeHome;
-  sharedDir = path.join(fakeHome, '.claude', SHARED_FOLDER || 'heimdall-shared');
+  sharedDir = path.join(fakeHome, ROOT_DIR, SHARED_FOLDER || 'heimdall-shared');
 });
 
 after(() => {
@@ -41,7 +42,7 @@ after(() => {
 });
 
 beforeEach(() => {
-  fs.rmSync(path.join(fakeHome, '.claude'), { recursive: true, force: true });
+  fs.rmSync(path.join(fakeHome, ROOT_DIR), { recursive: true, force: true });
 });
 
 describe('Four-kind precedence merge for buildEntries', () => {
@@ -67,9 +68,9 @@ describe('Four-kind precedence merge for buildEntries', () => {
       protect: ['~/shared-target'],
     };
 
-    writeConfig(path.join(repo, '.claude', FOLDER), { kind: 'local', locks: [localLock] });
-    writeConfig(path.join(wt, '.claude', FOLDER), { kind: 'worktree', locks: [worktreeLock] });
-    writeConfig(path.join(fakeHome, '.claude', FOLDER, 'repo'), {
+    writeConfig(path.join(repo, ROOT_DIR, FOLDER), { kind: 'local', locks: [localLock] });
+    writeConfig(path.join(wt, ROOT_DIR, FOLDER), { kind: 'worktree', locks: [worktreeLock] });
+    writeConfig(path.join(fakeHome, ROOT_DIR, FOLDER, 'repo'), {
       kind: 'global',
       locks: [globalLock],
     });
@@ -117,7 +118,7 @@ describe('Four-kind precedence merge for buildEntries', () => {
     const repo = path.join(wt, 'repo');
     fs.mkdirSync(repo, { recursive: true });
 
-    writeConfig(path.join(repo, '.claude', FOLDER), {
+    writeConfig(path.join(repo, ROOT_DIR, FOLDER), {
       kind: 'local',
       locks: [
         {
@@ -183,9 +184,9 @@ describe('Four-kind precedence merge for buildEntries', () => {
     const wt = path.join(base, 'wt2');
     const repo = path.join(wt, 'repo');
     fs.mkdirSync(repo, { recursive: true });
-    writeConfig(path.join(repo, '.claude', FOLDER), { kind: 'local', locks: [] });
-    writeConfig(path.join(wt, '.claude', FOLDER), { kind: 'worktree', locks: [] });
-    writeConfig(path.join(fakeHome, '.claude', FOLDER, 'repo'), { kind: 'global', locks: [] });
+    writeConfig(path.join(repo, ROOT_DIR, FOLDER), { kind: 'local', locks: [] });
+    writeConfig(path.join(wt, ROOT_DIR, FOLDER), { kind: 'worktree', locks: [] });
+    writeConfig(path.join(fakeHome, ROOT_DIR, FOLDER, 'repo'), { kind: 'global', locks: [] });
     writeConfig(sharedDir, { kind: 'shared', locks: [] });
 
     const liveKinds = discoverStores(repo).map((s) => s.kind);

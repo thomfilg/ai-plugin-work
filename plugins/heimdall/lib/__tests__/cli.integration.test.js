@@ -18,7 +18,7 @@ const cliPath = path.resolve(__dirname, '..', 'cli');
 const lockStorePath = path.resolve(__dirname, '..', 'lock-store');
 
 const { resolveStoreDirs, VALID_KINDS } = require(cliPath);
-const { FOLDER } = require(lockStorePath);
+const { ROOT_DIR, FOLDER } = require(lockStorePath);
 
 let originalHome;
 let base;
@@ -49,11 +49,11 @@ describe('resolveStoreDirs error string lists all four kinds', () => {
 });
 
 describe('resolveStoreDirs accepts kind=shared', () => {
-  it('returns the shared dir at ~/.claude/heimdall-shared', () => {
+  it('returns the shared dir at ~/.workflow/heimdall-shared', () => {
     const cwd = fs.mkdtempSync(path.join(base, 'shared-'));
     const { dirs, error } = resolveStoreDirs({ cwd, kind: 'shared' });
     assert.equal(error, null, `expected no error, got: ${error}`);
-    const expected = path.join(os.homedir(), '.claude', `${FOLDER}-shared`);
+    const expected = path.join(os.homedir(), ROOT_DIR, `${FOLDER}-shared`);
     assert.deepEqual(dirs, [expected]);
   });
 });

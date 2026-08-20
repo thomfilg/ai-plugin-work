@@ -144,7 +144,7 @@ at direnv time via `gh auth token`.
 
 ## Notes
 
-- Writing also updates the detection cache (`~/.claude/.cache/envconfig.json`),
+- Writing also updates the detection cache (`~/.workflow/.cache/envconfig.json`),
   which silences the session-start nudge until a plugin schema changes again.
 - Single-plugin variants exist as `/heimdall:configure`, `/synapsys:configure`,
   and `/maestro:configure`; this skill configures all installed plugins at once.

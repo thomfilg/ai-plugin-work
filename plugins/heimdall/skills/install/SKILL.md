@@ -1,6 +1,6 @@
 ---
 name: install
-description: Configure Heimdall file/directory protection storage and scan for paths to protect. Use when the user says "install heimdall", "set up heimdall", "set up protection", "configure heimdall", "create lock store", "initialize heimdall", or asks to start guarding files. Picks local (./.claude/heimdall), worktree (../.claude/heimdall), global (~/.claude/heimdall/<project>), or shared (~/.claude/heimdall-shared, user-wide across every project), then suggests protectable paths.
+description: Configure Heimdall file/directory protection storage and scan for paths to protect. Use when the user says "install heimdall", "set up heimdall", "set up protection", "configure heimdall", "create lock store", "initialize heimdall", or asks to start guarding files. Picks local (./.workflow/heimdall), worktree (../.workflow/heimdall), global (~/.workflow/heimdall/<project>), or shared (~/.workflow/heimdall-shared, user-wide across every project), then suggests protectable paths.
 argument-hint: '[local|worktree|global|shared]'
 user-invocable: true
 allowed-tools: Bash, AskUserQuestion

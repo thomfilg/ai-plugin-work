@@ -86,7 +86,7 @@ function collectConfigs(start) {
   let dir = path.resolve(start);
   const configs = [];
   for (;;) {
-    const cfgPath = path.join(dir, '.claude', 'heimdall-conceal.json');
+    const cfgPath = path.join(dir, '.workflow', 'heimdall-conceal.json');
     const r = readConfigAt(cfgPath);
     if (r.state === 'unreadable' || r.state === 'invalid') {
       return { state: r.state, cfgPath, error: r.error };

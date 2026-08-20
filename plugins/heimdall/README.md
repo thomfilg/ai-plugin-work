@@ -49,10 +49,10 @@ Config lives in the store marker `.heimdall.json`:
 
 | kind     | location                              | scope                                                              |
 |----------|---------------------------------------|--------------------------------------------------------------------|
-| local    | `./.claude/heimdall`                  | this directory                                                     |
-| worktree | nearest ancestor `../.claude/heimdall`| shared across a worktree base                                      |
-| global   | `~/.claude/heimdall/<project>`        | survives worktree deletion (scoped to this project)                |
-| shared   | `~/.claude/heimdall-shared`           | user-wide across every project — e.g. `~/.claude`, `~/.gitconfig`, `~/.ssh`, `~/.aws` |
+| local    | `./.workflow/heimdall`                  | this directory                                                     |
+| worktree | nearest ancestor `../.workflow/heimdall`| shared across a worktree base                                      |
+| global   | `~/.workflow/heimdall/<project>`        | survives worktree deletion (scoped to this project)                |
+| shared   | `~/.workflow/heimdall-shared`           | user-wide across every project — e.g. `~/.claude`, `~/.gitconfig`, `~/.ssh`, `~/.aws` |
 
 Locks from every active store are merged at evaluation time. Entries from
 all active stores remain in force simultaneously and any of the configured
@@ -77,12 +77,12 @@ should be guarded in every project, while keeping per-project locks in
 ### Migrating from the home-level workaround
 
 If you previously worked around the lack of a shared kind by placing a
-marker directly at `~/.claude/heimdall/.heimdall.json`, move it under the
+marker directly at `~/.workflow/heimdall/.heimdall.json`, move it under the
 new shared directory in one shot:
 
 ```bash
-mkdir -p ~/.claude/heimdall-shared && \
-  mv ~/.claude/heimdall/.heimdall.json ~/.claude/heimdall-shared/.heimdall.json
+mkdir -p ~/.workflow/heimdall-shared && \
+  mv ~/.workflow/heimdall/.heimdall.json ~/.workflow/heimdall-shared/.heimdall.json
 ```
 
 Then run `/heimdall:list` to confirm the locks are now reported under the
@@ -208,7 +208,7 @@ config and hook — it does not touch lock blocks.
 
 ### Config
 
-Both layers read `<repo>/.claude/heimdall-conceal.json` (safe-by-default-off —
+Both layers read `<repo>/.workflow/heimdall-conceal.json` (safe-by-default-off —
 no file means the conceal hook is a no-op). Copy `heimdall-conceal.example.json`
 and tune. `/heimdall:conceal` maintains the `denyFilePatterns` /
 `denyCommandPatterns` for you; the `secretsFiles`/`wrapper`/`allowlist` keys

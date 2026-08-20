@@ -6,7 +6,7 @@
  * in the hook. One line per event, written synchronously so partial
  * state survives crashes.
  *
- * Logs live under `~/.claude/work-workflow/logs/`:
+ * Logs live under `~/.workflow/work-workflow/logs/`:
  *   - next-scripts.jsonl   — every task-next/brief-next invocation
  *   - write-token.jsonl    — every token mint and consume attempt
  *
@@ -22,7 +22,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const DEFAULT_DIR = path.join(os.homedir(), '.claude', 'work-workflow', 'logs');
+const DEFAULT_DIR = path.join(os.homedir(), '.workflow', 'work-workflow', 'logs');
 
 function logsEnabled() {
   return process.env.NEXT_SCRIPT_LOG !== '0';

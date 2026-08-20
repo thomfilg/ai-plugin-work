@@ -69,7 +69,7 @@ test('renderMatchedMemories: a budget-demoted memory does NOT run its inline cor
     );
 
     // And its once-per-session fire marker was never written (no burned fire).
-    const cacheDir = path.join(home, '.claude', 'synapsys', '.cache');
+    const cacheDir = path.join(home, '.workflow', 'synapsys', '.cache');
     const markers = fs.existsSync(cacheDir) ? fs.readdirSync(cacheDir) : [];
     assert.ok(
       !markers.some((f) => f.includes('mem-demoted')),

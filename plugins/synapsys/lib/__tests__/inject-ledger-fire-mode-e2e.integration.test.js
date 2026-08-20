@@ -27,7 +27,7 @@ function makeTmpHome() {
 }
 
 function sessionDir(home) {
-  return path.join(home, '.claude', 'synapsys', '.session');
+  return path.join(home, '.workflow', 'synapsys', '.session');
 }
 
 function loadFreshLedgerModule() {

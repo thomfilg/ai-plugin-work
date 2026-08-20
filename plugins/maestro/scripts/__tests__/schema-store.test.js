@@ -13,7 +13,7 @@ const CLI = path.resolve(__dirname, '..', 'maestro-schema.js');
 const LIB = path.resolve(__dirname, '..', '..', 'lib', 'schema-store.js');
 
 // Pin discovery to cwd-rooted local/worktree tiers so a developer's real
-// ~/.claude/maestro{,-shared} stores never leak into these assertions.
+// ~/.workflow/maestro{,-shared} stores never leak into these assertions.
 function runCli(cwd, args) {
   return spawnSync('node', [CLI, ...args], {
     cwd,
@@ -64,7 +64,7 @@ test('init writes marker; save then round-trips through list/show', () => {
 
   const init = runCli(dir, ['init', 'local']);
   assert.equal(init.status, 0, init.stderr);
-  assert.ok(fs.existsSync(path.join(dir, '.claude', 'maestro', lib.MARKER)));
+  assert.ok(fs.existsSync(path.join(dir, lib.ROOT_DIR, lib.FOLDER, lib.MARKER)));
 
   const save = runCli(dir, [
     'save',
@@ -126,9 +126,9 @@ test('discoverStores returns only marked dirs, local before worktree', () => {
   const wt = path.join(base, 'wt');
   fs.mkdirSync(wt, { recursive: true });
 
-  // marker at base/.claude/maestro (ancestor → worktree tier for cwd=wt)
+  // marker at base/.workflow/maestro (ancestor → worktree tier for cwd=wt)
   runCli(base, ['init', 'local']);
-  // marker at wt/.claude/maestro (local tier for cwd=wt)
+  // marker at wt/.workflow/maestro (local tier for cwd=wt)
   runCli(wt, ['init', 'local']);
 
   const stores = lib.discoverStores(wt);

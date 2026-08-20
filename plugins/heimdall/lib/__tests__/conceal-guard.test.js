@@ -35,7 +35,7 @@ const readPayload = (p) => ({ tool_name: 'Read', tool_input: { file_path: p } })
 const bashPayload = (cmd) => ({ tool_name: 'Bash', tool_input: { command: cmd } });
 
 function readCfg() {
-  return JSON.parse(fs.readFileSync(path.join(repo, '.claude', 'heimdall-conceal.json'), 'utf8'));
+  return JSON.parse(fs.readFileSync(path.join(repo, '.workflow', 'heimdall-conceal.json'), 'utf8'));
 }
 
 before(() => {
@@ -179,10 +179,10 @@ describe('heimdall conceal guard', () => {
 describe('conceal config is found from a subdirectory', () => {
   it('walks up to a repo-root config when the session cwd is a subdir', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-subdir-'));
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
     fs.mkdirSync(path.join(r, 'sub', 'deep'), { recursive: true });
     fs.writeFileSync(
-      path.join(r, '.claude', 'heimdall-conceal.json'),
+      path.join(r, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({ denyFilePatterns: ['(^|/)secret-folder(/|$)'], denyCommandPatterns: [] })
     );
     const env = { ...process.env };
@@ -213,8 +213,8 @@ describe('config discovery is bounded at $HOME', () => {
       denyCommandPatterns: [],
     });
     // A conceal config ABOVE $HOME (at root) — must NOT govern sessions under $HOME.
-    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.claude', 'heimdall-conceal.json'), policy);
+    fs.mkdirSync(path.join(root, '.workflow', 'heimdall'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.workflow', 'heimdall-conceal.json'), policy);
 
     const env = { ...process.env, HOME: home }; // os.homedir() honors $HOME on POSIX
     delete env.CLAUDE_PROJECT_DIR;
@@ -230,8 +230,8 @@ describe('config discovery is bounded at $HOME', () => {
     assert.equal(status(path.join(home, 'secret-folder', 'x')), 0);
 
     // But a config AT $HOME itself IS discovered (boundary is inclusive).
-    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.claude', 'heimdall-conceal.json'), policy);
+    fs.mkdirSync(path.join(home, '.workflow', 'heimdall'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.workflow', 'heimdall-conceal.json'), policy);
     assert.equal(status(path.join(home, 'secret-folder', 'x')), 2);
 
     fs.rmSync(root, { recursive: true, force: true });
@@ -245,8 +245,8 @@ describe('conceal builder does not append above $HOME', () => {
     const repo = path.join(home, 'proj');
     fs.mkdirSync(repo, { recursive: true });
     // An existing config ABOVE $HOME that the hook would never load.
-    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
-    const aboveCfg = path.join(root, '.claude', 'heimdall-conceal.json');
+    fs.mkdirSync(path.join(root, '.workflow', 'heimdall'), { recursive: true });
+    const aboveCfg = path.join(root, '.workflow', 'heimdall-conceal.json');
     fs.writeFileSync(aboveCfg, JSON.stringify({ denyFilePatterns: [], denyCommandPatterns: [] }));
     const before = fs.readFileSync(aboveCfg, 'utf8');
 
@@ -257,7 +257,7 @@ describe('conceal builder does not append above $HOME', () => {
     // The above-$HOME config is untouched…
     assert.equal(fs.readFileSync(aboveCfg, 'utf8'), before);
     // …and a fresh config was written under the repo (the hook can load it).
-    assert.ok(fs.existsSync(path.join(repo, '.claude', 'heimdall-conceal.json')));
+    assert.ok(fs.existsSync(path.join(repo, '.workflow', 'heimdall-conceal.json')));
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
@@ -266,14 +266,14 @@ describe('nested config does not shadow an ancestor policy', () => {
   it('merges ancestor secretsFiles even when a subdir has a guard-only config', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-nested-'));
     // Root policy protects a credential; nested subdir has only a folder rule.
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
     fs.writeFileSync(
-      path.join(r, '.claude', 'heimdall-conceal.json'),
+      path.join(r, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({ secretsFiles: ['creds/root-secret.json'], denyCommandPatterns: [] })
     );
-    fs.mkdirSync(path.join(r, 'sub', '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, 'sub', '.workflow', 'heimdall'), { recursive: true });
     fs.writeFileSync(
-      path.join(r, 'sub', '.claude', 'heimdall-conceal.json'),
+      path.join(r, 'sub', '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({ denyFilePatterns: ['(^|/)logs(/|$)'], denyCommandPatterns: [] })
     );
     const env = { ...process.env };
@@ -297,11 +297,11 @@ describe('malformed deny pattern does not fail open', () => {
   let badRepo;
   before(() => {
     badRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-badrx-'));
-    fs.mkdirSync(path.join(badRepo, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(badRepo, '.workflow', 'heimdall'), { recursive: true });
     // A malformed regex ("[") alongside a valid one: the bad pattern must be
     // skipped (not crash the hook), and the valid pattern must still enforce.
     fs.writeFileSync(
-      path.join(badRepo, '.claude', 'heimdall-conceal.json'),
+      path.join(badRepo, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({
         denyFilePatterns: ['[', '(^|/)secret-folder(/|$)'],
         denyCommandPatterns: [],
@@ -329,11 +329,11 @@ describe('malformed deny pattern does not fail open', () => {
 describe('secretsFiles stay protected alongside an explicit deny list', () => {
   it('denies a secrets file not present in denyFilePatterns', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-sync-'));
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
     // secretsFiles names a credential the hook must protect even though only an
     // unrelated folder is in denyFilePatterns (simulates a later-added secret).
     fs.writeFileSync(
-      path.join(r, '.claude', 'heimdall-conceal.json'),
+      path.join(r, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({
         secretsFiles: ['creds/new-secret.json'],
         denyFilePatterns: ['(^|/)somefolder(/|$)'],
@@ -355,12 +355,12 @@ describe('secretsFiles stay protected alongside an explicit deny list', () => {
 describe('secrets command defaults persist after conceal', () => {
   it('still blocks /proc environ when denyCommandPatterns is already populated', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-cmddef-'));
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
     // A secrets config where conceal has already populated denyCommandPatterns
     // with a non-default entry: the /proc-environ + PGPASSWORD baseline must
     // still apply (they would otherwise be dropped).
     fs.writeFileSync(
-      path.join(r, '.claude', 'heimdall-conceal.json'),
+      path.join(r, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({
         secretsFiles: ['creds/secret.json'],
         denyFilePatterns: ['(^|/)logs(/|$)'],
@@ -382,9 +382,9 @@ describe('secrets command defaults persist after conceal', () => {
 describe('all-invalid deny list fails closed', () => {
   it('blocks (exit 2) when every denyFilePattern is invalid regex', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-allbad-'));
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
     fs.writeFileSync(
-      path.join(r, '.claude', 'heimdall-conceal.json'),
+      path.join(r, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({ denyFilePatterns: ['[', '(', '*'], denyCommandPatterns: [] })
     );
     const res = spawnSync('node', [HOOK], {
@@ -400,8 +400,8 @@ describe('all-invalid deny list fails closed', () => {
 describe('guard fails closed on a present-but-invalid config', () => {
   it('blocks (exit 2) instead of no-opping when the config is invalid JSON', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-badcfg-'));
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(r, '.claude', 'heimdall-conceal.json'), '{ broken json');
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
+    fs.writeFileSync(path.join(r, '.workflow', 'heimdall-conceal.json'), '{ broken json');
     const res = spawnSync('node', [HOOK], {
       input: JSON.stringify(readPayload(path.join(r, 'anything.txt'))),
       env: { ...process.env, CLAUDE_PROJECT_DIR: r },
@@ -416,8 +416,8 @@ describe('a broken config can still be repaired from inside Claude Code', () => 
   let r;
   before(() => {
     r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-recover-'));
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(r, '.claude', 'heimdall-conceal.json'), '{ broken json');
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
+    fs.writeFileSync(path.join(r, '.workflow', 'heimdall-conceal.json'), '{ broken json');
   });
   after(() => fs.rmSync(r, { recursive: true, force: true }));
   const g = (payload) =>
@@ -432,7 +432,7 @@ describe('a broken config can still be repaired from inside Claude Code', () => 
   });
 
   it('allows an Edit that targets the broken config file (recovery)', () => {
-    const cfgPath = path.join(r, '.claude', 'heimdall-conceal.json');
+    const cfgPath = path.join(r, '.workflow', 'heimdall-conceal.json');
     assert.equal(g({ tool_name: 'Edit', tool_input: { file_path: cfgPath } }), 0);
   });
 });
@@ -440,8 +440,8 @@ describe('a broken config can still be repaired from inside Claude Code', () => 
 describe('conceal refuses to overwrite a corrupt config', () => {
   it('exits non-zero and leaves the invalid file untouched', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-corrupt-'));
-    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
-    const cfgPath = path.join(r, '.claude', 'heimdall-conceal.json');
+    fs.mkdirSync(path.join(r, '.workflow', 'heimdall'), { recursive: true });
+    const cfgPath = path.join(r, '.workflow', 'heimdall-conceal.json');
     const original = '{ "secretsFiles": ["x"], not valid json';
     fs.writeFileSync(cfgPath, original);
     const res = spawnSync('node', [SCRIPT, 'foo.txt', r], { encoding: 'utf8' });
@@ -462,9 +462,9 @@ describe('conceal seeding preserves existing secrets coverage', () => {
 
   before(() => {
     secretsRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-secrets-'));
-    fs.mkdirSync(path.join(secretsRepo, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(secretsRepo, '.workflow', 'heimdall'), { recursive: true });
     fs.writeFileSync(
-      path.join(secretsRepo, '.claude', 'heimdall-conceal.json'),
+      path.join(secretsRepo, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({
         secretsFiles: ['credentials/mcp-secrets.json'],
         denyFilePatterns: [],
@@ -502,11 +502,11 @@ describe('conceal guard resists shell obfuscation (GH-655)', () => {
 
   before(() => {
     oRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-obf-'));
-    fs.mkdirSync(path.join(oRepo, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(oRepo, '.workflow', 'heimdall'), { recursive: true });
     fs.mkdirSync(path.join(oRepo, 'secret-folder'), { recursive: true });
     // Folder conceal only (no secretsFiles) so the folder name is the sole marker.
     fs.writeFileSync(
-      path.join(oRepo, '.claude', 'heimdall-conceal.json'),
+      path.join(oRepo, '.workflow', 'heimdall-conceal.json'),
       JSON.stringify({
         denyFilePatterns: ['secret-folder(/|$)'],
         denyCommandPatterns: ['(^|[^\\w.-])secret-folder\\b'],

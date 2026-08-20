@@ -929,7 +929,12 @@ function getRepoSlug() {
 }
 
 function stateFilePath(prNumber) {
-  return path.join(os.tmpdir(), '.claude', `follow-up-pr-${getRepoSlug()}-${prNumber}.json`);
+  return path.join(
+    os.tmpdir(),
+    '.workflow',
+    'work-workflow',
+    `follow-up-pr-${getRepoSlug()}-${prNumber}.json`
+  );
 }
 
 function loadState(prNumber) {

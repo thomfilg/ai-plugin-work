@@ -34,7 +34,7 @@ allowed-tools: Bash, Read, Write, AskUserQuestion
 
 The agent's job is **profile selection**, **preview review**, and **gating destructive writes** (overwriting manual memories, deleting stale consolidated memories). Discovery, parsing, manifest assembly, lint, and write are mechanical scripts.
 
-This skill orchestrates `synapsys-consolidate.js`, `synapsys-crystallize-lint.js`, `synapsys-crystallize-write.js`, and `synapsys-test.js`. It also maintains a sidecar registry at `~/.claude/synapsys/<repo>/.consolidate-registry.json` that distinguishes consolidated memories (machine-derived from a profile) from manual memories (hand-authored or crystallized).
+This skill orchestrates `synapsys-consolidate.js`, `synapsys-crystallize-lint.js`, `synapsys-crystallize-write.js`, and `synapsys-test.js`. It also maintains a sidecar registry at `~/.workflow/synapsys/<repo>/.consolidate-registry.json` that distinguishes consolidated memories (machine-derived from a profile) from manual memories (hand-authored or crystallized).
 
 ## Precondition
 
@@ -81,7 +81,7 @@ Pass `--profile=<name>` once per selected profile. The driver writes a manifest 
 Read `/tmp/synapsys-consolidate-$$.json` into memory. Then load the sidecar registry and discover the active store:
 
 ```bash
-REGISTRY=~/.claude/synapsys/$(basename "${PWD}")/.consolidate-registry.json
+REGISTRY=~/.workflow/synapsys/$(basename "${PWD}")/.consolidate-registry.json
 test -f "${REGISTRY}" && cat "${REGISTRY}" || echo "{}"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-crystallize-discover.js"
 ```
@@ -161,7 +161,7 @@ Use `AskUserQuestion` with options **no** (default) and **yes, delete them**. On
 After a successful write (regardless of the stale-delete choice), rebuild the sidecar registry from the names that were actually written and atomically replace the file. Write to a sibling tempfile in the same directory, then rename:
 
 ```bash
-REGISTRY=~/.claude/synapsys/$(basename "${PWD}")/.consolidate-registry.json
+REGISTRY=~/.workflow/synapsys/$(basename "${PWD}")/.consolidate-registry.json
 mkdir -p "$(dirname "${REGISTRY}")"
 # Build the new registry JSON: { "<name>": { "profile": "<profile>", "lastRun": "<iso>" }, ... }
 # Write to ${REGISTRY}.tmp.$$ then mv -f to ${REGISTRY}.

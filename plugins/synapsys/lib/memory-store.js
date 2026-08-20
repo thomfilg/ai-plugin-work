@@ -22,8 +22,16 @@ const discovery = createStoreDiscovery({
   ancestorWalkStopsAtHome: false,
   disableHomeStoresEnvVar: 'SYNAPSYS_DISABLE_HOME_STORES',
 });
-const { MARKER, FOLDER, SHARED_FOLDER, getProjectName, candidateStores, discoverStores, safeExec } =
-  discovery;
+const {
+  MARKER,
+  FOLDER,
+  SHARED_FOLDER,
+  ROOT_DIR,
+  getProjectName,
+  candidateStores,
+  discoverStores,
+  safeExec,
+} = discovery;
 // Per-field frontmatter normalization (fire_mode / enforce / signals /
 // telemetry / expiry coercion) lives in a sibling module for the same
 // max-lines reason. Same names, byte-identical behavior.
@@ -234,6 +242,7 @@ module.exports = {
   MARKER,
   FOLDER,
   SHARED_FOLDER,
+  ROOT_DIR,
   getProjectName,
   candidateStores,
   discoverStores,

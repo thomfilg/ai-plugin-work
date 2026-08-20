@@ -1,6 +1,6 @@
 ---
 name: harden
-description: "Harden a project's MCP secrets behind a setuid OS boundary (Layer 1). Use when the user says \"harden secrets\", \"set up the secrets safe\", \"lock my mcp secrets at the OS level\", \"install the setuid broker\", or asks for a real (not just hook-level) boundary around a credentials file. Creates/uses .claude/heimdall-conceal.json, then guides the privileged setup (creates a runner uid, locks the file, installs the setuid broker, rewrites .mcp.json). This is the OS-level companion to /heimdall:conceal (which is hook-only, no sudo)."
+description: "Harden a project's MCP secrets behind a setuid OS boundary (Layer 1). Use when the user says \"harden secrets\", \"set up the secrets safe\", \"lock my mcp secrets at the OS level\", \"install the setuid broker\", or asks for a real (not just hook-level) boundary around a credentials file. Creates/uses .workflow/heimdall-conceal.json, then guides the privileged setup (creates a runner uid, locks the file, installs the setuid broker, rewrites .mcp.json). This is the OS-level companion to /heimdall:conceal (which is hook-only, no sudo)."
 argument-hint: '[repo-dir]'
 user-invocable: true
 allowed-tools: Bash, Read, Edit, Write, AskUserQuestion
@@ -33,7 +33,7 @@ allowed-tools: Bash, Read, Edit, Write, AskUserQuestion
 # Harden MCP secrets (Layer 1)
 
 Two layers: an OS uid boundary (setuid broker) + the hook-level conceal guard.
-The conceal guard activates automatically once `.claude/heimdall-conceal.json`
+The conceal guard activates automatically once `.workflow/heimdall-conceal.json`
 exists; the broker needs one privileged (sudo) run.
 
 **Linux/Unix only** — this layer relies on setuid + uid file-ownership, which
@@ -48,10 +48,10 @@ repo basename plus a short hash of its absolute path) that the script writes.
 ## Phase 1 — config
 
 1. Resolve the repo dir (argument or `$CLAUDE_PROJECT_DIR`).
-2. If `<repo>/.claude/heimdall-conceal.json` is missing, copy the template and tune it:
+2. If `<repo>/.workflow/heimdall-conceal.json` is missing, copy the template and tune it:
    ```bash
-   mkdir -p "<repo>/.claude"
-   cp "${CLAUDE_PLUGIN_ROOT}/heimdall-conceal.example.json" "<repo>/.claude/heimdall-conceal.json"
+   mkdir -p "<repo>/.workflow"
+   cp "${CLAUDE_PLUGIN_ROOT}/heimdall-conceal.example.json" "<repo>/.workflow/heimdall-conceal.json"
    ```
    Then edit `secretsFiles`, `wrapper`, and `allowlist` to match the project
    (inspect `.mcp.json` to derive the allowlist of server names launched via the

@@ -7,7 +7,7 @@
  * host + settings.json plumbing lives here so the bars stay byte-identical in
  * behaviour and free of copy-paste.
  *
- * The host at ~/.claude/statusline-host.sh owns the single statusLine slot at a
+ * The host at ~/.workflow/statusline-host.sh owns the single statusLine slot at a
  * fixed, checkout-independent path and renders every registered fragment, so
  * installing/removing one bar never clobbers the others and new tabs/sessions
  * pick it up with no reinstall.

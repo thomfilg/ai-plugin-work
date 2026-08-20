@@ -149,18 +149,18 @@ fs.writeFileSync(`${ws}/.codex/hooks.json`, JSON.stringify({ hooks }, null, 2));
 git -C "$WS" init -q 2>/dev/null || true
 printf 'TOP-SECRET: original-content\n' >"$WS/secret-vault.txt"
 printf 'free original line\n' >"$WS/free.txt"
-mkdir -p "$WS/.claude"
+mkdir -p "$WS/.workflow"
 node -e '
 const fs = require("fs");
 const ws = process.argv[1];
 // Conceal config schema: regex pattern lists (lib/guard/conceal-paths.js) —
 // the conceal lane has NO /tmp exemption, unlike the lock lane.
-fs.writeFileSync(`${ws}/.claude/heimdall-conceal.json`, JSON.stringify({
+fs.writeFileSync(`${ws}/.workflow/heimdall-conceal.json`, JSON.stringify({
   denyFilePatterns: ["secret-vault\\.txt"],
   denyCommandPatterns: ["secret-vault\\.txt"],
   denyMessage: "CODEX-SMOKE: BLOCKED - secret-vault.txt is concealed; agents may not read or write it.",
 }, null, 2));
-const store = `${ws}/.claude/synapsys`;
+const store = `${ws}/.workflow/synapsys`;
 fs.mkdirSync(store, { recursive: true });
 fs.writeFileSync(`${store}/.synapsys.json`, JSON.stringify({ projectName: "codex-smoke" }));
 fs.writeFileSync(`${store}/smoke-marker.md`, [

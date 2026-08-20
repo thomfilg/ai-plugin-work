@@ -10,7 +10,7 @@ const { listMemoriesFromStore, parseFrontmatter } = require('../memory-store');
 
 function makeTempStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-memstore-'));
-  const storeDir = path.join(dir, '.claude', 'synapsys');
+  const storeDir = path.join(dir, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { cwd: dir, storeDir };

@@ -44,7 +44,7 @@ describe('inject-inbox-messages.js', () => {
   before(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'inject-inbox-'));
     inboxDir = path.join(tmp, 'inbox');
-    stateDir = path.join(tmp, '.claude', 'work-workflow', 'state');
+    stateDir = path.join(tmp, '.workflow', 'work-workflow', 'state');
     fs.mkdirSync(inboxDir, { recursive: true });
     fs.mkdirSync(stateDir, { recursive: true });
     // Hide real ~/.claude state by pointing HOME at tmp.

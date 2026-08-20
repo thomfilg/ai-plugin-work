@@ -29,10 +29,10 @@ Memories are markdown files with frontmatter that declares **which events** they
 
 | Kind | Path | When to use |
 |---|---|---|
-| local | `./.claude/synapsys/` | This repo only — commit or gitignore as you like |
-| worktree | `../.claude/synapsys/` | Shared across all worktrees of this repo |
-| global | `~/.claude/synapsys/<project-name>/` | User-scoped, follows the project name (`git rev-parse --show-toplevel` basename) |
-| shared | `~/.claude/synapsys-shared/` | User-scoped, reused across **every** project — discovered regardless of cwd or project name |
+| local | `./.workflow/synapsys/` | This repo only — commit or gitignore as you like |
+| worktree | `../.workflow/synapsys/` | Shared across all worktrees of this repo |
+| global | `~/.workflow/synapsys/<project-name>/` | User-scoped, follows the project name (`git rev-parse --show-toplevel` basename) |
+| shared | `~/.workflow/synapsys-shared/` | User-scoped, reused across **every** project — discovered regardless of cwd or project name |
 
 A store is "active" once it contains a `.synapsys.json` marker (written by `synapsys-init.js`). The dispatcher reads from every active store on every event, so multiple tiers coexist.
 
@@ -42,8 +42,8 @@ A store is "active" once it contains a `.synapsys.json` marker (written by `syna
 # 1. Create a local store
 node plugins/synapsys/scripts/synapsys-init.js --kind=local
 
-# 2. Drop a memory file in .claude/synapsys/
-cat > .claude/synapsys/git-push-caution.md <<'EOF'
+# 2. Drop a memory file in .workflow/synapsys/
+cat > .workflow/synapsys/git-push-caution.md <<'EOF'
 ---
 name: git-push-caution
 description: Remind me to verify branch and commits before push
@@ -443,7 +443,7 @@ Synapsys records two kinds of events per session so you can measure which memori
 Per-session JSONL files live under:
 
 ```
-~/.claude/synapsys/.telemetry/<session_id>.jsonl
+~/.workflow/synapsys/.telemetry/<session_id>.jsonl
 ```
 
 On first write the directory is created and a sibling `.gitignore` is seeded with `*` so the telemetry stays local. Missing `session_id` payloads route to `_unknown-session.jsonl` and the `reason` field carries a `${pid}-${startMs}` token so multi-process noise can be untangled.
@@ -534,7 +534,7 @@ Resolution is fail-open throughout (R14) — a misconfigured provider or an unde
 
 ### Config knobs
 
-Behavior is governed by `~/.claude/synapsys/config.yaml` under a `cortex_auto_recall:` block. Defaults (shipped values):
+Behavior is governed by `~/.workflow/synapsys/config.yaml` under a `cortex_auto_recall:` block. Defaults (shipped values):
 
 ```yaml
 cortex_auto_recall:
@@ -603,7 +603,7 @@ The injection ledger is keyed by `(session_id, memory_name)` and lives in a per-
 
 The session id used to key the per-session injection ledger is resolved through a four-leg chain, in priority order:
 
-1. **`process.env.CLAUDE_CODE_SESSION_ID`** — the authoritative signal. Claude Code rotates this environment variable on `/clear` and at the start of every new conversation, so the dispatcher automatically reads/writes a fresh ledger file (`~/.claude/synapsys/.session/<CLAUDE_CODE_SESSION_ID>.json`) per session with no explicit clear hook. Values are validated against `SAFE_ID_RE` (`/^[A-Za-z0-9_-]{1,128}$/`); unsafe values are sha256-hashed before touching the filesystem, and empty strings are treated as absent.
+1. **`process.env.CLAUDE_CODE_SESSION_ID`** — the authoritative signal. Claude Code rotates this environment variable on `/clear` and at the start of every new conversation, so the dispatcher automatically reads/writes a fresh ledger file (`~/.workflow/synapsys/.session/<CLAUDE_CODE_SESSION_ID>.json`) per session with no explicit clear hook. Values are validated against `SAFE_ID_RE` (`/^[A-Za-z0-9_-]{1,128}$/`); unsafe values are sha256-hashed before touching the filesystem, and empty strings are treated as absent.
 2. **`payload.session_id`** — passed by the hook payload when available.
 3. **`<sessionDir>/.current`** — advisory persistent fallback also published for out-of-process readers (`synapsys-list`, `synapsys-stats`).
 4. **`sha256(cwd + processStartTime)`** — last-resort deterministic fallback.

@@ -3,7 +3,7 @@
 /**
  * detect.js — new-variable detection with a persistent hash cache (GH-70).
  *
- * The cache lives under ~/.claude/.cache/ and stores, per project root and
+ * The cache lives under ~/.workflow/.cache/ and stores, per project root and
  * per plugin, the schema hash last acknowledged by the user plus the vars
  * they explicitly configured or skipped. The fast path is one hash compare:
  * when the stored hash matches the current schema, detection is O(1) and

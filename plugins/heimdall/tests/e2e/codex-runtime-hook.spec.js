@@ -22,7 +22,7 @@ const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
 const REPO_ROOT = path.resolve(PLUGIN_ROOT, '..', '..');
 const hookScript = path.join(PLUGIN_ROOT, 'hooks', 'heimdall.js');
 const concealHook = path.join(PLUGIN_ROOT, 'hooks', 'heimdall-conceal.js');
-const { writeConfig, FOLDER } = require(path.join(PLUGIN_ROOT, 'lib', 'lock-store'));
+const { writeConfig, ROOT_DIR, FOLDER } = require(path.join(PLUGIN_ROOT, 'lib', 'lock-store'));
 const { shimPath } = require(path.join(PLUGIN_ROOT, 'lib', 'guard', 'fsguard'));
 
 const PHRASE = 'edit the vault';
@@ -59,7 +59,7 @@ before(() => {
   vaultDir = path.join(project, 'vault');
   fs.mkdirSync(vaultDir, { recursive: true });
   fs.writeFileSync(path.join(vaultDir, 'config.json'), '{}\n');
-  writeConfig(path.join(project, '.claude', FOLDER), {
+  writeConfig(path.join(project, ROOT_DIR, FOLDER), {
     kind: 'local',
     locks: [{ protect: [vaultDir], unlockPhrase: PHRASE }],
   });
@@ -256,11 +256,11 @@ describe('heimdall-conceal.js apply_patch lane', () => {
   let repo;
   before(() => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-conceal-codex-'));
-    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(repo, '.workflow', 'heimdall'), { recursive: true });
     fs.mkdirSync(path.join(repo, 'credentials'), { recursive: true });
     fs.writeFileSync(path.join(repo, 'credentials', 'token.txt'), 'x\n');
     fs.writeFileSync(
-      path.join(repo, '.claude', 'heimdall-conceal.json'),
+      path.join(repo, '.workflow', 'heimdall-conceal.json'),
       `${JSON.stringify({ secretsFiles: ['credentials/token.txt'] })}\n`
     );
   });
@@ -300,9 +300,9 @@ describe('heimdall-conceal-status.js codex mcp wiring note', () => {
   const broker = '/usr/local/lib/mcp-broker/demo/mcp-pg-broker';
   before(() => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-status-codex-'));
-    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(repo, '.workflow', 'heimdall'), { recursive: true });
     fs.writeFileSync(
-      path.join(repo, '.claude', 'heimdall-conceal.json'),
+      path.join(repo, '.workflow', 'heimdall-conceal.json'),
       `${JSON.stringify({ secretsFiles: ['credentials/token.txt'], brokerPath: broker })}\n`
     );
     codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-codex-home-'));

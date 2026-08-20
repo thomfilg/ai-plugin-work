@@ -17,7 +17,7 @@ function setup() {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-status-enf-'));
   const home = path.join(base, 'home');
   const cwd = path.join(base, 'project');
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
@@ -55,7 +55,7 @@ test('status --json reports enforce memories and block/override counts for the s
   writeMemory(fix.storeDir, 'nudgey', 'enforce: suggest\n');
 
   const sid = 'status-enf-1';
-  const telDir = path.join(fix.home, '.claude', 'synapsys', '.telemetry');
+  const telDir = path.join(fix.home, '.workflow', 'synapsys', '.telemetry');
   fs.mkdirSync(telDir, { recursive: true });
   fs.writeFileSync(
     path.join(telDir, `${sid}.jsonl`),

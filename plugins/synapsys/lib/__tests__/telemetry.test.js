@@ -48,7 +48,7 @@ test('first recordFired write seeds .telemetry/ dir and .gitignore with *', () =
       { session_id: 'sess-1' },
       'UserPromptSubmit'
     );
-    const dir = path.join(home, '.claude', 'synapsys', '.telemetry');
+    const dir = path.join(home, '.workflow', 'synapsys', '.telemetry');
     const gi = path.join(dir, '.gitignore');
     assert.ok(fs.existsSync(dir));
     assert.ok(fs.existsSync(gi));
@@ -65,7 +65,7 @@ test('recordFired writes one JSONL line with ts, memory, event=fired, reason', (
       { session_id: 'sess-X' },
       'UserPromptSubmit'
     );
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-X.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 'sess-X.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].memory, 'mem-a');
@@ -85,7 +85,7 @@ test('SYNAPSYS_TELEMETRY=0 suppresses recordFired writes', () => {
       { session_id: 'sess-1' },
       'UserPromptSubmit'
     );
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-1.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 'sess-1.jsonl');
     assert.equal(fs.existsSync(file), false);
   });
 });
@@ -96,7 +96,7 @@ test('per-memory telemetry:false skips only that memory', () => {
     const telemetry = require('../telemetry');
     telemetry.recordFired({ name: 'silent', meta: { telemetry: false } }, { session_id: 's' }, 'r');
     telemetry.recordFired({ name: 'loud', meta: {} }, { session_id: 's' }, 'r');
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 's.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 's.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].memory, 'loud');
@@ -173,7 +173,7 @@ test('resolveSessionId falls back to _unknown-session; recordFired reason has pi
     assert.equal(telemetry.resolveSessionId({}), '_unknown-session');
     assert.equal(telemetry.resolveSessionId({ session_id: 'abc' }), 'abc');
     telemetry.recordFired({ name: 'm', meta: {} }, {}, 'UserPromptSubmit');
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', '_unknown-session.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', '_unknown-session.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 1);
     assert.match(rows[0].reason, new RegExp(`${process.pid}-\\d+`));
@@ -206,7 +206,7 @@ test('recordCited writes a cited JSONL line with match field', () => {
   withTempHome((home) => {
     const telemetry = require('../telemetry');
     telemetry.recordCited({ name: 'mem-c', meta: {} }, { session_id: 's2' }, 'alpha-match');
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 's2.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 's2.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].event, 'cited');
@@ -216,10 +216,10 @@ test('recordCited writes a cited JSONL line with match field', () => {
 });
 
 // telemetryDir returns correct path
-test('telemetryDir returns ~/.claude/synapsys/.telemetry', () => {
+test('telemetryDir returns ~/.workflow/synapsys/.telemetry', () => {
   withTempHome((home) => {
     const telemetry = require('../telemetry');
-    assert.equal(telemetry.telemetryDir(), path.join(home, '.claude', 'synapsys', '.telemetry'));
+    assert.equal(telemetry.telemetryDir(), path.join(home, '.workflow', 'synapsys', '.telemetry'));
   });
 });
 
@@ -260,7 +260,7 @@ test('recordBehaviorChanged appends one JSONL line with event=behavior_changed, 
       { session_id: 'sess-bc' },
       { reason: 'pretool-divergence', evidence: 'expected=git push got=git commit' }
     );
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-bc.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 'sess-bc.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].memory, 'mem-b');
@@ -281,7 +281,7 @@ test('recordBehaviorChanged caps evidence at MATCH_CAP (200 chars)', () => {
       { session_id: 'sess-cap' },
       { reason: 'self-report', evidence: huge }
     );
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-cap.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 'sess-cap.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].evidence.length, 200);
@@ -298,7 +298,7 @@ test('recordBehaviorChanged is suppressed when memory is disabled (per-memory + 
       { session_id: 'sess-dis' },
       { reason: 'self-report', evidence: 'x' }
     );
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-dis.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 'sess-dis.jsonl');
     assert.equal(fs.existsSync(file), false);
 
     process.env.SYNAPSYS_TELEMETRY = '0';
@@ -307,7 +307,7 @@ test('recordBehaviorChanged is suppressed when memory is disabled (per-memory + 
       { session_id: 'sess-dis2' },
       { reason: 'self-report', evidence: 'x' }
     );
-    const file2 = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-dis2.jsonl');
+    const file2 = path.join(home, '.workflow', 'synapsys', '.telemetry', 'sess-dis2.jsonl');
     assert.equal(fs.existsSync(file2), false);
   });
 });

@@ -9,7 +9,7 @@
  * actually wake the agent — without this, the listener-tmux pane just
  * shows messages to a human, but the Claude session never sees them.
  *
- * Cursor state lives at `~/.claude/work-workflow/state/inbox-cursors.json`
+ * Cursor state lives at `~/.workflow/work-workflow/state/inbox-cursors.json`
  * keyed by ticket. Each value is the line count we've already delivered;
  * only later lines are emitted on the next fire. Cursor advances after
  * a successful read so the same message is never injected twice.
@@ -61,7 +61,7 @@ function deriveTicket(hookData) {
 }
 
 function cursorFile() {
-  const dir = path.join(os.homedir(), '.claude', 'work-workflow', 'state');
+  const dir = path.join(os.homedir(), '.workflow', 'work-workflow', 'state');
   try {
     fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
   } catch {

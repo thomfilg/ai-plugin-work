@@ -24,7 +24,7 @@ const CONFIG_CLI = path.resolve(__dirname, '..', 'config-cli.js');
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
 
 function readStamps(home) {
-  const dir = path.join(home, '.claude', '.agent-runtime');
+  const dir = path.join(home, '.workflow', '.agent-runtime');
   return fs.readdirSync(dir).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
 }
 

@@ -43,7 +43,7 @@ root: git
 test('loadDomainRegistry: parses user file when present', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   writeRegistry(userFile, SAMPLE_REGISTRY);
 
   const registry = loadDomainRegistry({ home });
@@ -81,7 +81,7 @@ test('loadDomainRegistry: falls back to bundled registry when user file is absen
 test('loadDomainRegistry: user file takes precedence over bundled', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   const userOnly = `root: ticket-ops
   leaf: write
     signal_prompt: \\bticket\\b
@@ -101,7 +101,7 @@ test('loadDomainRegistry: user file takes precedence over bundled', () => {
 test('loadDomainRegistry: mtime cache hit returns identical object on unchanged file', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   writeRegistry(userFile, SAMPLE_REGISTRY);
 
   const first = loadDomainRegistry({ home });
@@ -112,7 +112,7 @@ test('loadDomainRegistry: mtime cache hit returns identical object on unchanged 
 test('loadDomainRegistry: cache invalidates when mtime changes', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   writeRegistry(userFile, SAMPLE_REGISTRY);
 
   const first = loadDomainRegistry({ home });
@@ -129,7 +129,7 @@ test('loadDomainRegistry: cache invalidates when mtime changes', () => {
 test('loadDomainRegistry: fail-open on malformed body returns empty registry', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   // Garbage that has no recognizable root/leaf lines
   writeRegistry(userFile, '!!!\n@@@ not a registry\n');
 
@@ -157,7 +157,7 @@ test('loadDomainRegistry: fail-open when no file anywhere', () => {
 test('loadDomainRegistry: invalid regex is dropped, not fatal', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   const body = `root: e2e
   leaf: local-execution
     signal_prompt: [unclosed
@@ -178,7 +178,7 @@ test('loadDomainRegistry: invalid regex is dropped, not fatal', () => {
 test('loadDomainRegistry: fail-open on EACCES (unreadable file)', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   writeRegistry(userFile, SAMPLE_REGISTRY);
   try {
     fs.chmodSync(userFile, 0o000);

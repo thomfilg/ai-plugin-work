@@ -3,7 +3,7 @@
  * heimdall-conceal — PreToolUse hook (plugin). Deny agent reads of protected secrets.
  *
  * Config-driven and SAFE-BY-DEFAULT-OFF: if the target project has no
- * `.claude/heimdall-conceal.json`, this hook is a no-op, so installing the
+ * `.workflow/heimdall-conceal.json`, this hook is a no-op, so installing the
  * plugin globally never breaks unrelated repos.
  *
  * Scoping (avoids false positives):
@@ -14,7 +14,7 @@
  *
  * Layer 2 (defense-in-depth + audit). The hard wall is the OS uid boundary
  * installed by setup-secrets-heimdall.sh; reads that slip past pattern-matching
- * still hit EACCES there. Blocks are logged to <project>/.claude/heimdall-conceal.log.
+ * still hit EACCES there. Blocks are logged to <project>/.workflow/heimdall-conceal.log.
  *
  * Block protocol: exit 2 + stderr → Claude Code denies the tool call.
  */
@@ -34,12 +34,12 @@ const {
   patchTargetsOnlyConfigFile,
 } = require('../lib/guard/conceal-paths');
 
-// Try to load the conceal config at <dir>/.claude/heimdall-conceal.json.
+// Try to load the conceal config at <dir>/.workflow/heimdall-conceal.json.
 // Returns the parsed config (stamped with __root = dir) when present, null when
 // genuinely absent (ENOENT), and THROWS when present-but-unreadable/invalid so
 // the caller fails closed rather than silently allowing reads.
 function tryLoadAt(dir) {
-  const f = path.join(dir, '.claude', 'heimdall-conceal.json');
+  const f = path.join(dir, '.workflow', 'heimdall-conceal.json');
   let raw;
   try {
     raw = fs.readFileSync(f, 'utf8');
@@ -320,7 +320,7 @@ function resolveConfig(root, toolName, input) {
 function log(cfg, payload) {
   try {
     fs.appendFileSync(
-      path.join(cfg.__root, '.claude', 'heimdall-conceal.log'),
+      path.join(cfg.__root, '.workflow', 'heimdall-conceal.log'),
       JSON.stringify(payload) + '\n'
     );
   } catch {

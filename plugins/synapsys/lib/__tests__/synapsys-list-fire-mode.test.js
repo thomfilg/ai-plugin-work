@@ -20,7 +20,7 @@ const SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'synapsys-list.js'
 
 function makeTempStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-list-firemode-'));
-  const storeDir = path.join(dir, '.claude', 'synapsys');
+  const storeDir = path.join(dir, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),
@@ -38,7 +38,7 @@ function writeMemory(storeDir, fileName, frontmatter) {
 }
 
 function seedLedger(home, sessionId, memoriesEntry) {
-  const dir = path.join(home, '.claude', 'synapsys', '.session');
+  const dir = path.join(home, '.workflow', 'synapsys', '.session');
   fs.mkdirSync(dir, { recursive: true });
   // Pin the resolved session id by writing `.current`.
   fs.writeFileSync(path.join(dir, '.current'), sessionId);

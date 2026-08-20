@@ -25,7 +25,7 @@ const PROCESS_START_MS = Date.now();
 const MATCH_CAP = 200;
 
 function telemetryDir() {
-  return path.join(os.homedir(), '.claude', 'synapsys', '.telemetry');
+  return path.join(os.homedir(), '.workflow', 'synapsys', '.telemetry');
 }
 
 function isDisabled(memory) {

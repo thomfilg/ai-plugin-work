@@ -22,7 +22,7 @@ see `01-codex-ground-truth.md` (§ refs).
 | hooks/work-hook.js:52 | env-var | Reads prompt from `CLAUDE_USER_PROMPT` env (not stdin) → never set by codex → /work plan injection dead. Codex sends `payload.prompt`. | breaks |
 | hooks/enforce-follow-up-script.js | hook-stdin-field | PreToolUse(Bash) reads tool_input.command from /dev/stdin; exit 2+stderr block. Fields compatible; Bash matcher fires under codex (research corrected the inventory's assumption). | degrades |
 | hooks/config-detect.js | claude-path | Requires `../../../factories/envConfig/sessionHook` (outside plugin root — absent in codex cache installs); remediation text uses `/work-workflow:configure` slash syntax. | degrades |
-| hooks/update-check.js:48 | claude-path | Cache at `~/.claude/.cache/update-*.json`; requires marketplace-root factories; SessionStart stdout banner (codex DOES inject plain SessionStart stdout — GT §2.6.6). | degrades |
+| hooks/update-check.js:48 | claude-path | Cache at `~/.workflow/.cache/update-*.json`; requires marketplace-root factories; SessionStart stdout banner (codex DOES inject plain SessionStart stdout — GT §2.6.6). | degrades |
 | scripts/workflows/lib/hooks/enforce-step-workflow.js | hook-stdin-field | Central Rules 1-5 gate. Reads tool_name/tool_input/transcript_path; event via inline `CLAUDE_HOOK_TYPE`. Hardcodes `toolName!=='Bash'` + FILE_WRITE_TOOLS `['Write','Edit','MultiEdit']` checks against payload tool_name — codex sends `apply_patch`, so in-code checks no-op even though matchers fire. | breaks |
 | scripts/workflows/lib/hooks/policies/workflow-context.js:64 | transcript-parsing | Ticket-id from transcript_path FILENAME regex — codex rollout names have no ticket ids; git-HEAD fallback survives. | works-as-is |
 | scripts/workflows/lib/agent-detection.js | transcript-parsing | isRunningInAgent(): CLAUDE_CURRENT_AGENT env (dead) → hookData.agent_type (codex HAS this) → Claude-JSONL transcript scans (dead). Only agent_type survives. | degrades |
@@ -62,7 +62,7 @@ see `01-codex-ground-truth.md` (§ refs).
 | follow-up/statusline/install-followup-statusline.js:17 | settings-json | Writes ~/.claude/settings.json statusLine — codex has no statusline surface (GT §8.4). | breaks |
 | follow-up/statusline/followup-statusline.sh + .js:50 | statusline | Claude statusLine stdin-JSON protocol renderer/chainer. | breaks |
 | lib/hooks/workflow-router-hook.js:40 | env-var | CLAUDE_USER_PROMPT reader (unwired/legacy). | breaks |
-| lib/next-script-log.js:25 (+inbox cursors, ticket-provider.js:19) | claude-path | State/logs under ~/.claude/work-workflow/ — plain fs, works; wrong home for a codex-native port. | works-as-is |
+| lib/next-script-log.js:25 (+inbox cursors, ticket-provider.js:19) | claude-path | State/logs under ~/.workflow/work-workflow/ — plain fs, works; wrong home for a codex-native port. | works-as-is |
 | lib/phase-runner/create-phase-runner.js:94 (+tdd token modules) | env-var | Write-token dir /tmp/.claude-write-tokens; enforcement rides on the (partly dead) PreToolUse hooks; scripts neutral. | works-as-is |
 | scripts/communicate.js, listen-all.js, listen-communication.js, monitor-manager.js | env-var | /tmp/claude-agent-inbox mailbox CLIs — neutral; consumption side (Monitor tool, stderr relay) is Claude-specific. | works-as-is |
 | lib/quality-check.js:135 + developer-quality-gate.js:68 | env-var | `CLAUDE_PROJECT_DIR \|\| cwd` — env never set; payload `cwd` is the codex source. | degrades |
@@ -98,8 +98,8 @@ see `01-codex-ground-truth.md` (§ refs).
 | lib/replay-events.js:104-168 | transcript-parsing | Walks ~/.claude/projects/<cwd-hash>/*.jsonl with Claude line shapes; codex sessions live at ~/.codex/sessions/Y/M/D/rollout-*.jsonl with different envelope. Needs new walker+extractor for codex history. | breaks |
 | lib/session-id.js + lib/inject-ledger.js | env-var | Leg 1 CLAUDE_CODE_SESSION_ID (never set) → payload.session_id leg takes over; /clear-rotation semantics lost. | degrades |
 | lib/session-id-rotation.js | env-var | Rotation instrumentation only fires on the env leg → dead-but-harmless under codex. | degrades |
-| lib state roots (telemetry.js, pretool-window.js, inject-ledger.js, enforce-classifiers.js, sticky-state.js, session-cache.js, domains.js, cortex-config.js, cortex-hook.js) | claude-path | All mutable state under ~/.claude/synapsys/ — plain fs, works; codex+Claude sessions share one ledger/telemetry namespace (port decision). | works-as-is |
-| lib/memory-store.js | claude-path | Store discovery (.claude/synapsys local/worktree/global/shared) — pure fs+git, runtime-neutral. | works-as-is |
+| lib state roots (telemetry.js, pretool-window.js, inject-ledger.js, enforce-classifiers.js, sticky-state.js, session-cache.js, domains.js, cortex-config.js, cortex-hook.js) | claude-path | All mutable state under ~/.workflow/synapsys/ — plain fs, works; codex+Claude sessions share one ledger/telemetry namespace (port decision). | works-as-is |
+| lib/memory-store.js | claude-path | Store discovery (.workflow/synapsys local/worktree/global/shared) — pure fs+git, runtime-neutral. | works-as-is |
 | hooks/config-detect.js + scripts/config-cli.js | claude-path | `../../../factories/envConfig` escape — absent from codex cache snapshot: detect fail-open no-ops, config-cli **crashes** (`/synapsys:configure` broken). | breaks |
 | lib/setup-hints.js | tool-name-in-instruction | Setup nudges instruct `/synapsys:install` + AskUserQuestion — wrong invocation surface + missing tool under codex. | degrades |
 | hooks/lib/enforce.js:100-102 + lib/render-budget.js | hook-response | [synapsys:*] injected text templates — runtime-neutral where the channel works. | works-as-is |
@@ -166,7 +166,7 @@ see `01-codex-ground-truth.md` (§ refs).
 | skills/conduct/SKILL.md | tool-name-in-instruction | CLAUDE_BIN doc, Monitor pipe, TaskStop, Claude prompt shapes. | degrades |
 | scripts/maestro-pulse.sh:29-30 | other | Bash copy of Claude spinner/token greps → SPINNER=IDLE, TOKENS=? under codex; git/gh sections fine. | degrades |
 | lib/inbox.js + namespace.js | claude-path | /tmp/claude-agent-inbox mailbox — neutral mechanics. | works-as-is |
-| lib/schema-store.js | claude-path | .claude/maestro store tiers — plain dirs, Claude-convention roots. | degrades |
+| lib/schema-store.js | claude-path | .workflow/maestro store tiers — plain dirs, Claude-convention roots. | degrades |
 | scripts/lib/resolve-prefix.sh:14-17 | other | Sources ../../../work/... (sibling plugin) — codex per-plugin cache isolates → falls back to GH prefix. | degrades |
 | lib/maestro-conduct/workstate.js + skill-registry*.js | other | Reads /work state files — neutral, depends on /work port. | works-as-is |
 | lib/maestro-conduct/stop-condition.js | other | bash -c oracle exec — neutral. | works-as-is |
@@ -203,11 +203,11 @@ TUI pane captures (open unknown).
 | lib/guard/{bash,shell-normalize,paths,entries,scripts-bypass}.js + command-analysis.js | other | Pure string/fs logic over tool_input.command — codex sends same shape. | works-as-is |
 | lib/guard/fsguard.js + bin/heimdall-fsguard.so | env-var | LD_PRELOAD delivery rides the (broken) updatedInput rewrite; interaction with codex's bubblewrap tool sandbox untested (U15). | breaks |
 | hooks/heimdall-conceal.js:153,202-215,339-374 | hook-stdin-field | Bash lane (command patterns incl. /proc environ) still protects — codex reads via shell; Read/Grep/Glob file lane dead; apply_patch lane absent. Exit-2 works. | degrades |
-| hooks/heimdall-conceal.js:31-51 | claude-path | Config .claude/heimdall-conceal.json + log — plain files. | works-as-is |
+| hooks/heimdall-conceal.js:31-51 | claude-path | Config .workflow/heimdall-conceal.json + log — plain files. | works-as-is |
 | hooks/heimdall-secrets-reminder.js | hook-response | CLAUDE_PROJECT_DIR → stdin cwd fallback holds; SessionStart hookSpecificOutput.additionalContext supported. | works-as-is |
 | hooks/config-detect.js | other | factories/envConfig escape (verified absent from codex cache) — silent no-op. | breaks |
 | factories/envConfig/sessionHook.js (as consumed here) | env-var | stdin `cwd` field verified present; plain SessionStart stdout verified injected — both former unknowns resolved GREEN; slash-command text remains. | unknown → resolved-mostly-works |
-| lib/lock-store.js | claude-path | .claude/heimdall store tiers — plain fs. | works-as-is |
+| lib/lock-store.js | claude-path | .workflow/heimdall store tiers — plain fs. | works-as-is |
 | lib/cli.js:67 + scripts/heimdall-list.js:28 | tool-name-in-instruction | `/heimdall:install` slash syntax in error text — codex uses $skill mentions. | degrades ×2 |
 | scripts/heimdall-conceal.js:156 + heimdall-conceal-status.js:14 | env-var | argv → CLAUDE_PROJECT_DIR → cwd — argv path used by skills. | works-as-is |
 | scripts/heimdall-conceal-status.js:225-273 | other | Audits .mcp.json broker wiring — codex MCP config lives in config.toml → audit blind for codex-launched servers; `/heimdall:harden` reminder text. | degrades |
@@ -239,7 +239,7 @@ TUI pane captures (open unknown).
 | factories/envConfig/sessionHook.js:48-51 | env-var | CLAUDE_PROJECT_DIR → stdin cwd → process.cwd() — env leg dead; cwd legs hold (codex payload cwd verified). | degrades |
 | factories/envConfig/sessionHook.js:33-46 | hook-stdin-field | readStdinCwd parses payload `cwd`. | unknown → **resolved**: field present on every codex event (verified). |
 | factories/envConfig/sessionHook.js:159-168 | hook-response | Plain-text stdout + exit 0 on SessionStart. | unknown → **resolved**: codex injects plain SessionStart stdout as context (verified). |
-| factories/envConfig/sessionHook.js:29-31 | claude-path | Cache ~/.claude/.cache/envconfig.json — works, wrong home under codex. | degrades |
+| factories/envConfig/sessionHook.js:29-31 | claude-path | Cache ~/.workflow/.cache/envconfig.json — works, wrong home under codex. | degrades |
 | factories/envConfig/sessionHook.js:64-69,138-154 | tool-name-in-instruction | Nudge templates say "Run /x:configure" (slash syntax). | degrades |
 | factories/envConfig/envFiles.js:78 | claude-path | Global env layer ~/.claude/.env only (no ~/.codex equivalent read). | degrades |
 | factories/envConfig/schema.js:108-134 | marketplace | findMarketplaceRoot walks up for .claude-plugin/marketplace.json — codex cache isolates plugins → --all discovery degrades to own-schema-only. | degrades |

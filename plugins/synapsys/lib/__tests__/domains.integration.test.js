@@ -3,7 +3,7 @@
 // RED phase — Task 2 (GH-513): integration test for `lib/domains.js`.
 //
 // Exercises the full filesystem lookup against:
-//   - a real tmpdir-backed `~/.claude/synapsys/DOMAINS.md`
+//   - a real tmpdir-backed `~/.workflow/synapsys/DOMAINS.md`
 //   - a real bundled fallback path
 // Verifies precedence and mtime cache across real reads (no mocks).
 
@@ -51,7 +51,7 @@ test('integration: bundled fallback wins when user file absent', () => {
 test('integration: user file wins when both exist', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   fs.mkdirSync(path.dirname(userFile), { recursive: true });
   fs.writeFileSync(userFile, USER_BODY);
 
@@ -67,7 +67,7 @@ test('integration: user file wins when both exist', () => {
 test('integration: mtime cache holds across two real reads, invalidates on rewrite', () => {
   _resetDomainCache();
   const home = mkTmp();
-  const userFile = path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  const userFile = path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
   fs.mkdirSync(path.dirname(userFile), { recursive: true });
   fs.writeFileSync(userFile, USER_BODY);
 

@@ -50,7 +50,7 @@ function setupFixture() {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-fire-mode-'));
   const home = path.join(base, 'home');
   const cwd = path.join(base, 'project');
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
@@ -271,7 +271,7 @@ describe('dispatcher fire_mode wiring (Task 3)', () => {
     // file before each dispatcher invocation, and verify that the dispatcher
     // emits the full body each time. Because `recordInjection` itself runs
     // inside the dispatcher's catch, a write failure must NOT change output.
-    const sessionDir = path.join(fixture.home, '.claude', 'synapsys', '.session');
+    const sessionDir = path.join(fixture.home, '.workflow', 'synapsys', '.session');
     fs.mkdirSync(sessionDir, { recursive: true });
     const ledgerFile = path.join(sessionDir, `${SESSION_ID}.json`);
 

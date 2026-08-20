@@ -73,9 +73,9 @@ shared host renders whatever is registered, stacked by fragment name (10/20/30/4
 
 ## How it fits together
 
-- **Host:** `~/.claude/statusline-host.sh` — the single registered statusLine; renders
-  every fragment under `~/.claude/statuslines/*.cmd` in filename order.
-- **Fragment:** `~/.claude/statuslines/20-work.cmd` — one line, the path to this
+- **Host:** `~/.workflow/statusline-host.sh` — the single registered statusLine; renders
+  every fragment under `~/.workflow/statuslines/*.cmd` in filename order.
+- **Fragment:** `~/.workflow/statuslines/20-work.cmd` — one line, the path to this
   plugin's renderer. Owned solely by the work installer.
 - **Renderer:** `scripts/workflows/work/statusline/work-statusline.sh` → `work-statusline.js`.
 - **Data source:** the engine's existing `<TASKS_BASE>/<ticket>/.work-state.json` + `.work.pid` (no files created by the bar).

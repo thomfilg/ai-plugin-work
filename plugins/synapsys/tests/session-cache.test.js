@@ -31,7 +31,7 @@ function cleanup(home) {
 }
 
 function cacheFile(home, sessionId) {
-  return path.join(home, '.claude', 'synapsys', '.cache', `${sessionId}.json`);
+  return path.join(home, '.workflow', 'synapsys', '.cache', `${sessionId}.json`);
 }
 
 test('write -> read round-trips the same object', () => {

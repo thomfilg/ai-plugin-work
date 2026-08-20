@@ -4,7 +4,7 @@
 /**
  * Add (or extend) a lock block in a Heimdall store.
  *
- *   node heimdall-protect.js --phrase="edit .claude" --paths=".claude,~/.claude" [--kind=local] [--cwd=<path>]
+ *   node heimdall-protect.js --phrase="edit config" --paths=".claude,~/.claude" [--kind=local] [--cwd=<path>]
  *
  * A lock block is the tuple { protect: [<dir|file>, ...], unlockPhrase }.
  * If a block with the same unlockPhrase already exists, the new paths are
@@ -20,7 +20,7 @@
 const path = require('node:path');
 const os = require('node:os');
 const { splitList, editContext } = require(path.join(__dirname, '..', 'lib', 'cli'));
-const { readConfig, writeConfig, upsertLock, SCHEMA_VERSION, SHARED_FOLDER } = require(
+const { readConfig, writeConfig, upsertLock, SCHEMA_VERSION, ROOT_DIR, SHARED_FOLDER } = require(
   path.join(__dirname, '..', 'lib', 'lock-store')
 );
 
@@ -70,7 +70,7 @@ const storeDir = dirs[0];
 // `discoverStores`), repo-relative paths like `package.json` still have no
 // meaning in a HOME-wide store. Guard on the resolved store path, not just
 // the --kind flag (Cursor bot PR #545, comment 3354852147).
-const sharedStoreDir = path.join(os.homedir(), '.claude', SHARED_FOLDER);
+const sharedStoreDir = path.join(os.homedir(), ROOT_DIR, SHARED_FOLDER);
 const targetsShared = path.resolve(storeDir) === path.resolve(sharedStoreDir);
 if (targetsShared) {
   const nonHome = paths.filter((p) => !isHomeAnchored(p));

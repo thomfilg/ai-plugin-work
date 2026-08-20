@@ -36,7 +36,7 @@ node $HOME/.claude/plugins/marketplaces/work-workflow/scripts/workflows/work/lib
 
 Claude Code's `statusLine.command` can only point at one command. To
 combine the plugin's existing statusline output with the step name,
-create a small wrapper. Save this as `$HOME/.claude/work-statusline.sh`:
+create a small wrapper. Save this as `$HOME/.workflow/work-statusline.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -56,7 +56,7 @@ printf '%s%s' "$ORIG" "${STEP:+ · step: $STEP}"
 Then make it executable:
 
 ```bash
-chmod +x $HOME/.claude/work-statusline.sh
+chmod +x $HOME/.workflow/work-statusline.sh
 ```
 
 And point `~/.claude/settings.json` at the wrapper:
@@ -65,7 +65,7 @@ And point `~/.claude/settings.json` at the wrapper:
 {
   "statusLine": {
     "type": "command",
-    "command": "/home/<you>/.claude/work-statusline.sh"
+    "command": "/home/<you>/.workflow/work-statusline.sh"
   }
 }
 ```

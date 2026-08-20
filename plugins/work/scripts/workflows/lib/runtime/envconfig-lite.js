@@ -31,7 +31,7 @@ const CACHE_VERSION = 1;
 const MAX_LISTED_VARS = 8;
 
 function defaultCachePath(home = os.homedir()) {
-  return path.join(home, '.claude', '.cache', 'envconfig.json');
+  return path.join(home, '.workflow', '.cache', 'envconfig.json');
 }
 
 /** Tolerant schema load — null (fail-open) on any read/parse/shape problem. */

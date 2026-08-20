@@ -22,13 +22,13 @@ const SCRIPT = path.resolve(__dirname, '..', 'synapsys-stats.js');
 function makeTempEnv() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-stats-test-home-'));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-stats-test-cwd-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),
     JSON.stringify({ kind: 'worktree', projectName: 'test', schemaVersion: 1 })
   );
-  const telDir = path.join(home, '.claude', 'synapsys', '.telemetry');
+  const telDir = path.join(home, '.workflow', 'synapsys', '.telemetry');
   fs.mkdirSync(telDir, { recursive: true });
   return { home, cwd, storeDir, telDir };
 }

@@ -17,6 +17,7 @@ const lockStorePath = path.resolve(__dirname, '..', 'lock-store');
 const {
   MARKER,
   FOLDER,
+  ROOT_DIR,
   candidateStores,
   discoverStores,
   writeConfig,
@@ -36,7 +37,7 @@ before(() => {
   fs.mkdirSync(fakeHome, { recursive: true });
   process.env.HOME = fakeHome;
   // os.homedir() caches via env on POSIX; reassert.
-  sharedDir = path.join(fakeHome, '.claude', SHARED_FOLDER || 'heimdall-shared');
+  sharedDir = path.join(fakeHome, ROOT_DIR, SHARED_FOLDER || 'heimdall-shared');
 });
 
 after(() => {
@@ -45,22 +46,26 @@ after(() => {
 });
 
 beforeEach(() => {
-  // Reset shared dir between tests so we can selectively seed it.
-  fs.rmSync(path.join(fakeHome, '.claude'), { recursive: true, force: true });
+  // Reset the home-rooted stores between tests so we can selectively seed them.
+  fs.rmSync(path.join(fakeHome, ROOT_DIR), { recursive: true, force: true });
 });
 
 describe('SHARED_FOLDER constant', () => {
   it('equals FOLDER + "-shared"', () => {
     assert.equal(SHARED_FOLDER, `${FOLDER}-shared`);
   });
+
+  it('every tier lives under the marketplace root, not the CLI config dir', () => {
+    assert.equal(ROOT_DIR, '.workflow');
+  });
 });
 
 describe('candidateStores includes shared row', () => {
-  it('returns a row with kind=shared at ~/.claude/heimdall-shared', () => {
+  it('returns a row with kind=shared at ~/.workflow/heimdall-shared', () => {
     const rows = candidateStores('/tmp/anywhere', 'anyproject');
     const shared = rows.find((r) => r.kind === 'shared');
     assert.ok(shared, 'expected a candidate row with kind=shared');
-    assert.equal(shared.dir, path.join(os.homedir(), '.claude', `${FOLDER}-shared`));
+    assert.equal(shared.dir, path.join(os.homedir(), ROOT_DIR, `${FOLDER}-shared`));
   });
 });
 
@@ -101,9 +106,9 @@ describe('discoverStores returns the shared store from any cwd', () => {
 describe('findAncestorStore HOME boundary', () => {
   it('discovers worktree marker installed at HOME (repo directly under home)', () => {
     // A `--kind=worktree` install from `~/myrepo` writes its marker to
-    // `~/.claude/heimdall/.heimdall.json` via candidateStores. discoverStores
+    // `~/.workflow/heimdall/.heimdall.json` via candidateStores. discoverStores
     // from `~/myrepo` must surface that as the worktree entry.
-    writeConfig(path.join(fakeHome, '.claude', FOLDER), { kind: 'worktree', locks: [] });
+    writeConfig(path.join(fakeHome, ROOT_DIR, FOLDER), { kind: 'worktree', locks: [] });
 
     const repo = path.join(fakeHome, 'myrepo');
     fs.mkdirSync(repo, { recursive: true });
@@ -111,7 +116,7 @@ describe('findAncestorStore HOME boundary', () => {
     const stores = discoverStores(repo);
     const worktree = stores.find((s) => s.kind === 'worktree');
     assert.ok(worktree, 'expected worktree store for repo directly under HOME');
-    assert.equal(worktree.dir, path.join(fakeHome, '.claude', FOLDER));
+    assert.equal(worktree.dir, path.join(fakeHome, ROOT_DIR, FOLDER));
   });
 
   it('does not walk past HOME (sandbox isolation)', () => {
@@ -140,9 +145,9 @@ describe('discoverStores order is data-driven from PRECEDENCE_ORDER', () => {
     const repo = path.join(wt, 'repo');
     fs.mkdirSync(repo, { recursive: true });
 
-    writeConfig(path.join(repo, '.claude', FOLDER), { kind: 'local', locks: [] });
-    writeConfig(path.join(wt, '.claude', FOLDER), { kind: 'worktree', locks: [] });
-    writeConfig(path.join(fakeHome, '.claude', FOLDER, 'repo'), { kind: 'global', locks: [] });
+    writeConfig(path.join(repo, ROOT_DIR, FOLDER), { kind: 'local', locks: [] });
+    writeConfig(path.join(wt, ROOT_DIR, FOLDER), { kind: 'worktree', locks: [] });
+    writeConfig(path.join(fakeHome, ROOT_DIR, FOLDER, 'repo'), { kind: 'global', locks: [] });
     writeConfig(sharedDir, { kind: 'shared', locks: [] });
 
     const stores = discoverStores(repo);
@@ -163,9 +168,9 @@ describe('Backward-compat: pre-shared layouts unchanged', () => {
     const repo = path.join(wt, 'repo');
     fs.mkdirSync(repo, { recursive: true });
 
-    writeConfig(path.join(repo, '.claude', FOLDER), { kind: 'local', locks: [] });
-    writeConfig(path.join(wt, '.claude', FOLDER), { kind: 'worktree', locks: [] });
-    writeConfig(path.join(fakeHome, '.claude', FOLDER, 'repo'), { kind: 'global', locks: [] });
+    writeConfig(path.join(repo, ROOT_DIR, FOLDER), { kind: 'local', locks: [] });
+    writeConfig(path.join(wt, ROOT_DIR, FOLDER), { kind: 'worktree', locks: [] });
+    writeConfig(path.join(fakeHome, ROOT_DIR, FOLDER, 'repo'), { kind: 'global', locks: [] });
 
     const stores = discoverStores(repo);
     assert.deepEqual(
@@ -181,18 +186,18 @@ describe('Backward-compat: pre-shared layouts unchanged', () => {
 
 describe('discoverStores precedence orders shared last', () => {
   it('returns entries in order local, worktree, global, shared', () => {
-    // Layout: <base>/wt/.claude/heimdall (worktree marker)
-    //         <base>/wt/repo/.claude/heimdall (local marker)
-    //         ~/.claude/heimdall/<projectName> (global marker)
-    //         ~/.claude/heimdall-shared (shared marker)
+    // Layout: <base>/wt/.workflow/heimdall (worktree marker)
+    //         <base>/wt/repo/.workflow/heimdall (local marker)
+    //         ~/.workflow/heimdall/<projectName> (global marker)
+    //         ~/.workflow/heimdall-shared (shared marker)
     const wt = path.join(base, 'wt');
     const repo = path.join(wt, 'repo');
     fs.mkdirSync(repo, { recursive: true });
 
-    writeConfig(path.join(repo, '.claude', FOLDER), { kind: 'local', locks: [] });
-    writeConfig(path.join(wt, '.claude', FOLDER), { kind: 'worktree', locks: [] });
+    writeConfig(path.join(repo, ROOT_DIR, FOLDER), { kind: 'local', locks: [] });
+    writeConfig(path.join(wt, ROOT_DIR, FOLDER), { kind: 'worktree', locks: [] });
     // Use 'repo' as the projectName since git is likely unavailable / not a repo.
-    writeConfig(path.join(fakeHome, '.claude', FOLDER, 'repo'), { kind: 'global', locks: [] });
+    writeConfig(path.join(fakeHome, ROOT_DIR, FOLDER, 'repo'), { kind: 'global', locks: [] });
     writeConfig(sharedDir, { kind: 'shared', locks: [] });
 
     assert.ok(fs.existsSync(path.join(sharedDir, MARKER)), 'shared marker seeded');

@@ -11,6 +11,47 @@ A dual-runtime (Claude Code + Codex CLI) plugin marketplace. Four plugins live i
 
 Repo-level files (`package.json`, `pnpm-lock.yaml`, `node_modules/`, `biome.json`, `.env`) are workspace-wide dev tooling. Plugin assets (agents, hooks, skills, scripts, docs) live entirely inside each plugin's directory.
 
+## Where plugin state lives: `.workflow/`
+
+Every plugin persists its state under a **`.workflow/` root**, never inside the
+agent CLI's own `.claude` config dir. `.workflow` sits exactly where `.claude`
+sits — as its sibling — at the repo root and at `$HOME`:
+
+| Path | Holds |
+|---|---|
+| `<repo>/.workflow/<plugin>/` | project-local store (synapsys memories, heimdall locks, maestro schemas) |
+| `~/.workflow/<plugin>/<project>/` | per-project global store |
+| `~/.workflow/<plugin>-shared/` | cross-project shared store |
+| `~/.workflow/work-workflow/` | work-workflow reminders, logs, inbox cursors |
+| `~/.workflow/synapsys/` | synapsys telemetry, session ledgers, sticky state, `config.yaml`, `DOMAINS.md` |
+| `<repo>/.workflow/heimdall-conceal.{json,log}` | heimdall conceal policy + block log |
+| `~/.workflow/.cache/`, `~/.workflow/.agent-runtime/` | shared caches (env detection, update banner, runtime stamp) |
+| `~/.workflow/statusline-host.sh`, `~/.workflow/statuslines/` | shared statusline host + per-plugin fragments |
+
+What stays under `.claude` is only what belongs to Claude Code itself and is
+read or registered, not owned, by these plugins: `~/.claude/settings.json` (the
+statusLine slot), `<worktree>/.claude/settings.local.json` (permissions),
+`~/.claude/projects/` (transcripts), `~/.claude/.env` and
+`~/.claude/ticket-providers.json` (user config), `~/.claude/workflows/`
+(user-authored workflows), and `~/.claude/plugins/` (the CLI's plugin cache).
+
+**Upgrading from a pre-`.workflow` install:** move each store across, then
+re-run the statusline installer so `~/.claude/settings.json` points at the new
+host path.
+
+```bash
+mkdir -p ~/.workflow
+for d in work-workflow synapsys maestro heimdall \
+         synapsys-shared maestro-shared heimdall-shared \
+         .cache .agent-runtime statuslines; do
+  [ -e ~/.claude/"$d" ] && mv ~/.claude/"$d" ~/.workflow/"$d"
+done
+[ -e ~/.claude/statusline-host.sh ] && rm -f ~/.claude/statusline-host.sh
+# per repo, for any project-local store:
+#   mkdir -p .workflow && mv .claude/synapsys .claude/heimdall .claude/maestro .workflow/ 2>/dev/null
+#   mv .claude/heimdall-conceal.json .workflow/ 2>/dev/null
+```
+
 ## Install
 
 | Step | Claude Code | Codex CLI (0.142.5+) |

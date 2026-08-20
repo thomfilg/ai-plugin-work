@@ -10,9 +10,9 @@
  *   node install-statusline.js --remove   unregister just the maestro bar
  *
  * Behavior:
- *   - Installs the fixed host at ~/.claude/statusline-host.sh (checkout-
+ *   - Installs the fixed host at ~/.workflow/statusline-host.sh (checkout-
  *     independent → every new tab/session picks it up, no reinstall) and drops
- *     the maestro fragment ~/.claude/statuslines/10-maestro.cmd pointing at this
+ *     the maestro fragment ~/.workflow/statuslines/10-maestro.cmd pointing at this
  *     plugin's renderer.
  *   - Because each plugin owns only its own fragment, installing/removing the
  *     maestro bar never clobbers the work/follow-up/qc bars, and vice-versa.

@@ -44,7 +44,7 @@ topics disappear):
 🎼 <topic> <done>/<total>✓ ▶<active>(<ids>) ⏳<pending> ✅<pr-ready> ⚠<pr-broken>
 ```
 
-It registers through the **shared statusline host** (`~/.claude/statusline-host.sh`),
+It registers through the **shared statusline host** (`~/.workflow/statusline-host.sh`),
 which owns Claude Code's single statusLine slot at a fixed, checkout-independent
 path and renders every registered bar (maestro 🎼, work ⚙, follow-up 🔄, qc 🔬).
 Installing only drops the maestro **fragment** — it never clobbers the other bars,
@@ -61,9 +61,9 @@ After installing, run `/reload-plugins` (or just wait for the next refresh tick)
 
 ## How it fits together
 
-- **Host:** `~/.claude/statusline-host.sh` — the single registered statusLine; renders
-  every fragment under `~/.claude/statuslines/*.cmd` in filename order.
-- **Fragment:** `~/.claude/statuslines/10-maestro.cmd` — one line, the path to this
+- **Host:** `~/.workflow/statusline-host.sh` — the single registered statusLine; renders
+  every fragment under `~/.workflow/statuslines/*.cmd` in filename order.
+- **Fragment:** `~/.workflow/statuslines/10-maestro.cmd` — one line, the path to this
   plugin's renderer. Owned solely by the maestro installer.
 - **Renderer:** `skills/lib/maestro-statusline.sh` → calls `maestro-statusline.js`.
 - **Data source:** `~/.cache/maestro/sessions/*.json` (manifests) + `/tmp/maestro-alerts.jsonl`.

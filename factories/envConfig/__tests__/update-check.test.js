@@ -74,7 +74,7 @@ test('update-check hook prints a banner from a fresh cache, never blocks', () =>
   const repoRoot = path.join(__dirname, '..', '..', '..');
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   const home = path.join(tmp, 'home');
-  const hookCache = path.join(home, '.claude', '.cache', `update-${pkg.name}.json`);
+  const hookCache = path.join(home, '.workflow', '.cache', `update-${pkg.name}.json`);
   fs.mkdirSync(path.dirname(hookCache), { recursive: true });
   // Fresh cache with a newer version: banner expected, no refresh spawned.
   writeState(hookCache, {

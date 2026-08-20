@@ -18,7 +18,7 @@ const LIST_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'synapsys-lis
 
 function makeTempStore() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-list-domain-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { cwd, storeDir };

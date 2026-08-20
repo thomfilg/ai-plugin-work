@@ -54,7 +54,7 @@ function setupFixture() {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-pretool-inject-'));
   const home = path.join(base, 'home');
   const cwd = path.join(base, 'project');
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
@@ -67,7 +67,7 @@ function setupFixture() {
 // Seed a user DOMAINS.md (takes precedence over the bundled registry) so a
 // known prompt token activates a known domain for the classifier.
 function writeDomains(home, body) {
-  const dir = path.join(home, '.claude', 'synapsys');
+  const dir = path.join(home, '.workflow', 'synapsys');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'DOMAINS.md'), body);
 }
@@ -587,7 +587,7 @@ describe('dispatcher PreToolUse injection (GH-497 Task 1)', () => {
     // Force an internal fault: poison the per-session ledger path by making the
     // ledger file a directory so every read/write throws. The dispatcher's
     // fail-open contract requires it to still exit 0 (and never block).
-    const sessionDir = path.join(fixture.home, '.claude', 'synapsys', '.session');
+    const sessionDir = path.join(fixture.home, '.workflow', 'synapsys', '.session');
     fs.mkdirSync(sessionDir, { recursive: true });
     const ledgerFile = path.join(sessionDir, `${SESSION_ID}.json`);
     fs.mkdirSync(ledgerFile, { recursive: true });
