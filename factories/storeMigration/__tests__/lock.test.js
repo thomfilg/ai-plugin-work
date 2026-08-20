@@ -1,0 +1,299 @@
+'use strict';
+
+const { describe, it, beforeEach, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const { createFileLock, readLock, lockIdentity, removeIfUnchanged } = require('../lock');
+
+let base;
+const target = () => path.join(base, 'thing');
+
+beforeEach(() => {
+  base = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-'));
+});
+afterEach(() => {
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+describe('config validation', () => {
+  it('rejects non-function hooks and a non-positive staleAfterMs', () => {
+    assert.throws(() => createFileLock({ lockPathFor: 'x' }), /"lockPathFor" must be a function/);
+    assert.throws(() => createFileLock({ isHolderDead: 1 }), /"isHolderDead" must be a function/);
+    assert.throws(() => createFileLock({ staleAfterMs: 0 }), /positive number or null/);
+    assert.throws(() => createFileLock({ staleAfterMs: -5 }), /positive number or null/);
+  });
+
+  it('defaults the lock path to <target>.lock', () => {
+    assert.equal(createFileLock({}).lockPathFor('/a/b'), '/a/b.lock');
+  });
+});
+
+describe('exclusive acquire', () => {
+  it('the first caller wins and the second is refused', () => {
+    const lock = createFileLock({});
+    const first = lock.acquire(target(), { payload: { who: 'a' } });
+    assert.equal(first.ok, true);
+    const second = lock.acquire(target(), { payload: { who: 'b' } });
+    assert.equal(second.ok, false);
+    assert.deepEqual(second.held, { who: 'a' }, 'refusal reports the live holder');
+  });
+
+  it('records the payload so a holder is identifiable', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { pid: 42, owner: 'PR7' } });
+    assert.deepEqual(lock.read(target()), { pid: 42, owner: 'PR7' });
+  });
+
+  it('creates a missing parent directory', () => {
+    const lock = createFileLock({});
+    const deep = path.join(base, 'a', 'b', 'c');
+    assert.equal(lock.acquire(deep).ok, true);
+    assert.equal(fs.existsSync(`${deep}.lock`), true);
+  });
+
+  it('re-acquires after release', () => {
+    const lock = createFileLock({});
+    assert.equal(lock.acquire(target()).ok, true);
+    lock.release(target());
+    assert.equal(lock.acquire(target()).ok, true);
+  });
+
+  // The lock is published with link(2) from a private temp rather than written
+  // in place, so a half-written body is never visible under the lock's name.
+  // Both observable halves of that are pinned here.
+  it('leaves no temp artifacts behind', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { who: 'a' } });
+    lock.acquire(target(), { payload: { who: 'b' } }); // refused; must also clean up
+    lock.release(target());
+    assert.deepEqual(
+      fs.readdirSync(base).filter((f) => f.includes('.tmp.')),
+      [],
+      'publishing must not strand the temp it linked from'
+    );
+  });
+
+  // The failure path is the whole point of publishing by link, so inject one:
+  // with an in-place write, a failure after the create left an empty file at
+  // the lock path, which reads as an unreadable holder and is refused forever.
+  it('a failed publish leaves neither a lock nor a temp', () => {
+    const lock = createFileLock({});
+    const realLink = fs.linkSync;
+    fs.linkSync = () => {
+      const err = new Error('no space left on device');
+      err.code = 'ENOSPC';
+      throw err;
+    };
+    try {
+      assert.throws(() => lock.acquire(target(), { payload: { who: 'a' } }), /ENOSPC|no space/);
+    } finally {
+      fs.linkSync = realLink;
+    }
+    assert.equal(fs.existsSync(`${target()}.lock`), false, 'no half-published lock');
+    assert.deepEqual(
+      fs.readdirSync(base).filter((f) => f.includes('.tmp.')),
+      [],
+      'no stranded temp'
+    );
+    assert.equal(lock.acquire(target()).ok, true, 'the path is still claimable');
+  });
+
+  it('a refused acquire does not touch the incumbent lock', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { who: 'a' } });
+    const before = fs.readFileSync(`${target()}.lock`, 'utf8');
+    assert.equal(lock.acquire(target(), { payload: { who: 'b' } }).ok, false);
+    assert.equal(
+      fs.readFileSync(`${target()}.lock`, 'utf8'),
+      before,
+      'link(2) must fail rather than clobber the holder'
+    );
+  });
+});
+
+describe('staleness by age', () => {
+  it('refuses a fresh lock and steals an aged-out one', () => {
+    const lock = createFileLock({ staleAfterMs: 1000 });
+    lock.acquire(target(), { payload: { who: 'old' } });
+    assert.equal(lock.acquire(target()).ok, false, 'fresh lock is respected');
+
+    const old = Date.now() - 60_000;
+    fs.utimesSync(`${target()}.lock`, new Date(old), new Date(old));
+    const res = lock.acquire(target(), { payload: { who: 'new' } });
+    assert.equal(res.ok, true, 'aged-out lock is reclaimed');
+    assert.deepEqual(lock.read(target()), { who: 'new' });
+  });
+
+  it('never ages out when staleAfterMs is unset — a claim is held until released', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { who: 'a' } });
+    const old = Date.now() - 10 * 365 * 24 * 3600 * 1000;
+    fs.utimesSync(`${target()}.lock`, new Date(old), new Date(old));
+    assert.equal(lock.acquire(target()).ok, false, 'age alone must not release a claim');
+  });
+});
+
+describe('staleness by holder liveness', () => {
+  it('reclaims a lock whose holder is dead', () => {
+    const lock = createFileLock({ isHolderDead: (held) => held.pid !== process.pid });
+    fs.writeFileSync(`${target()}.lock`, JSON.stringify({ pid: 999999 }));
+    assert.equal(lock.acquire(target(), { payload: { pid: process.pid } }).ok, true);
+  });
+
+  it('respects a lock whose holder is alive', () => {
+    const lock = createFileLock({ isHolderDead: () => false });
+    fs.writeFileSync(`${target()}.lock`, JSON.stringify({ pid: 1 }));
+    assert.equal(lock.acquire(target()).ok, false);
+  });
+});
+
+describe('unreadable holder', () => {
+  it('is refused rather than guessed at', () => {
+    // Guessing about a lock you cannot read is how you get two writers.
+    const lock = createFileLock({});
+    fs.writeFileSync(`${target()}.lock`, '{ not json');
+    const res = lock.acquire(target());
+    assert.equal(res.ok, false);
+    assert.deepEqual(res.held, { unreadable: true });
+  });
+
+  it('is taken over under force', () => {
+    const lock = createFileLock({});
+    fs.writeFileSync(`${target()}.lock`, '{ not json');
+    assert.equal(lock.acquire(target(), { force: true, payload: { who: 'me' } }).ok, true);
+  });
+});
+
+describe('force takeover', () => {
+  it('takes a live lock and flags it as forced', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { who: 'first' } });
+    const res = lock.acquire(target(), { payload: { who: 'second' }, force: true });
+    assert.equal(res.ok, true);
+    assert.equal(res.forced, true, 'caller can tell it displaced someone');
+    assert.deepEqual(lock.read(target()), { who: 'second' });
+  });
+
+  it('is not flagged forced when the lock was merely stale', () => {
+    const lock = createFileLock({ staleAfterMs: 1 });
+    lock.acquire(target(), { payload: { who: 'a' } });
+    const old = Date.now() - 60_000;
+    fs.utimesSync(`${target()}.lock`, new Date(old), new Date(old));
+    assert.equal(lock.acquire(target(), { force: true }).forced, false);
+  });
+});
+
+describe('ownership-checked release', () => {
+  it('refuses to remove a lock owned by someone else', () => {
+    // A process forced out must not delete the new holder's lock on exit.
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { pid: 111 } });
+    const removed = lock.release(target(), { ownedBy: (held) => held.pid === 222 });
+    assert.equal(removed, false);
+    assert.deepEqual(lock.read(target()), { pid: 111 }, 'holder survives');
+  });
+
+  it('removes its own lock', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { pid: 111 } });
+    assert.equal(lock.release(target(), { ownedBy: (held) => held.pid === 111 }), true);
+    assert.equal(fs.existsSync(`${target()}.lock`), false);
+  });
+
+  it('release without an ownership check always removes', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { pid: 111 } });
+    assert.equal(lock.release(target()), true);
+    assert.equal(fs.existsSync(`${target()}.lock`), false);
+  });
+});
+
+describe('directory locks from earlier releases', () => {
+  it('are treated as held, and cleared on takeover', () => {
+    // The migration lock used to be a mkdir; upgrading in place must not wedge.
+    const lock = createFileLock({ staleAfterMs: 1000 });
+    fs.mkdirSync(`${target()}.lock`);
+    assert.equal(lock.acquire(target()).ok, false, 'a dir lock still counts as held');
+
+    const old = Date.now() - 60_000;
+    fs.utimesSync(`${target()}.lock`, new Date(old), new Date(old));
+    assert.equal(lock.acquire(target(), { payload: { who: 'new' } }).ok, true);
+    assert.equal(fs.statSync(`${target()}.lock`).isFile(), true, 'replaced by a file lock');
+  });
+});
+
+describe('a failed write must not publish a broken lock', () => {
+  it('removes the file it created when the write fails, leaving the path free', () => {
+    // An empty/half-written lock reads as an UNREADABLE holder, which is
+    // refused rather than reclaimed — so for a caller with no staleness
+    // policy (a task claim) it wedges the lock permanently.
+    const lock = createFileLock({});
+    const realWrite = fs.writeSync;
+    fs.writeSync = () => {
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    };
+    try {
+      assert.throws(() => lock.acquire(target()), /ENOSPC/);
+    } finally {
+      fs.writeSync = realWrite;
+    }
+    assert.equal(fs.existsSync(`${target()}.lock`), false, 'no broken lock left behind');
+    assert.equal(lock.acquire(target()).ok, true, 'a later claimant can still win');
+  });
+});
+
+describe('reclaim never deletes a replacement lock', () => {
+  // Unconditional removal defeats the primitive: two processes seeing the same
+  // stale lock would each delete-and-create, and the second delete lands on
+  // the first one's brand-new lock, leaving both believing they hold it.
+  const lockFile = () => `${target()}.lock`;
+
+  it('removes the lock it judged', () => {
+    fs.writeFileSync(lockFile(), JSON.stringify({ who: 'stale' }));
+    const identity = lockIdentity(lockFile());
+    assert.equal(removeIfUnchanged(lockFile(), identity), true);
+    assert.equal(fs.existsSync(lockFile()), false);
+  });
+
+  it('declines when the holder was replaced since it was judged', () => {
+    fs.writeFileSync(lockFile(), JSON.stringify({ who: 'stale' }));
+    const identity = lockIdentity(lockFile());
+
+    // The racing process wins the reclaim and publishes its own lock.
+    fs.rmSync(lockFile(), { force: true });
+    fs.writeFileSync(lockFile(), JSON.stringify({ who: 'winner' }));
+
+    assert.equal(removeIfUnchanged(lockFile(), identity), false, 'must not delete it');
+    assert.deepEqual(readLock(lockFile()), { who: 'winner' }, "winner's lock survives");
+  });
+
+  it('declines when there was nothing to judge', () => {
+    assert.equal(removeIfUnchanged(lockFile(), null), false);
+  });
+
+  it('two acquires of the same path never share an identity', () => {
+    // Inodes are reused when a file is deleted and recreated in the same
+    // directory, so identity is the lock's bytes — which carry a per-acquire
+    // nonce precisely so this can never collide.
+    const lock = createFileLock({});
+    assert.equal(lockIdentity(lockFile()), null, 'absent path has no identity');
+    lock.acquire(target(), { payload: { who: 'a' } });
+    const first = lockIdentity(lockFile());
+    lock.release(target());
+    lock.acquire(target(), { payload: { who: 'a' } });
+    assert.notEqual(lockIdentity(lockFile()), first, 'identical payloads must still differ');
+  });
+});
+
+describe('readLock', () => {
+  it('returns null for absent, unparseable and non-object bodies', () => {
+    assert.equal(readLock(path.join(base, 'nope')), null);
+    fs.writeFileSync(path.join(base, 'bad'), '{[');
+    assert.equal(readLock(path.join(base, 'bad')), null);
+    fs.writeFileSync(path.join(base, 'arr'), '[1,2]');
+    assert.equal(readLock(path.join(base, 'arr')), null);
+  });
+});
