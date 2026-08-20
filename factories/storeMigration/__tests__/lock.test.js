@@ -60,6 +60,58 @@ describe('exclusive acquire', () => {
     lock.release(target());
     assert.equal(lock.acquire(target()).ok, true);
   });
+
+  // The lock is published with link(2) from a private temp rather than written
+  // in place, so a half-written body is never visible under the lock's name.
+  // Both observable halves of that are pinned here.
+  it('leaves no temp artifacts behind', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { who: 'a' } });
+    lock.acquire(target(), { payload: { who: 'b' } }); // refused; must also clean up
+    lock.release(target());
+    assert.deepEqual(
+      fs.readdirSync(base).filter((f) => f.includes('.tmp.')),
+      [],
+      'publishing must not strand the temp it linked from'
+    );
+  });
+
+  // The failure path is the whole point of publishing by link, so inject one:
+  // with an in-place write, a failure after the create left an empty file at
+  // the lock path, which reads as an unreadable holder and is refused forever.
+  it('a failed publish leaves neither a lock nor a temp', () => {
+    const lock = createFileLock({});
+    const realLink = fs.linkSync;
+    fs.linkSync = () => {
+      const err = new Error('no space left on device');
+      err.code = 'ENOSPC';
+      throw err;
+    };
+    try {
+      assert.throws(() => lock.acquire(target(), { payload: { who: 'a' } }), /ENOSPC|no space/);
+    } finally {
+      fs.linkSync = realLink;
+    }
+    assert.equal(fs.existsSync(`${target()}.lock`), false, 'no half-published lock');
+    assert.deepEqual(
+      fs.readdirSync(base).filter((f) => f.includes('.tmp.')),
+      [],
+      'no stranded temp'
+    );
+    assert.equal(lock.acquire(target()).ok, true, 'the path is still claimable');
+  });
+
+  it('a refused acquire does not touch the incumbent lock', () => {
+    const lock = createFileLock({});
+    lock.acquire(target(), { payload: { who: 'a' } });
+    const before = fs.readFileSync(`${target()}.lock`, 'utf8');
+    assert.equal(lock.acquire(target(), { payload: { who: 'b' } }).ok, false);
+    assert.equal(
+      fs.readFileSync(`${target()}.lock`, 'utf8'),
+      before,
+      'link(2) must fail rather than clobber the holder'
+    );
+  });
 });
 
 describe('staleness by age', () => {

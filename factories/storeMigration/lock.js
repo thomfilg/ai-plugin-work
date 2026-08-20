@@ -21,10 +21,11 @@
  *
  * Everything else is invariant and lives here once:
  *
- * ATOMICITY. `open(…, 'wx')` is O_CREAT|O_EXCL — exactly one concurrent caller
- * can win. This closes the read-then-write TOCTOU window that a naive
- * `existsSync` check leaves open, which is the bug that lets two holders both
- * believe they own the lock.
+ * ATOMICITY. The body is written to a private temp file and published with
+ * `link(2)`, which creates the lock path or fails EEXIST — never clobbers.
+ * Exactly one concurrent caller can win, which closes the read-then-write
+ * TOCTOU window that a naive `existsSync` check leaves open, and what appears
+ * at the lock path is always a COMPLETE lock (see `createExclusive`).
  *
  * BOUNDED RETRY. Reclaiming means unlink-then-recreate, and the recreate can
  * lose to a third process. Retry a few times, then fail closed rather than
@@ -41,6 +42,24 @@
  *
  * Directory locks created by earlier versions are removed correctly on
  * takeover (`rm -r`), so upgrading in place does not wedge on one.
+ *
+ * KNOWN LIMIT — reclaiming a stale lock is not fully atomic. Removing one is
+ * "read it, confirm it is still the one we judged, unlink it", and on a plain
+ * filesystem the confirm and the unlink are separate syscalls. Two processes
+ * reclaiming the same stale lock can both confirm before either unlinks, and
+ * the second unlink then lands on the first one's brand-new lock, leaving both
+ * believing they hold it.
+ *
+ * Every read here is therefore collapsed to ONE `readFileSync` whose bytes
+ * answer both "who holds it" and "is it still the same file", which is as
+ * tight as the gap gets: the remaining window is a single read→unlink pair.
+ * Closing it entirely needs a second lock to serialize reclaims, and that lock
+ * has the same problem one level down — the recursion gets rarer, it does not
+ * bottom out. Advisory file locks cannot do better without kernel help
+ * (`flock`, unavailable in Node core) or holder-side compromise detection.
+ *
+ * What this is NOT is a regression: the three implementations replaced here
+ * all unlinked the incumbent unconditionally, with no identity check at all.
  */
 
 const crypto = require('node:crypto');
@@ -60,10 +79,20 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Parsed lock body without the internal nonce, or null when absent/unreadable. */
-function readLock(file) {
+/** Raw bytes at `file`, or null when it is absent or cannot be read. */
+function readRaw(file) {
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** Lock body from already-read bytes, minus the internal nonce. */
+function parseLock(raw) {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw);
     if (!isPlainObject(parsed)) return null;
     const { [NONCE_KEY]: _nonce, ...payload } = parsed;
     return payload;
@@ -72,41 +101,61 @@ function readLock(file) {
   }
 }
 
+/** Parsed lock body without the internal nonce, or null when absent/unreadable. */
+function readLock(file) {
+  return parseLock(readRaw(file));
+}
+
+// Remove one of our own private temp files. Never called on a lock path, so it
+// can never take a lock away from anyone.
+function discardTemp(tmp) {
+  try {
+    fs.rmSync(tmp, { force: true });
+  } catch {
+    /* best-effort: an orphaned temp is litter, never a lock */
+  }
+}
+
 /**
  * Atomic create. True on win, false when someone already holds it.
  *
- * A failure AFTER the create must not leave the file behind. An empty or
- * half-written lock parses as nothing, which `readLock` reports as an
- * unreadable holder — and an unreadable holder is refused, not reclaimed. For
- * a caller with no staleness policy (a task claim) that wedges the lock
- * permanently: every later claimant sees ALREADY_CLAIMED until someone deletes
- * the file by hand. So on any write/close error we remove what we created and
- * rethrow, leaving the path exactly as we found it.
+ * Write to a private temp, then publish with `link(2)`. Both halves matter.
+ *
+ * `link` is atomic and refuses to clobber: it either creates the lock path or
+ * fails EEXIST, so it is as exclusive as `open(…, 'wx')`. What it adds is that
+ * the file is COMPLETE before it is ever reachable under the lock's name.
+ *
+ * Writing in place cannot promise that, and the failure is not cosmetic. A
+ * write or close that fails after the create leaves an empty file; an empty
+ * body parses as nothing, `readLock` reports that as an unreadable holder, and
+ * an unreadable holder is refused rather than reclaimed — deliberately, since
+ * guessing about a lock you cannot read is how you get two writers. For a
+ * caller with no staleness policy that is permanent, not transient.
+ *
+ * Nor can it be patched up by deleting the path on failure: between the failed
+ * write and the delete, a forcing caller can replace the file, and the cleanup
+ * would then remove THEIR lock. Publishing a finished file removes both
+ * problems at once — nothing partial is ever visible, and the only thing this
+ * function deletes is its own temp, which no other process can name.
  */
 function createExclusive(file, body, mode) {
-  let fd;
+  const tmp = `${file}.tmp.${process.pid}.${crypto.randomBytes(6).toString('hex')}`;
   try {
-    fd = fs.openSync(file, 'wx', mode);
+    // The hard link shares this inode, so `mode` lands on the published lock.
+    fs.writeFileSync(tmp, body, { mode });
   } catch (err) {
-    if (err.code === 'EEXIST' || err.code === 'EISDIR') return false;
+    discardTemp(tmp);
     throw err;
   }
   try {
-    fs.writeSync(fd, body);
-    fs.closeSync(fd);
+    fs.linkSync(tmp, file);
     return true;
   } catch (err) {
-    try {
-      fs.closeSync(fd);
-    } catch {
-      /* already closed, or closing is what failed */
-    }
-    try {
-      fs.rmSync(file, { force: true });
-    } catch {
-      /* best-effort: better a stray lock than a thrown cleanup */
-    }
+    // EEXIST covers a directory lock left by an older release too.
+    if (err.code === 'EEXIST') return false;
     throw err;
+  } finally {
+    discardTemp(tmp);
   }
 }
 
@@ -116,17 +165,18 @@ function createExclusive(file, body, mode) {
  * Directory locks from older releases have no bytes to read, so they fall back
  * to stat; they are always reclaimed wholesale anyway.
  */
-function lockIdentity(file) {
+function identityOf(raw, file) {
+  if (raw !== null) return `raw:${raw}`;
   try {
-    return `raw:${fs.readFileSync(file, 'utf8')}`;
+    const st = fs.statSync(file);
+    return `stat:${st.dev}:${st.ino}:${st.birthtimeMs}`;
   } catch {
-    try {
-      const st = fs.statSync(file);
-      return `stat:${st.dev}:${st.ino}:${st.birthtimeMs}`;
-    } catch {
-      return null;
-    }
+    return null;
   }
+}
+
+function lockIdentity(file) {
+  return identityOf(readRaw(file), file);
 }
 
 // `recursive` so a directory lock left by an older release is cleared too.
@@ -144,9 +194,13 @@ function removeLock(file) {
  * Unconditional removal defeats the whole primitive: two processes that both
  * see the same stale lock would each delete and recreate, and the second
  * delete lands on the FIRST one's brand-new lock — leaving both believing they
- * hold it. Comparing inode+device means we never delete a lock we did not
- * evaluate; if it changed under us we simply lose the race and re-evaluate
- * against the new holder.
+ * hold it. Comparing content means we never delete a lock we did not evaluate;
+ * if it changed under us we simply lose the race and re-evaluate against the
+ * new holder.
+ *
+ * This narrows the window to the gap between the comparison and the unlink; it
+ * does not abolish it. See KNOWN LIMIT at the top of this file for why, and
+ * for why a second lock to serialize reclaims is not the answer.
  */
 function removeIfUnchanged(file, identity) {
   if (identity === null || lockIdentity(file) !== identity) return false;
@@ -205,8 +259,13 @@ function assertConfig(config) {
  *   { takeover, forced } — stale, dead, or forced: remove it and retry
  */
 function evaluateHolder(spec, file, force, now) {
-  const identity = lockIdentity(file);
-  const held = readLock(file);
+  // ONE read answers both questions. Reading the bytes for the identity and
+  // then re-reading for the payload lets the lock change in between, so the
+  // verdict could describe one holder while the identity names another — and
+  // the reclaim would be authorised against a file nobody ever judged.
+  const raw = readRaw(file);
+  const identity = identityOf(raw, file);
+  const held = parseLock(raw);
   const unreadable = held === null;
   const dead = !unreadable && spec.isHolderDead ? spec.isHolderDead(held) : false;
   const stale = agedOut(file, spec.staleAfterMs, now);
@@ -271,12 +330,19 @@ function createFileLock(config) {
    */
   function release(target, opts = {}) {
     const file = spec.lockPathFor(target);
-    if (typeof opts.ownedBy === 'function') {
-      const held = readLock(file);
-      if (!held || !opts.ownedBy(held)) return false;
+    if (typeof opts.ownedBy !== 'function') {
+      removeLock(file);
+      return true;
     }
-    removeLock(file);
-    return true;
+    // ONE read decides both questions: is this still ours, and are these still
+    // the bytes we are about to delete. Checking ownership and then deleting
+    // unconditionally lets a forced takeover slip in between, and the delete
+    // would land on the new holder's lock — so a process that was forced out
+    // would take the replacement down with it on its way out.
+    const raw = readRaw(file);
+    const held = parseLock(raw);
+    if (!held || !opts.ownedBy(held)) return false;
+    return removeIfUnchanged(file, identityOf(raw, file));
   }
 
   return Object.freeze({
