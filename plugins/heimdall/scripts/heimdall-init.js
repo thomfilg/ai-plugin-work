@@ -27,26 +27,32 @@ const {
   readConfig,
   writeConfig,
 } = require(path.join(__dirname, '..', 'lib', 'lock-store'));
-const { runMigrations, stampLatest } = require(
-  path.join(__dirname, '..', 'lib', 'store-migrations')
-);
+const { prepareStore } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 
 const args = parseArgs(process.argv);
 const kind = args.kind || 'local';
-// Migrate BEFORE creating anything. `stampLatest` below marks the store fully
-// migrated, and a stamp is believed on sight — so stamping a fresh store while
-// an older install's data is still at the legacy path suppresses the migration
-// that would have moved it, permanently. For heimdall that data includes the
-// conceal policy, and the guard is safe-by-default-OFF, so the failure is
-// silent: concealment simply stops. Installing must never be able to do that,
-// including when the SessionStart hook never ran (codex skips untrusted hooks).
-runMigrations(args.cwd || process.cwd());
 const projectName = getProjectName(args.cwd);
 const target = candidateStores(args.cwd, projectName).find((c) => c.kind === kind);
 
 if (!target) {
   console.error(`unknown kind: ${kind} (use local|worktree|global|shared)`);
   process.exit(1);
+}
+
+// Migrate BEFORE reading or writing the store, and stamp only if that settled.
+// A stamp marks the store fully migrated and is believed on sight, so stamping
+// while an older install's data is still at the legacy path suppresses the
+// move permanently. For heimdall that data includes the conceal policy, and
+// the guard is safe-by-default-OFF — so the failure is silent: concealment
+// simply stops. Installing must never be able to cause that, including when
+// the SessionStart hook never ran (codex skips untrusted hooks).
+// Running first also means `readConfig` below sees any locks just carried over.
+const prepared = prepareStore(args.cwd || process.cwd(), target.dir);
+if (!prepared.stamped) {
+  console.error(
+    'note: a pending store migration did not complete, so this store is left unstamped; ' +
+      'it will be retried at the next session start'
+  );
 }
 
 const existing = readConfig(target.dir);
@@ -62,10 +68,6 @@ const cfg = {
   locks: existing?.locks || [],
 };
 writeConfig(target.dir, cfg);
-// A store created NOW is already at the latest layout; stamping it here keeps
-// the SessionStart runner from treating it as un-versioned and replaying the
-// whole migration chain against it on first use.
-stampLatest(target.dir);
 
 console.log(
   `initialized heimdall store at ${path.join(target.dir, MARKER)} ` +

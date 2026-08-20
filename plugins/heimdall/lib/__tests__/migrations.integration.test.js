@@ -184,6 +184,53 @@ describe('SessionStart migrates the conceal config', { skip: !HOME_DRIVEN }, () 
     assert.equal(status, 2, 'concealment must survive an install');
   });
 
+  it('a blocked migration leaves the store UNSTAMPED so a later session retries', () => {
+    // Regression (Greptile P1, follow-up): runMigrations is fail-open and
+    // reports a locked/failed location through its return value. Stamping
+    // regardless marks the store fully migrated while the policy is still at
+    // the legacy path — and a stamp is believed on sight, so the strand is
+    // permanent. Verified end to end: without this the conceal policy is never
+    // recovered even after the lock clears.
+    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.claude', 'heimdall-conceal.json'), POLICY);
+    fs.writeFileSync(path.join(repo, 'secret-vault.txt'), 'TOP SECRET\n');
+    // Stand in for a concurrent migration holding this location's lock.
+    const lock = path.join(repo, '.workflow', '.heimdall.migrating');
+    fs.mkdirSync(lock, { recursive: true });
+
+    const init = spawnSync(
+      process.execPath,
+      [
+        path.resolve(__dirname, '..', '..', 'scripts', 'heimdall-init.js'),
+        '--kind=local',
+        `--cwd=${repo}`,
+      ],
+      { encoding: 'utf8', env: { ...process.env, HOME: home }, cwd: repo }
+    );
+    assert.equal(init.status, 0);
+    assert.equal(
+      fs.existsSync(path.join(repo, '.workflow', 'heimdall', '.version.json')),
+      false,
+      'a store whose migration did not settle must not be stamped'
+    );
+
+    // Lock clears; the next session must still pick the work up.
+    fs.rmSync(lock, { recursive: true, force: true });
+    runMigrateHook(repo);
+    assert.equal(fs.existsSync(path.join(repo, '.workflow', 'heimdall-conceal.json')), true);
+
+    const status = spawnSync(process.execPath, [CONCEAL_HOOK], {
+      input: JSON.stringify({
+        cwd: repo,
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(repo, 'secret-vault.txt') },
+      }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, CLAUDE_PROJECT_DIR: repo },
+    }).status;
+    assert.equal(status, 2, 'concealment recovered once the migration could run');
+  });
+
   it('does nothing when there is no legacy state at all', () => {
     const res = runMigrateHook(repo);
     assert.equal(res.status, 0);
