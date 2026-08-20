@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createFileLock, readLock } = require('../lock');
+const { createFileLock, readLock, lockIdentity, removeIfUnchanged } = require('../lock');
 
 let base;
 const target = () => path.join(base, 'thing');
@@ -170,6 +170,69 @@ describe('directory locks from earlier releases', () => {
     fs.utimesSync(`${target()}.lock`, new Date(old), new Date(old));
     assert.equal(lock.acquire(target(), { payload: { who: 'new' } }).ok, true);
     assert.equal(fs.statSync(`${target()}.lock`).isFile(), true, 'replaced by a file lock');
+  });
+});
+
+describe('a failed write must not publish a broken lock', () => {
+  it('removes the file it created when the write fails, leaving the path free', () => {
+    // An empty/half-written lock reads as an UNREADABLE holder, which is
+    // refused rather than reclaimed — so for a caller with no staleness
+    // policy (a task claim) it wedges the lock permanently.
+    const lock = createFileLock({});
+    const realWrite = fs.writeSync;
+    fs.writeSync = () => {
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    };
+    try {
+      assert.throws(() => lock.acquire(target()), /ENOSPC/);
+    } finally {
+      fs.writeSync = realWrite;
+    }
+    assert.equal(fs.existsSync(`${target()}.lock`), false, 'no broken lock left behind');
+    assert.equal(lock.acquire(target()).ok, true, 'a later claimant can still win');
+  });
+});
+
+describe('reclaim never deletes a replacement lock', () => {
+  // Unconditional removal defeats the primitive: two processes seeing the same
+  // stale lock would each delete-and-create, and the second delete lands on
+  // the first one's brand-new lock, leaving both believing they hold it.
+  const lockFile = () => `${target()}.lock`;
+
+  it('removes the lock it judged', () => {
+    fs.writeFileSync(lockFile(), JSON.stringify({ who: 'stale' }));
+    const identity = lockIdentity(lockFile());
+    assert.equal(removeIfUnchanged(lockFile(), identity), true);
+    assert.equal(fs.existsSync(lockFile()), false);
+  });
+
+  it('declines when the holder was replaced since it was judged', () => {
+    fs.writeFileSync(lockFile(), JSON.stringify({ who: 'stale' }));
+    const identity = lockIdentity(lockFile());
+
+    // The racing process wins the reclaim and publishes its own lock.
+    fs.rmSync(lockFile(), { force: true });
+    fs.writeFileSync(lockFile(), JSON.stringify({ who: 'winner' }));
+
+    assert.equal(removeIfUnchanged(lockFile(), identity), false, 'must not delete it');
+    assert.deepEqual(readLock(lockFile()), { who: 'winner' }, "winner's lock survives");
+  });
+
+  it('declines when there was nothing to judge', () => {
+    assert.equal(removeIfUnchanged(lockFile(), null), false);
+  });
+
+  it('two acquires of the same path never share an identity', () => {
+    // Inodes are reused when a file is deleted and recreated in the same
+    // directory, so identity is the lock's bytes — which carry a per-acquire
+    // nonce precisely so this can never collide.
+    const lock = createFileLock({});
+    assert.equal(lockIdentity(lockFile()), null, 'absent path has no identity');
+    lock.acquire(target(), { payload: { who: 'a' } });
+    const first = lockIdentity(lockFile());
+    lock.release(target());
+    lock.acquire(target(), { payload: { who: 'a' } });
+    assert.notEqual(lockIdentity(lockFile()), first, 'identical payloads must still differ');
   });
 });
 

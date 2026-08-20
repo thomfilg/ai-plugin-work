@@ -43,8 +43,15 @@
  * takeover (`rm -r`), so upgrading in place does not wedge on one.
  */
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+
+// Written into every lock body so one holder's file is never byte-identical
+// to another's. Inode identity is NOT usable here: deleting and immediately
+// recreating a file in the same directory reliably reuses the inode, so
+// dev:ino cannot tell "still the lock I judged" from "already replaced".
+const NONCE_KEY = '__lockNonce';
 
 const DEFAULT_RETRIES = 5;
 const DEFAULT_MODE = 0o600;
@@ -53,17 +60,29 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Parsed lock body, or null when absent/unreadable. */
+/** Parsed lock body without the internal nonce, or null when absent/unreadable. */
 function readLock(file) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return isPlainObject(parsed) ? parsed : null;
+    if (!isPlainObject(parsed)) return null;
+    const { [NONCE_KEY]: _nonce, ...payload } = parsed;
+    return payload;
   } catch {
     return null;
   }
 }
 
-/** Atomic create. True on win, false when someone already holds it. */
+/**
+ * Atomic create. True on win, false when someone already holds it.
+ *
+ * A failure AFTER the create must not leave the file behind. An empty or
+ * half-written lock parses as nothing, which `readLock` reports as an
+ * unreadable holder — and an unreadable holder is refused, not reclaimed. For
+ * a caller with no staleness policy (a task claim) that wedges the lock
+ * permanently: every later claimant sees ALREADY_CLAIMED until someone deletes
+ * the file by hand. So on any write/close error we remove what we created and
+ * rethrow, leaving the path exactly as we found it.
+ */
 function createExclusive(file, body, mode) {
   let fd;
   try {
@@ -74,10 +93,40 @@ function createExclusive(file, body, mode) {
   }
   try {
     fs.writeSync(fd, body);
-  } finally {
     fs.closeSync(fd);
+    return true;
+  } catch (err) {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* already closed, or closing is what failed */
+    }
+    try {
+      fs.rmSync(file, { force: true });
+    } catch {
+      /* best-effort: better a stray lock than a thrown cleanup */
+    }
+    throw err;
   }
-  return true;
+}
+
+/**
+ * Identity of whatever currently sits at `file` — its exact bytes, which carry
+ * a per-acquire nonce and so differ between any two holders. Null when absent.
+ * Directory locks from older releases have no bytes to read, so they fall back
+ * to stat; they are always reclaimed wholesale anyway.
+ */
+function lockIdentity(file) {
+  try {
+    return `raw:${fs.readFileSync(file, 'utf8')}`;
+  } catch {
+    try {
+      const st = fs.statSync(file);
+      return `stat:${st.dev}:${st.ino}:${st.birthtimeMs}`;
+    } catch {
+      return null;
+    }
+  }
 }
 
 // `recursive` so a directory lock left by an older release is cleared too.
@@ -87,6 +136,22 @@ function removeLock(file) {
   } catch {
     /* best-effort */
   }
+}
+
+/**
+ * Remove the lock ONLY if it is still the one we judged reclaimable.
+ *
+ * Unconditional removal defeats the whole primitive: two processes that both
+ * see the same stale lock would each delete and recreate, and the second
+ * delete lands on the FIRST one's brand-new lock — leaving both believing they
+ * hold it. Comparing inode+device means we never delete a lock we did not
+ * evaluate; if it changed under us we simply lose the race and re-evaluate
+ * against the new holder.
+ */
+function removeIfUnchanged(file, identity) {
+  if (identity === null || lockIdentity(file) !== identity) return false;
+  removeLock(file);
+  return true;
 }
 
 function agedOut(file, staleAfterMs, now) {
@@ -140,13 +205,14 @@ function assertConfig(config) {
  *   { takeover, forced } — stale, dead, or forced: remove it and retry
  */
 function evaluateHolder(spec, file, force, now) {
+  const identity = lockIdentity(file);
   const held = readLock(file);
   const unreadable = held === null;
   const dead = !unreadable && spec.isHolderDead ? spec.isHolderDead(held) : false;
   const stale = agedOut(file, spec.staleAfterMs, now);
 
-  if (dead || stale) return { takeover: true, forced: false, held };
-  if (force) return { takeover: true, forced: true, held };
+  if (dead || stale) return { takeover: true, forced: false, held, identity };
+  if (force) return { takeover: true, forced: true, held, identity };
   return { refuse: true, held: held || { unreadable: true } };
 }
 
@@ -171,7 +237,9 @@ function claimLoop(spec, clock, { file, payload, body, force }) {
     const verdict = evaluateHolder(spec, file, force, clock);
     if (verdict.refuse) return { ok: false, path: file, held: verdict.held };
     if (verdict.forced) forced = true;
-    removeLock(file);
+    // If this returns false the holder changed under us — fall through and
+    // re-evaluate rather than deleting a lock we never judged.
+    removeIfUnchanged(file, verdict.identity);
   }
   return { ok: false, path: file, held: readLock(file) || { unreadable: true } };
 }
@@ -191,7 +259,7 @@ function createFileLock(config) {
     return claimLoop(spec, clock, {
       file,
       payload,
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, [NONCE_KEY]: crypto.randomBytes(12).toString('hex') }),
       force: Boolean(opts.force),
     });
   }
@@ -219,4 +287,7 @@ function createFileLock(config) {
   });
 }
 
-module.exports = { createFileLock, readLock };
+// `lockIdentity` / `removeIfUnchanged` are exported for direct testing: they
+// are the compare-and-delete that keeps two reclaimers from both winning, and
+// that guarantee is not reachable deterministically through `acquire` alone.
+module.exports = { createFileLock, readLock, lockIdentity, removeIfUnchanged };
