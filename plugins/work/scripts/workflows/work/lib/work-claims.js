@@ -6,29 +6,34 @@
  * IDEA2 / GH-219 — Task 6 (R5, R15).
  *
  * Provides atomic `claimTask` / `releaseTask` helpers that persist a lock
- * file at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock` using an
- * exclusive-create primitive (`fs.linkSync` — see note below). Exactly one
+ * file at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`. Exactly one
  * concurrent caller wins the lock; every other caller sees a structured
  * `ALREADY_CLAIMED` error carrying the winning owner id.
  *
- * Atomicity primitive — deviation from brief text, not intent:
- *   The task description suggests `fs.renameSync` for publication. On POSIX,
- *   `rename(2)` SILENTLY OVERWRITES the target (verified locally: Linux 6.6).
- *   That is the correct primitive for writeSessionAtomic (update-in-place),
- *   but it cannot express the "create if not exists" semantic this lock
- *   needs. `fs.linkSync(tmp, target)` uses `link(2)`, which is atomic and
- *   fails with EEXIST when the target already exists — this is the right
- *   primitive for a lock. We still use a temp file under `.claims/` as per
- *   the brief and clean it up in a `finally` regardless of outcome.
+ * Atomicity primitive:
+ *   `rename(2)` SILENTLY OVERWRITES its target (verified locally: Linux 6.6),
+ *   which is right for writeSessionAtomic (update-in-place) but cannot express
+ *   the "create if not exists" semantic a lock needs. The exclusive-create
+ *   (O_CREAT|O_EXCL) used here fails with EEXIST when the target exists, which
+ *   is the winner-takes-all behaviour we want. It comes from the shared lock in
+ *   `workflows/lib/storeMigration/lock.js` — the same primitive the migration
+ *   runner and the maestro conductor use. (This previously hand-rolled a temp
+ *   file plus `fs.linkSync`; the shared version needs no temp file, so the
+ *   `.tmp-*` cleanup it required is gone with it.)
  *
- * Shared helper vs. `writeSessionAtomic` — decision:
+ * Shared helper vs. `writeSessionAtomic` — decision (unchanged):
  *   `writeSessionAtomic(ticketId, data)` in `workflows/lib/hooks/session-guard.js`
  *   implements atomic OVERWRITE (delete target, then rename). This module
  *   needs atomic CREATE-IF-NOT-EXISTS (never clobber a live lock). The two
  *   surfaces diverge on outcome — OVERWRITE never fails on EEXIST, CLAIM
- *   ONLY fails on EEXIST — so extracting a shared helper would force a
- *   confusing mode flag. Per Task 6.1.3 refactor guidance, keep them
- *   separate with cross-references in both headers.
+ *   ONLY fails on EEXIST — so they stay separate. That reasoning is about
+ *   OVERWRITE-vs-CREATE, and does not apply to the create-if-not-exists locks
+ *   this module now shares with the conductor and the migration runner.
+ *
+ * What stays local to this module: ownership policy. Same-owner reclaim is
+ * idempotent, a refused claim reports the winning owner, and `releaseTask`
+ * refuses to delete another owner's lock. The shared primitive owns atomicity;
+ * this file owns who may hold what.
  *
  * Ticket-scoped session guarding in `workflows/lib/hooks/session-guard.js`
  * is NOT modified by this module — task claims sit beneath the session
@@ -54,7 +59,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 // ─── Config resolution ──────────────────────────────────────────────────────
 // Mirrors work-state.js: tolerate missing config (e.g. during partial
@@ -280,6 +284,19 @@ function lockPathFor(ticketId, taskNumInt) {
 
 // ─── Payload read (best-effort) ────────────────────────────────────────────
 
+const { createFileLock } = require(
+  path.join(__dirname, '..', '..', 'lib', 'storeMigration', 'lock')
+);
+
+// A task claim is held until it is explicitly released: no age-based expiry
+// and no liveness probe, so a conflict is always a refusal. The atomic
+// create / bounded retry / unreadable-holder handling is shared with the
+// migration runner and the maestro conductor.
+const locker = createFileLock({
+  lockPathFor: (file) => file,
+  mode: 0o600,
+});
+
 function readLockOwner(lockPath) {
   try {
     const raw = fs.readFileSync(lockPath, 'utf8');
@@ -318,11 +335,6 @@ function claimTask(ticketId, taskNum, ownerId) {
   const lockPath = lockPathFor(ticketId, taskNumInt);
   fs.mkdirSync(claimsDir, { recursive: true });
 
-  // Prepare temp file with the canonical payload. crypto.randomBytes avoids
-  // collisions between concurrent racers with the same pid (unlikely in
-  // this process model but cheap insurance).
-  const rand = crypto.randomBytes(6).toString('hex');
-  const tmpPath = path.join(claimsDir, `.tmp-${process.pid}-${rand}`);
   const payload = {
     ownerId,
     taskNum: taskNumInt,
@@ -330,63 +342,34 @@ function claimTask(ticketId, taskNum, ownerId) {
     timestamp: new Date().toISOString(),
   };
 
-  let tmpWritten = false;
-  try {
-    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { mode: 0o600 });
-    tmpWritten = true;
+  const res = locker.acquire(lockPath, { payload });
+  if (res.ok) return { success: true, ownerId, lockPath };
 
-    // Atomic publication. `fs.linkSync` maps to `link(2)` which creates a
-    // second directory entry pointing at the same inode IFF the target
-    // does not already exist. When it does exist, link(2) fails with
-    // EEXIST — this is the "winner takes all" semantic we need.
-    try {
-      fs.linkSync(tmpPath, lockPath);
-      // We linked; the tmp file is now redundant. Remove it so the
-      // acceptance-criterion test ("no .tmp-* artifacts") stays green.
-      try {
-        fs.unlinkSync(tmpPath);
-        tmpWritten = false;
-      } catch {
-        /* best-effort cleanup; finally will retry while tmpWritten remains true */
-      }
-      return { success: true, ownerId, lockPath };
-    } catch (linkErr) {
-      if (linkErr && linkErr.code === 'EEXIST') {
-        // Lock already held — read existing owner (best-effort).
-        const existingOwner = readLockOwner(lockPath);
-        // Idempotent: same owner reclaiming is not an error.
-        if (existingOwner === ownerId) {
-          return { success: true, ownerId, existingOwner, lockPath, idempotent: true };
-        }
-        return {
-          success: false,
-          existingOwner: existingOwner || null,
-          lockPath,
-          error: {
-            code: 'ALREADY_CLAIMED',
-            message: existingOwner
-              ? `Task ${taskNumInt} on ${ticketId} is already claimed by ${existingOwner}.`
-              : `Task ${taskNumInt} on ${ticketId} is already claimed (owner unreadable).`,
-            remediation: [
-              `Wait for ${existingOwner || 'the current owner'} to call releaseTask or complete.`,
-              `Pick a different task (see canStart in workflows/work/work-state.js for readiness).`,
-              `If the lock is stale, inspect ${lockPath} manually before removing.`,
-            ],
-          },
-        };
-      }
-      throw linkErr;
-    }
-  } finally {
-    // Always clean up the temp file on any non-success path.
-    if (tmpWritten) {
-      try {
-        fs.unlinkSync(tmpPath);
-      } catch {
-        /* best-effort cleanup */
-      }
-    }
+  // Held. Read the owner off the refused lock (best-effort — an unreadable
+  // body reports as null, which is still a refusal, never a takeover).
+  const existingOwner = res.held && typeof res.held.ownerId === 'string' ? res.held.ownerId : null;
+
+  // Idempotent: the same owner reclaiming its own task is not an error.
+  if (existingOwner === ownerId) {
+    return { success: true, ownerId, existingOwner, lockPath, idempotent: true };
   }
+
+  return {
+    success: false,
+    existingOwner: existingOwner || null,
+    lockPath,
+    error: {
+      code: 'ALREADY_CLAIMED',
+      message: existingOwner
+        ? `Task ${taskNumInt} on ${ticketId} is already claimed by ${existingOwner}.`
+        : `Task ${taskNumInt} on ${ticketId} is already claimed (owner unreadable).`,
+      remediation: [
+        `Wait for ${existingOwner || 'the current owner'} to call releaseTask or complete.`,
+        `Pick a different task (see canStart in workflows/work/work-state.js for readiness).`,
+        `If the lock is stale, inspect ${lockPath} manually before removing.`,
+      ],
+    },
+  };
 }
 
 // ─── releaseTask ───────────────────────────────────────────────────────────

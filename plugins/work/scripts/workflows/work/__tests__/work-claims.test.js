@@ -217,11 +217,11 @@ describe('claimTask — concurrency atomicity (R5)', () => {
   });
   afterEach(() => cleanupTicket(TICKET)); // cleanup each test's unique TICKET
   it('exactly one owner wins when multiple owners claim the same task', () => {
-    // claimTask is synchronous and uses link(2) for atomic lock creation.
-    // Atomicity is provided by the kernel's link(2) syscall: it rejects
+    // claimTask is synchronous and uses exclusive-create (O_CREAT|O_EXCL).
+    // Atomicity is provided by the kernel's O_EXCL open: it rejects
     // with EEXIST when the target already exists, so even sequential
     // calls produce exactly-one-winner. True cross-process parallelism
-    // is not needed because this tests link(2) semantics, not app locking.
+    // is not needed because this tests O_EXCL semantics, not app locking.
     const owners = ['PR1', 'PR2', 'PR3', 'PR4', 'PR5'];
     const results = owners.map((id) => workClaims.claimTask(TICKET, 7, id));
 
