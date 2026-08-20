@@ -17,7 +17,9 @@ const path = require('node:path');
 const { MARKER, FOLDER, getProjectName, candidateStores } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
-const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
+const { runMigrations, stampLatest } = require(
+  path.join(__dirname, '..', 'lib', 'store-migrations')
+);
 
 function parseArgs(argv) {
   const out = { kind: 'local', cwd: process.cwd() };
@@ -38,6 +40,9 @@ if (!target) {
   process.exit(1);
 }
 
+// Migrate before creating/stamping — a stamp on a fresh store suppresses any
+// migration that still had work to do for this location. See heimdall-init.
+runMigrations(args.cwd);
 fs.mkdirSync(target.dir, { recursive: true });
 const markerPath = path.join(target.dir, MARKER);
 // The shared store is cross-project, so its marker must NOT be stamped with

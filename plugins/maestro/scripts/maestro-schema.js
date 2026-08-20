@@ -39,7 +39,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const store = require(path.join(__dirname, '..', 'lib', 'schema-store'));
-const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
+const { runMigrations, stampLatest } = require(
+  path.join(__dirname, '..', 'lib', 'store-migrations')
+);
 const {
   MARKER,
   getProjectName,
@@ -79,6 +81,9 @@ function cmdInit(args) {
   const target = candidateStores(cwd, projectName).find((c) => c.kind === kind);
   if (!target) die(`unknown tier: ${kind}`);
 
+  // Migrate before creating/stamping — a stamp on a fresh store suppresses any
+  // migration that still had work to do for this location. See heimdall-init.
+  runMigrations(cwd);
   fs.mkdirSync(target.dir, { recursive: true });
   const marker = {
     kind,

@@ -27,10 +27,20 @@ const {
   readConfig,
   writeConfig,
 } = require(path.join(__dirname, '..', 'lib', 'lock-store'));
-const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
+const { runMigrations, stampLatest } = require(
+  path.join(__dirname, '..', 'lib', 'store-migrations')
+);
 
 const args = parseArgs(process.argv);
 const kind = args.kind || 'local';
+// Migrate BEFORE creating anything. `stampLatest` below marks the store fully
+// migrated, and a stamp is believed on sight — so stamping a fresh store while
+// an older install's data is still at the legacy path suppresses the migration
+// that would have moved it, permanently. For heimdall that data includes the
+// conceal policy, and the guard is safe-by-default-OFF, so the failure is
+// silent: concealment simply stops. Installing must never be able to do that,
+// including when the SessionStart hook never ran (codex skips untrusted hooks).
+runMigrations(args.cwd || process.cwd());
 const projectName = getProjectName(args.cwd);
 const target = candidateStores(args.cwd, projectName).find((c) => c.kind === kind);
 

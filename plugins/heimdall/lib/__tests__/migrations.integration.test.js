@@ -145,6 +145,45 @@ describe('SessionStart migrates the conceal config', { skip: !HOME_DRIVEN }, () 
     );
   });
 
+  it('installing does not strand the conceal config behind a fresh stamp', () => {
+    // Regression (Greptile P1): heimdall-init stamps a fresh store at
+    // LATEST_VERSION, and currentVersion trusts that stamp before it ever
+    // looks at legacyPaths — so an init that ran before any SessionStart
+    // migration (codex skips untrusted hooks) would suppress the conceal move
+    // permanently. Silent, because the guard is safe-by-default-OFF.
+    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.claude', 'heimdall-conceal.json'), POLICY);
+    fs.writeFileSync(path.join(repo, 'secret-vault.txt'), 'TOP SECRET\n');
+
+    const init = spawnSync(
+      process.execPath,
+      [
+        path.resolve(__dirname, '..', '..', 'scripts', 'heimdall-init.js'),
+        '--kind=local',
+        `--cwd=${repo}`,
+      ],
+      { encoding: 'utf8', env: { ...process.env, HOME: home }, cwd: repo }
+    );
+    assert.equal(init.status, 0, `init stderr: ${init.stderr}`);
+
+    assert.equal(
+      fs.existsSync(path.join(repo, '.workflow', 'heimdall-conceal.json')),
+      true,
+      'install must migrate the conceal policy before stamping'
+    );
+
+    const status = spawnSync(process.execPath, [CONCEAL_HOOK], {
+      input: JSON.stringify({
+        cwd: repo,
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(repo, 'secret-vault.txt') },
+      }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, CLAUDE_PROJECT_DIR: repo },
+    }).status;
+    assert.equal(status, 2, 'concealment must survive an install');
+  });
+
   it('does nothing when there is no legacy state at all', () => {
     const res = runMigrateHook(repo);
     assert.equal(res.status, 0);
