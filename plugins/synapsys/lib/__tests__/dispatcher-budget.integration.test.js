@@ -56,7 +56,7 @@ function setupFixture() {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-budget-'));
   const home = path.join(base, 'home');
   const cwd = path.join(base, 'project');
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
@@ -73,7 +73,7 @@ function promptPayload(prompt, cwd) {
 }
 
 function readLedger(home) {
-  const ledgerPath = path.join(home, '.claude', 'synapsys', '.session', `${SESSION_ID}.json`);
+  const ledgerPath = path.join(home, '.workflow', 'synapsys', '.session', `${SESSION_ID}.json`);
   if (!fs.existsSync(ledgerPath)) return { memories: {} };
   return JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
 }
@@ -268,7 +268,7 @@ describe('dispatcher 16k budget + demote-instead-of-drop (GH-588 Task 2)', () =>
       makeBody('SENTINEL-y', 1000)
     );
     // Pre-seed ledger so decideInjection picks the reminder branch.
-    const sessionDir = path.join(fixture.home, '.claude', 'synapsys', '.session');
+    const sessionDir = path.join(fixture.home, '.workflow', 'synapsys', '.session');
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(
       path.join(sessionDir, `${SESSION_ID}.json`),

@@ -16,7 +16,7 @@
  *      or removes this var, legs 2–4 keep producing a working — but `/clear`-blind —
  *      id, so behavior degrades to the pre-GH-583 state rather than crashing.
  *   2. `payload.session_id` when safe; unsafe values are sha256-hashed.
- *   3. Otherwise read `~/.claude/synapsys/.session/.current` if present (advisory
+ *   3. Otherwise read `~/.workflow/synapsys/.session/.current` if present (advisory
  *      since GH-583 — still written by `publishCurrentSessionId` so out-of-process
  *      callers like `synapsys-list` can locate the active ledger).
  *   4. Otherwise compute `sha256(cwd + processStartTime)`, write it to `.current`,
@@ -27,7 +27,7 @@
  * 'fallback'`) for telemetry. The primary `resolveSessionId(payload) -> string`
  * contract is unchanged.
  *
- * Storage (spec §3.3): `~/.claude/synapsys/.session/<session_id>.json` with shape
+ * Storage (spec §3.3): `~/.workflow/synapsys/.session/<session_id>.json` with shape
  *   `{ createdAt, sessionId, memories: { <name>: { injectedCount, lastFullInjectAt } } }`.
  *
  * Invariants:
@@ -53,7 +53,7 @@ function sessionDir() {
   // SYNAPSYS_SESSION_DIR lets tests isolate ledger state into a per-test
   // tmpdir; absent → the real per-user location.
   if (process.env.SYNAPSYS_SESSION_DIR) return process.env.SYNAPSYS_SESSION_DIR;
-  return path.join(os.homedir(), '.claude', 'synapsys', '.session');
+  return path.join(os.homedir(), '.workflow', 'synapsys', '.session');
 }
 
 function ledgerPath(sessionId) {

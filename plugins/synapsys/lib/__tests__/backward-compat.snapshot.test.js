@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { listMemoriesFromStore, MARKER, FOLDER } = require(
+const { listMemoriesFromStore, MARKER, ROOT_DIR, FOLDER } = require(
   path.resolve(__dirname, '..', 'memory-store')
 );
 const { selectForEvent, isDomainMismatch } = require(path.resolve(__dirname, '..', 'matcher'));
@@ -25,7 +25,7 @@ let store;
 
 before(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-bc-'));
-  const storeDir = path.join(tmpRoot, '.claude', FOLDER);
+  const storeDir = path.join(tmpRoot, ROOT_DIR, FOLDER);
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, MARKER),

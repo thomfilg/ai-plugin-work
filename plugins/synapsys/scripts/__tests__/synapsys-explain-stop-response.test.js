@@ -26,7 +26,7 @@ const STOP_REGEX = 'bump\\s+timeout';
 
 function makeTempStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-explain-stopresp-'));
-  const storeDir = path.join(dir, '.claude', 'synapsys');
+  const storeDir = path.join(dir, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),
@@ -138,7 +138,7 @@ test('synapsys-explain Stop with NO trigger_stop_response reports no-stop-respon
   // fire only churned the ledger/telemetry). explain must surface the
   // no-stop-response-configured reason so the author gets a signal.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-explain-stopresp-uncond-'));
-  const storeDir = path.join(dir, '.claude', 'synapsys');
+  const storeDir = path.join(dir, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),

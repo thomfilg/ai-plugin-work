@@ -21,7 +21,7 @@ function defaultStatePath() {
   // the user's home so the dispatcher and the status CLI agree on which
   // sticky-state file to read. Falls back to HOME, then to os.homedir().
   const home = process.env.SYNAPSYS_HOME || process.env.HOME || os.homedir();
-  return path.join(home, '.claude', 'synapsys', '.state', 'sticky-domains.json');
+  return path.join(home, '.workflow', 'synapsys', '.state', 'sticky-domains.json');
 }
 
 function readJsonFile(filePath) {

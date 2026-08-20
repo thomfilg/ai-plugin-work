@@ -1,5 +1,5 @@
 {
-  "_doc": "Copy to <project>/.claude/heimdall-conceal.json and tune. Drives BOTH the PreToolUse guard (deny patterns) and setup-secrets-heimdall.sh (install).",
+  "_doc": "Copy to <project>/.workflow/heimdall-conceal.json and tune. Drives BOTH the PreToolUse guard (deny patterns) and setup-secrets-heimdall.sh (install).",
 
   "runnerUser": "mcp-runner",
   "secretsFiles": ["credentials/mcp-secrets.json"],

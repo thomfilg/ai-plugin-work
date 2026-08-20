@@ -47,7 +47,7 @@ const EXPECTED_GOLDEN_STDOUT =
 
 function makeFixtureStore() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-dispatcher-golden-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),
@@ -86,7 +86,7 @@ function makeFixtureStore() {
 // preset body is ever edited (hard-coding the regex would silently drift).
 function makeExcludeFixtureStore() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-dispatcher-exclude-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),

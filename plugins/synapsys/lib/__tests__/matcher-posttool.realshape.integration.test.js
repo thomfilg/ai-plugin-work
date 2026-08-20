@@ -96,7 +96,7 @@ const REAL_FAILING_TEST = {
 
 function makeStore() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-posttool-realshape-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),

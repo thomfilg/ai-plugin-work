@@ -1,6 +1,6 @@
 // Behavioral tests for the cross-project "shared" memory tier.
 //
-// The shared store lives at `~/.claude/synapsys-shared/` and must be
+// The shared store lives at `~/.workflow/synapsys-shared/` and must be
 // discovered for EVERY project — regardless of cwd or project name. These
 // tests pin HOME to a temp dir (Node's os.homedir() honours $HOME on POSIX)
 // so discovery resolves into a fixture instead of the real home directory.
@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { discoverStores, listMemoriesFromStore, SHARED_FOLDER } = require(
+const { discoverStores, listMemoriesFromStore, SHARED_FOLDER, ROOT_DIR } = require(
   path.resolve(__dirname, '..', 'memory-store')
 );
 const { selectForEvent } = require(path.resolve(__dirname, '..', 'matcher'));
@@ -35,7 +35,7 @@ before(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-shared-'));
   process.env.HOME = home;
 
-  sharedDir = path.join(home, '.claude', SHARED_FOLDER);
+  sharedDir = path.join(home, ROOT_DIR, SHARED_FOLDER);
   fs.mkdirSync(sharedDir, { recursive: true });
   fs.writeFileSync(
     path.join(sharedDir, '.synapsys.json'),
@@ -90,13 +90,14 @@ describe('shared store does not collide with the per-project namespace', {
 }, () => {
   it('keeps global and shared distinct even for a project named like the shared folder', () => {
     // A project whose basename matches SHARED_FOLDER must NOT shadow the shared
-    // store: global lives under `synapsys/<name>/`, shared is a sibling of
-    // `synapsys/`, so the two paths can never resolve to the same directory.
+    // store: global lives under `.workflow/synapsys/<name>/`, shared is the
+    // sibling `.workflow/synapsys-shared/`, so the two paths can never
+    // resolve to the same directory.
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-collide-'));
     const projectCwd = path.join(parent, SHARED_FOLDER);
     fs.mkdirSync(projectCwd, { recursive: true });
 
-    const globalDir = path.join(home, '.claude', 'synapsys', SHARED_FOLDER);
+    const globalDir = path.join(home, '.workflow', 'synapsys', SHARED_FOLDER);
     fs.mkdirSync(globalDir, { recursive: true });
     fs.writeFileSync(
       path.join(globalDir, '.synapsys.json'),

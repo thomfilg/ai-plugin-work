@@ -18,17 +18,17 @@ const STATUS_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'synapsys-s
 
 function makeHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-status-'));
-  fs.mkdirSync(path.join(home, '.claude', 'synapsys', '.state'), { recursive: true });
+  fs.mkdirSync(path.join(home, '.workflow', 'synapsys', '.state'), { recursive: true });
   return home;
 }
 
 function writeRegistry(home, body) {
-  fs.writeFileSync(path.join(home, '.claude', 'synapsys', 'DOMAINS.md'), body);
+  fs.writeFileSync(path.join(home, '.workflow', 'synapsys', 'DOMAINS.md'), body);
 }
 
 function writeStickyState(home, state) {
   fs.writeFileSync(
-    path.join(home, '.claude', 'synapsys', '.state', 'sticky-domains.json'),
+    path.join(home, '.workflow', 'synapsys', '.state', 'sticky-domains.json'),
     JSON.stringify(state)
   );
 }
@@ -138,7 +138,7 @@ test('synapsys-status: read-only — does not advance sticky streaks across repe
     },
   };
   writeStickyState(home, initialState);
-  const stickyPath = path.join(home, '.claude', 'synapsys', '.state', 'sticky-domains.json');
+  const stickyPath = path.join(home, '.workflow', 'synapsys', '.state', 'sticky-domains.json');
 
   for (let i = 0; i < 2; i += 1) {
     const res = runStatus(home, ['--session-id=sess-ro', '--prompt=git commit -m wip']);

@@ -50,7 +50,7 @@ function captureStderr(fn) {
 
 function makeStoreDir(label) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `synapsys-exclude-${label}-`));
-  const storeDir = path.join(dir, '.claude', 'synapsys');
+  const storeDir = path.join(dir, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),

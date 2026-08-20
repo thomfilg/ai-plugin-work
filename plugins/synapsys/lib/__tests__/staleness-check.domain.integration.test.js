@@ -40,12 +40,12 @@ function makeFixture() {
 
   // Seeded DOMAINS.md under a fake $HOME so loadDomainRegistry picks it up.
   const fakeHome = path.join(root, 'home');
-  const domainsDir = path.join(fakeHome, '.claude', 'synapsys');
+  const domainsDir = path.join(fakeHome, '.workflow', 'synapsys');
   fs.mkdirSync(domainsDir, { recursive: true });
   fs.writeFileSync(path.join(domainsDir, 'DOMAINS.md'), SEEDED_DOMAINS);
 
-  // Local store under repo .claude/synapsys.
-  const storeDir = path.join(root, '.claude', 'synapsys');
+  // Local store under repo .workflow/synapsys.
+  const storeDir = path.join(root, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { root, fakeHome, storeDir };

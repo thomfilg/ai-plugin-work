@@ -14,7 +14,7 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
  * @returns {string}
  */
 function cacheDir(home) {
-  return path.join(home, '.claude', 'synapsys', '.cache');
+  return path.join(home, '.workflow', 'synapsys', '.cache');
 }
 
 /**

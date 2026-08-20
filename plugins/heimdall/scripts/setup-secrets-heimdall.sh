@@ -2,7 +2,7 @@
 #
 # setup-secrets-heimdall.sh — install the "secrets safe" (Layer 1), config-driven.
 #
-# Reads <repo>/.claude/heimdall-conceal.json and:
+# Reads <repo>/.workflow/heimdall-conceal.json and:
 #   - creates the dedicated runner uid (with a home for npx cache)
 #   - locks each secrets file to it (0600)
 #   - hardens the wrapper (root-owned, not agent-writable)
@@ -42,7 +42,7 @@ for a in "${1:-}" "${2:-}" "${3:-}"; do
 done
 REPO_DIR="${REPO_ARG:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 REPO_DIR="$(cd "${REPO_DIR}" && pwd)"
-CONFIG="${REPO_DIR}/.claude/heimdall-conceal.json"
+CONFIG="${REPO_DIR}/.workflow/heimdall-conceal.json"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "must run as root (use sudo)"

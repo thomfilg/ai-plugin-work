@@ -231,7 +231,7 @@ function formatSections(stats, { color = false, changersOnly = false } = {}) {
   }
 
   // All three sections must restrict to memories discovered via --cwd
-  // (`m.known`). The global ~/.claude/synapsys/.telemetry/ aggregates events
+  // (`m.known`). The global ~/.workflow/synapsys/.telemetry/ aggregates events
   // from every project, so without this filter Top influencers and Noise
   // candidates would surface deleted or other-project memories that the
   // current store no longer (or never) owned.

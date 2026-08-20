@@ -928,14 +928,34 @@ function getRepoSlug() {
   }
 }
 
+// Run state lives in the plugin's own state root, NOT the OS temp dir: the
+// path must stay deterministic so a later invocation can resume the same PR's
+// run, which rules out mkdtemp, and a predictable name directly under a
+// world-writable /tmp is a symlink/overwrite target (CodeQL js/insecure-
+// temporary-file). Owner-only modes below keep the file private.
+const STATE_DIR_MODE = 0o700;
+const STATE_FILE_MODE = 0o600;
+// /tmp used to expire this state on reboot. It no longer lives there, so an
+// explicit TTL keeps a months-old file from silently resuming a fresh run.
+const STATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 function stateFilePath(prNumber) {
-  return path.join(os.tmpdir(), '.claude', `follow-up-pr-${getRepoSlug()}-${prNumber}.json`);
+  return path.join(
+    os.homedir(),
+    '.workflow',
+    'work-workflow',
+    'follow-up',
+    `follow-up-pr-${getRepoSlug()}-${prNumber}.json`
+  );
 }
 
 function loadState(prNumber) {
   const filePath = stateFilePath(prNumber);
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const startedAt = Date.parse(state && state.startTime);
+    if (Number.isFinite(startedAt) && Date.now() - startedAt > STATE_MAX_AGE_MS) return null;
+    return state;
   } catch {
     return null;
   }
@@ -944,8 +964,8 @@ function loadState(prNumber) {
 function saveState(state) {
   const filePath = stateFilePath(state.prNumber);
   const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(state, null, 2) + '\n');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2) + '\n', { mode: STATE_FILE_MODE });
 }
 
 function initState(prInfo) {

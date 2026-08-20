@@ -2,7 +2,7 @@
 //
 // These assert the property the user actually cares about: from a session
 // running INSIDE a worktree, a memory stored one level up in the shared
-// `<base>/.claude/synapsys` store is discovered AND injected for a matching
+// `<base>/.workflow/synapsys` store is discovered AND injected for a matching
 // event — and is NOT injected for a non-matching one.
 //
 // Discovered by plugins/work/scripts/run-tests.sh (searches plugins/synapsys/).
@@ -21,8 +21,8 @@ const { selectForEvent } = require(path.resolve(__dirname, '..', 'matcher'));
 
 // ─── Fixture: a worktree base with a shared store one level up ────────────────
 //
-//   <base>/.claude/synapsys/.synapsys.json   ← store marker
-//   <base>/.claude/synapsys/ci.md            ← memory
+//   <base>/.workflow/synapsys/.synapsys.json   ← store marker
+//   <base>/.workflow/synapsys/ci.md            ← memory
 //   <base>/worktree-echo-1/                   ← session cwd (the "worktree")
 
 let base;
@@ -38,7 +38,7 @@ function writeMemory(dir, file, frontmatter, body) {
 
 before(() => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-wt-'));
-  storeDir = path.join(base, '.claude', 'synapsys');
+  storeDir = path.join(base, '.workflow', 'synapsys');
   worktreeCwd = path.join(base, 'worktree-echo-1');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.mkdirSync(worktreeCwd, { recursive: true });
@@ -114,7 +114,7 @@ describe('worktree-level injection', () => {
 
 // ─── Multi-level discovery: walk up to the nearest ancestor store ─────────────
 // A session may run from a sub-directory of the worktree (e.g. packages/app),
-// which is more than one level below the shared `.claude` base. Discovery must
+// which is more than one level below the `.workflow/synapsys` store base. Discovery must
 // still resolve the store by walking up the tree.
 describe('multi-level discovery', () => {
   it('finds the shared store from a deeply-nested sub-directory', () => {

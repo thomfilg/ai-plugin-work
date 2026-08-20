@@ -19,14 +19,14 @@ const HOOK = path.resolve(__dirname, '..', '..', 'hooks', 'synapsys.js');
 
 function makeTmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-domain-gate-hook-'));
-  const synapsysHome = path.join(home, '.claude', 'synapsys');
+  const synapsysHome = path.join(home, '.workflow', 'synapsys');
   fs.mkdirSync(path.join(synapsysHome, '.state'), { recursive: true });
   return { home, synapsysHome };
 }
 
 function makeStoreCwd() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-domain-gate-hook-cwd-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),

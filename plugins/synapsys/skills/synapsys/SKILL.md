@@ -34,9 +34,9 @@ Synapsys is a memory injection plugin: memories are markdown files with frontmat
 ## Subcommands
 
 - `/synapsys init <kind>` — Initialize a memory store at one of three locations:
-  - `local` → `./.claude/synapsys/` (this repo)
-  - `worktree` → `../.claude/synapsys/` (sibling to repo, shared across worktrees)
-  - `global` → `~/.claude/synapsys/<project-name>/` (user-scoped per project)
+  - `local` → `./.workflow/synapsys/` (this repo)
+  - `worktree` → `../.workflow/synapsys/` (sibling to repo, shared across worktrees)
+  - `global` → `~/.workflow/synapsys/<project-name>/` (user-scoped per project)
 
   Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-init.js --kind=<kind>`
 

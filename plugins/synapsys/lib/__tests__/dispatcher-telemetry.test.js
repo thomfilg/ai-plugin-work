@@ -4,7 +4,7 @@
  * Dispatcher telemetry integration tests (GH-512, Task 3).
  *
  * These tests spawn `plugins/synapsys/hooks/synapsys.js` against a temporary
- * memory store and a temporary HOME (so `~/.claude/synapsys/.telemetry/`
+ * memory store and a temporary HOME (so `~/.workflow/synapsys/.telemetry/`
  * resolves into the test sandbox via os.homedir()).
  *
  * Scenarios (matches tasks.md Task 3 + gherkin):
@@ -51,7 +51,7 @@ function writeMemory(storeDir, name, opts) {
 
 function makeFixture({ home }) {
   const cwd = mktemp('synapsys-disp-tel-cwd-');
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),
@@ -88,7 +88,7 @@ function runDispatcher(event, payload, { home, extraEnv } = {}) {
 }
 
 function telemetryDirFor(home) {
-  return path.join(home, '.claude', 'synapsys', '.telemetry');
+  return path.join(home, '.workflow', 'synapsys', '.telemetry');
 }
 
 function readJsonl(file) {

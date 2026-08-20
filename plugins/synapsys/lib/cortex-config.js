@@ -54,14 +54,14 @@ function parseCortexBlock(text) {
 
 /**
  * Load the cortex auto-recall config, merging the documented defaults
- * with any keys declared in `~/.claude/synapsys/config.yaml`.
+ * with any keys declared in `~/.workflow/synapsys/config.yaml`.
  *
  * @param {{ home: string, env?: NodeJS.ProcessEnv }} opts
  * @returns {typeof DEFAULTS}
  */
 function loadConfig({ home, env } = {}) {
   void env;
-  const configPath = path.join(home, '.claude', 'synapsys', 'config.yaml');
+  const configPath = path.join(home, '.workflow', 'synapsys', 'config.yaml');
   let overrides = {};
   try {
     const text = fs.readFileSync(configPath, 'utf8');

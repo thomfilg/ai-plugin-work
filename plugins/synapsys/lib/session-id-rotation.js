@@ -39,12 +39,12 @@ const os = require('node:os');
 const FAST_ROTATION_THRESHOLD_MS = 5_000;
 
 function telemetryDir() {
-  return path.join(os.homedir(), '.claude', 'synapsys', '.telemetry');
+  return path.join(os.homedir(), '.workflow', 'synapsys', '.telemetry');
 }
 
 function sessionDir() {
   if (process.env.SYNAPSYS_SESSION_DIR) return process.env.SYNAPSYS_SESSION_DIR;
-  return path.join(os.homedir(), '.claude', 'synapsys', '.session');
+  return path.join(os.homedir(), '.workflow', 'synapsys', '.session');
 }
 
 function lastObservedFile() {

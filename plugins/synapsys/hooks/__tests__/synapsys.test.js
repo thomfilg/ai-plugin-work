@@ -28,7 +28,7 @@ const DISPATCHER = path.resolve(__dirname, '..', 'synapsys.js');
 const PRETOOL_WINDOW = path.resolve(__dirname, '..', '..', 'lib', 'pretool-window.js');
 
 // Redirect pretool-window persistence into a per-run tmpdir so in-process tests
-// don't touch the real ~/.claude/.telemetry dir.
+// don't touch the real ~/.workflow/synapsys/.telemetry dir.
 process.env.SYNAPSYS_PRETOOL_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-disp-pretool-'));
 
 function mktemp(prefix) {
@@ -54,7 +54,7 @@ function writeMemory(storeDir, name, opts) {
 function makeFixture() {
   const home = mktemp('synapsys-disp-t5-home-');
   const cwd = mktemp('synapsys-disp-t5-cwd-');
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),
@@ -88,7 +88,7 @@ function runDispatcher(event, payload, { home, extraEnv } = {}) {
 }
 
 function telemetryDirFor(home) {
-  return path.join(home, '.claude', 'synapsys', '.telemetry');
+  return path.join(home, '.workflow', 'synapsys', '.telemetry');
 }
 
 function readJsonl(file) {

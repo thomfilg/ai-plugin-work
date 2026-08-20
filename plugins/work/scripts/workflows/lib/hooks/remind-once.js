@@ -18,7 +18,7 @@
  * SAFE_ID_RE (unsafe → sha256-hashed) before use as a filename (path-traversal
  * guard).
  *
- * Storage: `~/.claude/work-workflow/.reminders/<sessionId>.json`, overridable
+ * Storage: `~/.workflow/work-workflow/.reminders/<sessionId>.json`, overridable
  * via `REMIND_ONCE_SESSION_DIR` for tests. Shape:
  *   `{ createdAt, sessionId, reminders: { <reminderId>: { firedAt, count } } }`.
  * Stores reminder ids + counters + timestamps ONLY — no prompt text, no bodies.
@@ -63,7 +63,7 @@ function sanitizeSessionId(raw) {
 
 function sessionDir() {
   if (process.env.REMIND_ONCE_SESSION_DIR) return process.env.REMIND_ONCE_SESSION_DIR;
-  return path.join(os.homedir(), '.claude', 'work-workflow', '.reminders');
+  return path.join(os.homedir(), '.workflow', 'work-workflow', '.reminders');
 }
 
 function ledgerPath(sessionId) {

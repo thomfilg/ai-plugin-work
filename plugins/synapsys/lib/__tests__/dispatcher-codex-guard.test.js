@@ -34,7 +34,7 @@ const MEMORY_DESCRIPTION = 'Codex guard regression memory.';
 
 function makeFixtureStore() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-codex-guard-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(
     path.join(storeDir, '.synapsys.json'),

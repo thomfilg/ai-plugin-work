@@ -10,6 +10,10 @@ node_modules
 # Runtime-generated hook artifacts
 .claude-code-check-request.json
 
+# Repo-local plugin store root (`.workflow/<plugin>/`). Anchored at the repo
+# root so the checked-in store fixtures under plugins/**/tests/ stay tracked.
+/.workflow/
+
 # Local-only backward-compat symlink for stale sessions (workflows -> scripts/workflows)
 /workflows
 .in_use/

@@ -19,7 +19,7 @@
  */
 
 const path = require('node:path');
-const { setupCli, listMemories } = require('../lib/script-bootstrap');
+const { setupCli, listMemories, ROOT_DIR, FOLDER } = require('../lib/script-bootstrap');
 const { getDomains, firstShared } = require('../lib/lint/domain-utils');
 const { parseArgs } = require('../lib/lint/parse-args');
 const {
@@ -52,14 +52,14 @@ const LINK_RE = /\[\[([a-z0-9][a-z0-9-]*)\]\]/g;
  * into a test fixture run).
  *
  * The convention is one-level-up: a worktree-tier store sits at
- * `<boundDir>/../.claude/synapsys`. Stores discovered by `findAncestorStore`
+ * `<boundDir>/../.workflow/synapsys`. Stores discovered by `findAncestorStore`
  * walking further up the filesystem (the leak case) are rejected. `local`
- * lives at `<cwd>/.claude/...` (always inside cwd), `global` and `shared`
+ * lives at `<cwd>/.workflow/synapsys` (always inside cwd), `global` and `shared`
  * live at fixed paths under `$HOME` (which tests isolate via the HOME env
  * var), so neither needs clamping.
  */
 function filterMemories(memories, scope, boundDir) {
-  const expectedWorktreeDir = boundDir ? path.resolve(boundDir, '..', '.claude', 'synapsys') : null;
+  const expectedWorktreeDir = boundDir ? path.resolve(boundDir, '..', ROOT_DIR, FOLDER) : null;
   return memories.filter((m) => {
     if (m.disabled) return false;
     if (m.expired) return false;

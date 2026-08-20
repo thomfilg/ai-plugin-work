@@ -41,7 +41,7 @@ function cleanup(dir) {
 }
 
 function cacheFilePath(home, sessionId) {
-  return path.join(home, '.claude', 'synapsys', '.cache', `${sessionId}.json`);
+  return path.join(home, '.workflow', 'synapsys', '.cache', `${sessionId}.json`);
 }
 
 /** Create a fixture cortex db (real `memories` schema) under `dir`. */
@@ -174,8 +174,8 @@ test('SessionStart with no module and no cortex db has zero cortex side effects'
     assert.equal(res.status, 0, 'SessionStart still exits 0');
     assert.equal(waitForCache(home, sessionId, 30), null, 'no baseline cache file is written');
     assert.ok(
-      !fs.existsSync(path.join(home, '.claude', 'synapsys', '.cache')) ||
-        fs.readdirSync(path.join(home, '.claude', 'synapsys', '.cache')).length === 0,
+      !fs.existsSync(path.join(home, '.workflow', 'synapsys', '.cache')) ||
+        fs.readdirSync(path.join(home, '.workflow', 'synapsys', '.cache')).length === 0,
       'no cortex cache side effects at all'
     );
   } finally {

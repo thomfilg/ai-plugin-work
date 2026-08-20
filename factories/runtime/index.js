@@ -11,7 +11,7 @@
  *      /.claude/projects/ transcript_path ⇒ claude
  *   3. PLUGIN_ROOT set ⇒ codex (codex-only hook env, ground truth §2.7.1)
  *   4. CODEX_THREAD_ID set ⇒ codex (codex model-shell signature)
- *   5. session stamp (~/.claude/.agent-runtime/<sha1(cwd)>.json, TTL 12h)
+ *   5. session stamp (~/.workflow/.agent-runtime/<sha1(cwd)>.json, TTL 12h)
  *   6. CLAUDECODE=1 / CLAUDE_CODE_SESSION_ID ⇒ claude
  *   7. default claude — the load-bearing compatibility guarantee.
  *
@@ -34,7 +34,7 @@ const STAMP_TTL_MS = 12 * 60 * 60 * 1000;
 let warnedInvalidPin = false;
 
 function stampDir() {
-  return path.join(os.homedir(), '.claude', '.agent-runtime');
+  return path.join(os.homedir(), '.workflow', '.agent-runtime');
 }
 
 function stampPath(cwd) {

@@ -8,8 +8,8 @@
  *                           [--tool=<ToolName:args>]... [--json] [--no-color]
  *
  * Reads:
- *   - Domain registry: $HOME/.claude/synapsys/DOMAINS.md (Task 2)
- *   - Sticky state:    $HOME/.claude/synapsys/.state/sticky-domains.json (Task 5)
+ *   - Domain registry: $HOME/.workflow/synapsys/DOMAINS.md (Task 2)
+ *   - Sticky state:    $HOME/.workflow/synapsys/.state/sticky-domains.json (Task 5)
  *
  * Computes the active-domain set via classifier + sticky carry-over (Task 6)
  * and prints each domain with signal attribution:
@@ -251,7 +251,7 @@ function emitHuman(opts, active, attribution, C) {
 function main(argv) {
   const opts = parseArgs(argv);
   const home = process.env.SYNAPSYS_HOME || process.env.HOME || os.homedir();
-  const stickyPath = path.join(home, '.claude', 'synapsys', '.state', 'sticky-domains.json');
+  const stickyPath = path.join(home, '.workflow', 'synapsys', '.state', 'sticky-domains.json');
 
   const registry = safeLoadRegistry(home);
   const stickyState = safeLoadSticky(stickyPath);

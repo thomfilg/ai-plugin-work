@@ -64,8 +64,8 @@ describe('install-work-statusline runtime guard', () => {
     assert.equal(fs.existsSync(settingsPath(home)), false);
   });
 
-  const hostPath = (home) => path.join(home, '.claude', 'statusline-host.sh');
-  const fragPath = (home, name) => path.join(home, '.claude', 'statuslines', name);
+  const hostPath = (home) => path.join(home, '.workflow', 'statusline-host.sh');
+  const fragPath = (home, name) => path.join(home, '.workflow', 'statuslines', name);
 
   it('claude: installs the shared host and drops the work fragment', async () => {
     const home = freshHome();

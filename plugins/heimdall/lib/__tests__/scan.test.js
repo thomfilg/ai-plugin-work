@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { scan } = require(path.resolve(__dirname, '..', 'scan'));
-const { writeConfig, FOLDER } = require(path.resolve(__dirname, '..', 'lock-store'));
+const { writeConfig, ROOT_DIR, FOLDER } = require(path.resolve(__dirname, '..', 'lock-store'));
 
 let repo;
 
@@ -58,7 +58,7 @@ describe('scan', () => {
   });
 
   it('drops suggestions already covered by an existing lock', () => {
-    writeConfig(path.join(repo, '.claude', FOLDER), {
+    writeConfig(path.join(repo, ROOT_DIR, FOLDER), {
       kind: 'local',
       locks: [{ protect: ['.github'], unlockPhrase: 'edit .github' }],
     });

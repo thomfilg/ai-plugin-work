@@ -32,13 +32,13 @@ const MEMORY_BODY =
   '2. Quarantine before bumping the timeout.';
 const STOP_REGEX = '\\b(flaky|bump\\s+timeout)\\b';
 
-// Build a worktree-kind store at `<base>/.claude/synapsys` with the session
+// Build a worktree-kind store at `<base>/.workflow/synapsys` with the session
 // cwd at `<base>/worktree-stop-response/` (one level below the store base).
 // This produces `[synapsys:worktree] <name>` in dispatcher output, matching
 // the Task 5 acceptance criteria.
 function makeWorktreeStore() {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-stop-resp-'));
-  const storeDir = path.join(base, '.claude', 'synapsys');
+  const storeDir = path.join(base, '.workflow', 'synapsys');
   const cwd = path.join(base, 'worktree-stop-response');
 
   fs.mkdirSync(storeDir, { recursive: true });

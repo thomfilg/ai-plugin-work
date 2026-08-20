@@ -92,13 +92,13 @@ test('--scope=shared narrows discovery to the shared tier', () => {
 
 test('Worktree-tier memories are included when the store sits one level above cwd', () => {
   // Regression for the worktree-tier exclusion bug: lintStore must not drop
-  // memories whose store lives at `<cwd>/../.claude/synapsys` (the worktree
+  // memories whose store lives at `<cwd>/../.workflow/synapsys` (the worktree
   // convention). Build a tmp layout:
-  //   <tmp>/.claude/synapsys/.synapsys.json + mem-wt.md   (worktree tier)
+  //   <tmp>/.synapsys/.synapsys.json + mem-wt.md   (worktree tier)
   //   <tmp>/proj/                                          (cwd; no local store)
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-wt-'));
   try {
-    const wtStore = path.join(tmp, '.claude', 'synapsys');
+    const wtStore = path.join(tmp, '.workflow', 'synapsys');
     fs.mkdirSync(wtStore, { recursive: true });
     fs.writeFileSync(path.join(wtStore, '.synapsys.json'), '{}');
     fs.writeFileSync(
@@ -214,7 +214,7 @@ function buildSlackFlakeStore() {
   // so the existing `proj` fixtures (used by Task-3/4 tests above) are
   // not perturbed by extra memories that would generate cross-pairs.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-lint-task5-'));
-  const storeDir = path.join(root, '.claude', 'synapsys');
+  const storeDir = path.join(root, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{"version":1,"kind":"project"}\n');
   fs.copyFileSync(SLACK_FIXTURE, path.join(storeDir, path.basename(SLACK_FIXTURE)));
@@ -281,7 +281,7 @@ function buildPretoolOverlapStore() {
   // Per-test isolated store so the existing `proj` fixtures (Task 3/4)
   // do not pollute pair generation with unrelated overlaps.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-lint-task6-'));
-  const storeDir = path.join(root, '.claude', 'synapsys');
+  const storeDir = path.join(root, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{"version":1,"kind":"project"}\n');
   fs.copyFileSync(PRETOOL_A_FIXTURE, path.join(storeDir, path.basename(PRETOOL_A_FIXTURE)));
@@ -336,7 +336,7 @@ function buildTooBroadStore() {
   // Per-test isolated store so the broad-trigger fixture does not
   // interfere with the `proj` fixtures used by Task 3/4 tests.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-lint-task7-'));
-  const storeDir = path.join(root, '.claude', 'synapsys');
+  const storeDir = path.join(root, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{"version":1,"kind":"project"}\n');
   fs.copyFileSync(TOO_BROAD_CI_FIXTURE, path.join(storeDir, path.basename(TOO_BROAD_CI_FIXTURE)));
@@ -642,7 +642,7 @@ test('synapsys memorize warns on a new high-severity pair before commit (AC-G6)'
   // memory whose trigger tokens match ≥4 tokens of the flake body, triggering
   // a `trigger-body-overlap` high-severity pair (mirrors AC-G1 collision).
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-lint-task9-'));
-  const storeDir = path.join(root, '.claude', 'synapsys');
+  const storeDir = path.join(root, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{"version":1,"kind":"project"}\n');
   fs.copyFileSync(FLAKE_FIXTURE, path.join(storeDir, 'flaky-test-fix-protocol.md'));
