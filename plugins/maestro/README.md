@@ -10,6 +10,20 @@ Session names are prefixed with the **provider-derived ticket prefix** rather th
 
 The `SESSION_PATTERN` default is therefore `^${PREFIX}-[0-9]+-(work|dev|listen)$` for the resolved `${PREFIX}` — never an empty-prefix pattern. `SESSION_PATTERN` is the single env override that drives discovery: its default already widens to `-(work|dev|listen)` so the `-dev`/`-listen` helper sessions `/work` spawns surface informationally. Auto-restart is gated **separately** to `-work` only, so `-dev` and `-listen` helpers are reported but never relaunched with `/work <TICKET>`.
 
+## Store version + migrations
+
+Each schema store carries `.version.json` — the layout version applied to that
+directory. On SessionStart, [`lib/store-migrations.js`](lib/store-migrations.js)
+applies anything pending and re-stamps, so a saved schema keeps resolving by
+name across an upgrade that moves the store.
+
+History: [`lib/migrations/`](lib/migrations/), one file per migration named
+`<YYYYMMDDHHMMSS>_<slug>.js`; the filename timestamp *is* the version.
+
+| Version | Change |
+|---|---|
+| `20260820213000` | schema store `.claude/maestro` → `.workflow/maestro` |
+
 ## Components
 
 ### `scripts/maestro-conduct.js`

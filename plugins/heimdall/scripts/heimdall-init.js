@@ -27,6 +27,7 @@ const {
   readConfig,
   writeConfig,
 } = require(path.join(__dirname, '..', 'lib', 'lock-store'));
+const { prepareStore } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 
 const args = parseArgs(process.argv);
 const kind = args.kind || 'local';
@@ -36,6 +37,22 @@ const target = candidateStores(args.cwd, projectName).find((c) => c.kind === kin
 if (!target) {
   console.error(`unknown kind: ${kind} (use local|worktree|global|shared)`);
   process.exit(1);
+}
+
+// Migrate BEFORE reading or writing the store, and stamp only if that settled.
+// A stamp marks the store fully migrated and is believed on sight, so stamping
+// while an older install's data is still at the legacy path suppresses the
+// move permanently. For heimdall that data includes the conceal policy, and
+// the guard is safe-by-default-OFF — so the failure is silent: concealment
+// simply stops. Installing must never be able to cause that, including when
+// the SessionStart hook never ran (codex skips untrusted hooks).
+// Running first also means `readConfig` below sees any locks just carried over.
+const prepared = prepareStore(args.cwd || process.cwd(), target.dir);
+if (!prepared.stamped) {
+  console.error(
+    'note: a pending store migration did not complete, so this store is left unstamped; ' +
+      'it will be retried at the next session start'
+  );
 }
 
 const existing = readConfig(target.dir);

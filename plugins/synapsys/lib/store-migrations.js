@@ -23,17 +23,8 @@ const path = require('node:path');
 const { createStoreMigrator } = require(path.join(__dirname, 'storeMigration'));
 const { migrationCandidates } = require(path.join(__dirname, 'memory-store'));
 
-const migrator = createStoreMigrator({
+module.exports = createStoreMigrator({
   plugin: 'synapsys',
   migrationsDir: path.join(__dirname, 'migrations'),
   locations: (cwd) => migrationCandidates(cwd),
 });
-
-module.exports = {
-  LATEST_VERSION: migrator.LATEST_VERSION,
-  VERSION_FILE: migrator.VERSION_FILE,
-  MIGRATIONS: migrator.MIGRATIONS,
-  runMigrations: (cwd) => migrator.run({ cwd }),
-  readVersion: migrator.readVersion,
-  stampLatest: migrator.stampLatest,
-};

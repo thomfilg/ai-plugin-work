@@ -50,7 +50,13 @@ const EXPECTED_MASTER_FILES = {
     'vocab.js',
   ],
   'factories/storeDiscovery': ['index.js', 'storeDiscovery.js'],
-  'factories/storeMigration': ['index.js', 'load.js', 'relocate.js', 'storeMigration.js'],
+  'factories/storeMigration': [
+    'index.js',
+    'load.js',
+    'lock.js',
+    'relocate.js',
+    'storeMigration.js',
+  ],
   'factories/safeIO': ['index.js', 'safeIO.js'],
   'factories/hookEntrypoint': ['hookEntrypoint.js', 'index.js', 'logHookError.js'],
   'factories/safeSubprocess': ['index.js', 'safeSubprocess.js'],
@@ -115,7 +121,12 @@ describe('VENDOR_SETS table shape', () => {
       'plugins/heimdall/lib/storeDiscovery',
       'plugins/maestro/lib/storeDiscovery',
     ],
-    'factories/storeMigration': ['plugins/synapsys/lib/storeMigration'],
+    'factories/storeMigration': [
+      'plugins/synapsys/lib/storeMigration',
+      'plugins/heimdall/lib/storeMigration',
+      'plugins/maestro/lib/storeMigration',
+      'plugins/work/scripts/workflows/lib/storeMigration',
+    ],
     'factories/safeIO': ['plugins/work/scripts/workflows/lib/safeIO'],
     'factories/hookEntrypoint': [
       'plugins/ghostwriter/lib/hookEntrypoint',

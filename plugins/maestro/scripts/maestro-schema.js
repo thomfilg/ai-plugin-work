@@ -39,6 +39,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const store = require(path.join(__dirname, '..', 'lib', 'schema-store'));
+const { prepareStore } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 const {
   MARKER,
   getProjectName,
@@ -78,6 +79,16 @@ function cmdInit(args) {
   const target = candidateStores(cwd, projectName).find((c) => c.kind === kind);
   if (!target) die(`unknown tier: ${kind}`);
 
+  // Migrate before creating, and stamp only if that settled — a stamp is
+  // believed on sight, so stamping over data still at the legacy path would
+  // suppress the move permanently. See storeMigration.prepareStore.
+  const prepared = prepareStore(cwd, target.dir);
+  if (!prepared.stamped) {
+    console.error(
+      'note: a pending store migration did not complete, so this store is left ' +
+        'unstamped; it will be retried at the next session start'
+    );
+  }
   fs.mkdirSync(target.dir, { recursive: true });
   const marker = {
     kind,

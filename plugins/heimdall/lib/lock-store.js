@@ -106,6 +106,7 @@ module.exports = {
   getRepoRoot: discovery.getRepoRoot,
   getProjectName: discovery.getProjectName,
   candidateStores: discovery.candidateStores,
+  migrationCandidates: discovery.migrationCandidates,
   findAncestorStore: discovery.findAncestorStore,
   discoverStores: discovery.discoverStores,
   // Heimdall-specific config IO + lock-block editing.
