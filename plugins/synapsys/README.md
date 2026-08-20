@@ -40,12 +40,17 @@ A store is "active" once it contains a `.synapsys.json` marker (written by `syna
 
 Alongside the marker, each store carries `.version.json` — the layout version
 applied to that directory. On SessionStart, **before anything reads the
-stores**, the dispatcher runs any pending migrations declared in
-[`lib/migrations.js`](lib/migrations.js) and re-stamps each store.
+stores**, the runner in [`lib/store-migrations.js`](lib/store-migrations.js)
+applies anything pending and re-stamps each store.
+
+The history is [`lib/migrations/`](lib/migrations/), one file per migration
+named `<YYYYMMDDHHMMSS>_<slug>.js`; the timestamp in the filename *is* the
+version. Adding a migration means adding a file — nothing shared is edited, so
+two branches never collide. Never rename or edit a shipped one.
 
 | Version | Change |
 |---|---|
-| 1 | Store moved out of the agent CLI config dir: `.claude/synapsys` → `.workflow/synapsys` (and `-shared`) |
+| `20260820213000` | `20260820213000_relocate-store-root.js` — store moved out of the agent CLI config dir: `.claude/synapsys` → `.workflow/synapsys` (and `-shared`) |
 
 So an install predating a relocation finds its memories where it left them: the
 first session after the upgrade moves them, and every session after that is a

@@ -12,7 +12,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const HOOK = path.resolve(__dirname, '..', '..', 'hooks', 'synapsys.js');
-const migrations = require(path.resolve(__dirname, '..', 'migrations'));
+const migrations = require(path.resolve(__dirname, '..', 'store-migrations'));
 const { discoverStores, listMemoriesFromStore } = require(
   path.resolve(__dirname, '..', 'memory-store')
 );
@@ -68,16 +68,42 @@ afterEach(() => {
 });
 
 describe('synapsys migration declaration', () => {
-  it('exposes a contiguous, positive, ascending version history', () => {
+  const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'migrations');
+
+  it('discovers one file per migration, ascending and unique', () => {
     const versions = migrations.MIGRATIONS.map((m) => m.version);
+    assert.ok(versions.length > 0, 'at least one migration must be discovered');
     assert.deepEqual(
       versions,
       [...versions].sort((a, b) => a - b),
       'must be ascending'
     );
     assert.equal(new Set(versions).size, versions.length, 'must be unique');
-    assert.ok(versions.every((v) => Number.isInteger(v) && v > 0));
     assert.equal(migrations.LATEST_VERSION, Math.max(...versions));
+  });
+
+  it('every migration file on disk is discovered — none silently skipped', () => {
+    const onDisk = fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith('.js'))
+      .sort();
+    assert.equal(
+      migrations.MIGRATIONS.length,
+      onDisk.length,
+      `discovered ${migrations.MIGRATIONS.length} of ${onDisk.length} files: ${onDisk.join(', ')}`
+    );
+  });
+
+  it('every version matches its filename timestamp', () => {
+    const fromNames = fs
+      .readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => Number(f.slice(0, 14)))
+      .sort((a, b) => a - b);
+    assert.deepEqual(
+      migrations.MIGRATIONS.map((m) => m.version),
+      fromNames
+    );
   });
 
   it('every migration carries a description', () => {

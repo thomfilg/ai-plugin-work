@@ -50,7 +50,7 @@ const EXPECTED_MASTER_FILES = {
     'vocab.js',
   ],
   'factories/storeDiscovery': ['index.js', 'storeDiscovery.js'],
-  'factories/storeMigration': ['index.js', 'relocate.js', 'storeMigration.js'],
+  'factories/storeMigration': ['index.js', 'load.js', 'relocate.js', 'storeMigration.js'],
   'factories/safeIO': ['index.js', 'safeIO.js'],
   'factories/hookEntrypoint': ['hookEntrypoint.js', 'index.js', 'logHookError.js'],
   'factories/safeSubprocess': ['index.js', 'safeSubprocess.js'],

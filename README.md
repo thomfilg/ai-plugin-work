@@ -45,7 +45,7 @@ carries existing data forward on the next session — no manual step.
 | | |
 |---|---|
 | Mechanism | [`factories/storeMigration`](factories/storeMigration/) |
-| Declared by | `plugins/<plugin>/lib/migrations.js` (the list *is* the history — append, never renumber) |
+| Declared by | `plugins/<plugin>/lib/migrations/<YYYYMMDDHHMMSS>_<slug>.js` — one file per migration, discovered at load; the filename timestamp is the version |
 | Adopted by | synapsys |
 
 Migrations are per store directory, applied in order, stamped after each

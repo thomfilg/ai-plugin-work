@@ -17,7 +17,7 @@ const path = require('node:path');
 const { MARKER, FOLDER, getProjectName, candidateStores } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
-const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'migrations'));
+const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 
 function parseArgs(argv) {
   const out = { kind: 'local', cwd: process.cwd() };

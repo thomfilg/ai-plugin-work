@@ -69,7 +69,7 @@ const { runHook } = require(path.join(__dirname, '..', 'lib', 'hookEntrypoint'))
 
 const { getSessionStartHint } = require(path.join(__dirname, '..', 'lib', 'setup-hints'));
 const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime', 'index'));
-const { runMigrations } = require(path.join(__dirname, '..', 'lib', 'migrations'));
+const { runMigrations } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 
 // Build the activeDomains opts for selectForEvent. Delegates to the
 // shared resolver so synapsys-explain stays in lockstep. Uses the

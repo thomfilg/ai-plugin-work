@@ -58,6 +58,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { loadMigrations } = require('./load');
+
 const DEFAULT_VERSION_FILE = '.version.json';
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 // Version reported for a store that exists but carries no readable stamp.
@@ -99,17 +101,32 @@ function assertMigration(entry, seen) {
   });
 }
 
+// `migrationsDir` (one file per migration, discovered) is the shape plugins
+// use; the inline `migrations` array stays for tests and for a caller that
+// builds its list some other way. Exactly one of the two.
+function resolveMigrationList(config) {
+  const hasDir = typeof config.migrationsDir === 'string' && config.migrationsDir !== '';
+  const hasArray = Array.isArray(config.migrations);
+  if (hasDir && hasArray) {
+    throw new TypeError('storeMigration: pass "migrationsDir" or "migrations", not both');
+  }
+  if (hasDir) return loadMigrations(config.migrationsDir);
+  if (hasArray) return config.migrations;
+  throw new TypeError('storeMigration: "migrationsDir" or "migrations" required');
+}
+
 function assertConfig(config) {
   if (!isPlainObject(config)) throw new TypeError('storeMigration: config object required');
   const plugin = requiredString(config, 'plugin');
   if (typeof config.locations !== 'function') {
     throw new TypeError('storeMigration: "locations" must be a function');
   }
-  if (!Array.isArray(config.migrations) || config.migrations.length === 0) {
-    throw new TypeError('storeMigration: "migrations" must be a non-empty array');
+  const declared = resolveMigrationList(config);
+  if (declared.length === 0) {
+    throw new TypeError('storeMigration: no migrations declared');
   }
   const seen = new Set();
-  const migrations = config.migrations
+  const migrations = declared
     .map((entry) => assertMigration(entry, seen))
     .sort((a, b) => a.version - b.version);
   return Object.freeze({
@@ -324,6 +341,8 @@ function createStoreMigrator(config) {
 
   return Object.freeze({
     LATEST_VERSION: spec.latest,
+    // The resolved history, for callers that surface or assert on it.
+    MIGRATIONS: spec.migrations,
     VERSION_FILE: spec.versionFile,
     readVersion: (dir) => (dirExists(dir) ? readStamp(spec, dir) : null),
     currentVersion: (location) => currentVersion(spec, location),

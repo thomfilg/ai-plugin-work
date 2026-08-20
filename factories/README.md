@@ -65,7 +65,7 @@ small frozen API, replacing the near-copies each plugin used to hand-roll.
 | Module | Concern it centralizes |
 |---|---|
 | `storeDiscovery` | Tiered, marker-gated discovery of `.workflow/<folder>` store directories — only explicitly installed locations are ever read. |
-| `storeMigration` | Versioned, fail-open, lock-guarded migration of those store directories: a `.version.json` stamp per store, an ordered migration list, and the move-a-store body (`relocateDirectory`). |
+| `storeMigration` | Versioned, fail-open, lock-guarded migration of those store directories: a `.version.json` stamp per store, a `migrations/` folder of `<timestamp>_<slug>.js` files discovered at load, and the move-a-store body (`relocateDirectory`). |
 | `safeIO` | Fail-open readers ("anything goes wrong → empty") and Windows-aware atomic writers (no half-written payloads). |
 | `hookEntrypoint` | The hook-script entry protocol: stdin → JSON payload → guarded handler → deliberate exit code, plus `logHookError` file logging. |
 | `safeSubprocess` | Synchronous subprocess wrappers with non-optional timeouts and no shell interpolation. |

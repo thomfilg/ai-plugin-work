@@ -59,7 +59,13 @@ describe('config validation', () => {
   it('requires plugin, locations and a non-empty migrations array', () => {
     assert.throws(() => createStoreMigrator({ ...valid, plugin: '' }), /"plugin"/);
     assert.throws(() => createStoreMigrator({ ...valid, locations: 'x' }), /"locations"/);
-    assert.throws(() => createStoreMigrator({ ...valid, migrations: [] }), /"migrations"/);
+    assert.throws(
+      () => createStoreMigrator({ ...valid, migrations: [] }),
+      /no migrations declared/
+    );
+    const { migrations: _drop, ...noList } = valid;
+    assert.throws(() => createStoreMigrator(noList), /"migrationsDir" or "migrations" required/);
+    assert.throws(() => createStoreMigrator({ ...valid, migrationsDir: '/tmp/x' }), /not both/);
   });
 
   it('rejects bad migration entries', () => {

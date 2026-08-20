@@ -13,7 +13,7 @@ a migration note. This factory is that mechanism; `relocate.js` ships the
 Each store directory carries `.version.json`:
 
 ```json
-{ "plugin": "synapsys", "version": 1, "updatedAt": "2026-08-20T21:20:52.666Z" }
+{ "plugin": "synapsys", "version": 20260820213000, "updatedAt": "2026-08-20T21:20:52.666Z" }
 ```
 
 `version` is the highest migration applied to **that directory**. Stores are
@@ -39,7 +39,7 @@ user never installed.
 
 | Property | How |
 |---|---|
-| **Ordered** | Ascending `version`, each applied exactly once. Versions are unique positive integers; gaps allowed. |
+| **Ordered** | Ascending `version`, each applied exactly once. Versions are the unique `YYYYMMDDHHMMSS` timestamps parsed from the filenames. |
 | **Resumable** | The stamp is written after *each* migration succeeds, so an interrupted run resumes at the first unapplied one instead of replaying the chain. |
 | **Fail-open** | `run` never throws and never writes to stderr. A throwing migration stops that location's chain only, leaves the stamp at the last success, and lands in `result.errors`. Every other location still runs. |
 | **Concurrent-safe** | Each location is guarded by an atomic `mkdir` lock placed *beside* the store — a lock inside it would vanish mid-migration when the directory is renamed. A live lock means another process owns the location: skip and report. A lock older than `lockTimeoutMs` (default 30s) is treated as abandoned and stolen. |
@@ -50,7 +50,8 @@ user never installed.
 | Key | Type | Effect |
 |---|---|---|
 | `plugin` | string (required) | Stamped into every version file. |
-| `migrations` | array (required) | `{ version, description?, migrate(ctx) }`. Sorted by the factory; order of declaration is irrelevant. |
+| `migrationsDir` | string | Directory of one-file-per-migration modules (see below). Mutually exclusive with `migrations`; one of the two is required. |
+| `migrations` | array | `{ version, description?, migrate(ctx) }`, for tests or a caller that builds its list another way. Sorted by the factory. |
 | `locations` | `(cwd) => location[]` (required) | The roots to consider. Each is `{ dir, legacyDir?, kind? }`. **Must be mutually disjoint** — handing the migrator a location nested inside another invites moving a parent out from under a queued child. |
 | `versionFile` | string (default `.version.json`) | Stamp filename. |
 | `lockTimeoutMs` | number (default `30000`) | Age at which a lock is considered abandoned. |
@@ -61,7 +62,7 @@ user never installed.
 Returned frozen API:
 
 ```
-{ LATEST_VERSION, VERSION_FILE, readVersion, currentVersion,
+{ LATEST_VERSION, VERSION_FILE, MIGRATIONS, readVersion, currentVersion,
   pending, stamp, stampLatest, run }
 ```
 
@@ -82,17 +83,49 @@ That last row is the "user reinstalled before upgrading" case: a fresh empty
 store at the new path while the real data sits at the old one. Deleting the
 user's only other copy on a guess is not a migration, it is data loss.
 
+## One migration per file
+
+Migrations live in a folder, one file each, named
+`<YYYYMMDDHHMMSS>_<kebab-slug>.js`:
+
+```
+lib/migrations/
+  20260820213000_relocate-store-root.js
+  20261102090000_rewrite-frontmatter-dates.js
+```
+
+```js
+// 20260820213000_relocate-store-root.js
+module.exports = {
+  description: 'move the store out of the agent CLI config dir into .workflow/',
+  migrate: relocateStore(),
+};
+```
+
+**The filename is the version.** The module exports no `version` field —
+that would be the same value written twice, free to drift. Timestamps rather
+than `0001`, `0002`, … so two branches authoring migrations on the same day
+get distinct, correctly-ordered versions instead of both claiming the next
+integer. 14 digits is ~2.0e13, comfortably inside the safe-integer range.
+
+Adding a migration means adding a **file**; no shared list is edited, so two
+branches never collide on the same lines. Never rename or edit a shipped
+migration — its timestamp is the version already stamped into users' stores.
+
+A `.js` file whose name does not parse **throws**. Silently skipping it is the
+worst available failure: the migration looks committed, never runs, and the
+store is stamped as though it had. Non-`.js` entries are ignored, so a README
+can sit in the folder.
+
 ## Usage
 
 ```js
-const { createStoreMigrator, relocateStore } = require('./storeMigration');
+const { createStoreMigrator } = require('./storeMigration');
 const { migrationCandidates } = require('./memory-store');
 
 const migrator = createStoreMigrator({
   plugin: 'myplugin',
-  migrations: [
-    { version: 1, description: 'move out of the CLI config dir', migrate: relocateStore() },
-  ],
+  migrationsDir: path.join(__dirname, 'migrations'),
   locations: (cwd) => migrationCandidates(cwd),
 });
 
@@ -100,10 +133,8 @@ const migrator = createStoreMigrator({
 migrator.run({ cwd });
 ```
 
-Append to the list, never renumber or edit a shipped entry — the declaration
-list *is* the migration history. Have the plugin's installer call
-`stampLatest(dir)` when it creates a store, so a fresh one starts at
-`LATEST_VERSION` instead of replaying the chain.
+Have the plugin's installer call `stampLatest(dir)` when it creates a store,
+so a fresh one starts at `LATEST_VERSION` instead of replaying the chain.
 
 `storeDiscovery.migrationCandidates(cwd)` supplies the four disjoint roots for
 the `.claude` → `.workflow` relocation, each already paired with its
