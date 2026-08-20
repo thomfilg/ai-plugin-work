@@ -29,6 +29,7 @@ const {
   ROOT_DIR,
   getProjectName,
   candidateStores,
+  migrationCandidates,
   discoverStores,
   safeExec,
 } = discovery;
@@ -245,6 +246,7 @@ module.exports = {
   ROOT_DIR,
   getProjectName,
   candidateStores,
+  migrationCandidates,
   discoverStores,
   parseFrontmatter,
   listMemories,
