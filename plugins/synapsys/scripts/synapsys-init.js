@@ -17,6 +17,7 @@ const path = require('node:path');
 const { MARKER, FOLDER, getProjectName, candidateStores } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
+const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'migrations'));
 
 function parseArgs(argv) {
   const out = { kind: 'local', cwd: process.cwd() };
@@ -48,6 +49,11 @@ const marker = {
   schemaVersion: 1,
 };
 fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+
+// A store created NOW is already at the latest layout. Stamping it here keeps
+// the SessionStart runner from treating a fresh store as un-versioned and
+// replaying the whole migration chain against it on first use.
+stampLatest(target.dir);
 
 const indexPath = path.join(target.dir, 'INDEX.md');
 if (!fs.existsSync(indexPath)) {

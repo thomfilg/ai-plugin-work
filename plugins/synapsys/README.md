@@ -36,6 +36,24 @@ Memories are markdown files with frontmatter that declares **which events** they
 
 A store is "active" once it contains a `.synapsys.json` marker (written by `synapsys-init.js`). The dispatcher reads from every active store on every event, so multiple tiers coexist.
 
+### Store version + migrations
+
+Alongside the marker, each store carries `.version.json` — the layout version
+applied to that directory. On SessionStart, **before anything reads the
+stores**, the dispatcher runs any pending migrations declared in
+[`lib/migrations.js`](lib/migrations.js) and re-stamps each store.
+
+| Version | Change |
+|---|---|
+| 1 | Store moved out of the agent CLI config dir: `.claude/synapsys` → `.workflow/synapsys` (and `-shared`) |
+
+So an install predating a relocation finds its memories where it left them: the
+first session after the upgrade moves them, and every session after that is a
+no-op. The runner never creates a store that does not exist, fails open (a
+migration it cannot complete leaves the store untouched and the session
+continues), and merges rather than clobbers if a store already exists at the
+new path. See [`factories/storeMigration`](../../factories/storeMigration/).
+
 ## Quick start
 
 ```bash

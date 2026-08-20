@@ -163,6 +163,56 @@ describe('candidateStores', () => {
   });
 });
 
+describe('migrationCandidates', () => {
+  it('pairs each root with its pre-ROOT_DIR location', () => {
+    const cwd = path.join(os.tmpdir(), 'sd-mig', 'repo');
+    const rows = makeApi().migrationCandidates(cwd);
+    assert.deepEqual(
+      rows.map((r) => r.kind),
+      ['local', 'worktree', 'home', 'shared']
+    );
+    for (const row of rows) {
+      assert.ok(
+        row.dir.includes(`${path.sep}.workflow${path.sep}`),
+        `${row.kind} dir under ROOT_DIR`
+      );
+      assert.ok(
+        row.legacyDir.includes(`${path.sep}.claude${path.sep}`),
+        `${row.kind} legacyDir under LEGACY_ROOT_DIR`
+      );
+      // Same geometry, only the root differs — that is the whole contract.
+      assert.equal(row.legacyDir.replace('.claude', '.workflow'), row.dir);
+    }
+  });
+
+  it('returns the per-user namespace, NOT the per-project global tier', () => {
+    // global is `~/<root>/<folder>/<project>` — inside the home row. Emitting
+    // both would hand the migrator nested locations.
+    const rows = makeApi().migrationCandidates(path.join(os.tmpdir(), 'sd-mig', 'repo'));
+    const home = rows.find((r) => r.kind === 'home');
+    assert.equal(home.dir, path.join(os.homedir(), '.workflow', FOLDER));
+  });
+
+  it('emits mutually disjoint roots — none contains another', () => {
+    const rows = makeApi().migrationCandidates(path.join(os.tmpdir(), 'sd-mig', 'repo'));
+    for (const a of rows) {
+      for (const b of rows) {
+        if (a === b) continue;
+        assert.ok(
+          !path.resolve(b.dir).startsWith(`${path.resolve(a.dir)}${path.sep}`),
+          `${b.kind} (${b.dir}) must not sit inside ${a.kind} (${a.dir})`
+        );
+      }
+    }
+  });
+
+  it('exposes LEGACY_ROOT_DIR alongside ROOT_DIR', () => {
+    const api = makeApi();
+    assert.equal(api.ROOT_DIR, '.workflow');
+    assert.equal(api.LEGACY_ROOT_DIR, '.claude');
+  });
+});
+
 describe('getProjectName / getRepoRoot (real git repo + linked worktree)', () => {
   let base;
   let repo;

@@ -65,6 +65,11 @@ const PROJECT_NAME_STRATEGIES = new Set(['git-common-dir', 'toplevel']);
 // agent CLI's own `.claude` config dir would sit (repo root / $HOME). Plugins
 // never write inside `.claude`.
 const ROOT_DIR = '.workflow';
+// Where the tiers lived before ROOT_DIR existed. Read-only history: discovery
+// never looks here, but store migrations need the old geometry to find data
+// left behind by an older install, so it is derived from the SAME tier switch
+// rather than re-hardcoded per plugin.
+const LEGACY_ROOT_DIR = '.claude';
 
 // ── config validation ────────────────────────────────────────────────────────
 
@@ -158,25 +163,59 @@ function projectNameOf(spec, cwd) {
 
 // ── tier geometry ────────────────────────────────────────────────────────────
 
-// Canonical directory for one tier. os.homedir() is deliberately read here,
-// at call time, so a reassigned $HOME is honored per call.
-function tierDirOf(spec, kind, cwd, projectName) {
+// Canonical directory for one tier under `root`. os.homedir() is deliberately
+// read here, at call time, so a reassigned $HOME is honored per call. `root`
+// is ROOT_DIR for live discovery and LEGACY_ROOT_DIR when a migration is
+// looking for data an older install left behind — the geometry is identical
+// either way, which is the whole point of taking it as a parameter.
+function tierDirUnder(spec, root, kind, cwd, projectName) {
   switch (kind) {
     case 'local':
-      return path.join(cwd, ROOT_DIR, spec.folder);
+      return path.join(cwd, root, spec.folder);
     case 'worktree':
-      return path.resolve(cwd, '..', ROOT_DIR, spec.folder);
+      return path.resolve(cwd, '..', root, spec.folder);
     case 'global':
-      return path.join(os.homedir(), ROOT_DIR, spec.folder, projectName);
+      return path.join(os.homedir(), root, spec.folder, projectName);
     case 'shared':
-      return path.join(os.homedir(), ROOT_DIR, spec.sharedFolder);
+      return path.join(os.homedir(), root, spec.sharedFolder);
     default:
       return '';
   }
 }
 
+function tierDirOf(spec, kind, cwd, projectName) {
+  return tierDirUnder(spec, ROOT_DIR, kind, cwd, projectName);
+}
+
 function candidateRows(spec, cwd, projectName) {
   return PRECEDENCE_ORDER.map((kind) => ({ kind, dir: tierDirOf(spec, kind, cwd, projectName) }));
+}
+
+// Roots a migration must carry forward, each paired with its pre-ROOT_DIR
+// location: `{ kind, dir, legacyDir }`. Deliberately NOT the four discovery
+// tiers — `global` is `~/<root>/<folder>/<project>`, which lives INSIDE
+// `~/<root>/<folder>`, and handing a migrator two locations where one
+// contains the other invites moving a parent out from under a queued child.
+// The `home` row covers the whole per-user namespace instead: every project's
+// global store plus any loose state the plugin keeps beside them. The four
+// rows returned here are mutually disjoint.
+function migrationRows(spec, cwd) {
+  const home = os.homedir();
+  const pair = (kind, tail) => ({
+    kind,
+    dir: path.join(...tail(ROOT_DIR)),
+    legacyDir: path.join(...tail(LEGACY_ROOT_DIR)),
+  });
+  return [
+    pair('local', (root) => [cwd, root, spec.folder]),
+    {
+      kind: 'worktree',
+      dir: path.resolve(cwd, '..', ROOT_DIR, spec.folder),
+      legacyDir: path.resolve(cwd, '..', LEGACY_ROOT_DIR, spec.folder),
+    },
+    pair('home', (root) => [home, root, spec.folder]),
+    pair('shared', (root) => [home, root, spec.sharedFolder]),
+  ];
 }
 
 // ── ancestor walk ────────────────────────────────────────────────────────────
@@ -248,11 +287,14 @@ function createStoreDiscovery(config) {
     // Marketplace root every tier lives under, for callers that build a store
     // path themselves instead of going through a tier.
     ROOT_DIR,
+    // Pre-ROOT_DIR root, exposed for store migrations only.
+    LEGACY_ROOT_DIR,
     PRECEDENCE_ORDER,
     safeExec,
     getRepoRoot,
     getProjectName: (cwd) => projectNameOf(spec, cwd),
     candidateStores: (cwd, projectName) => candidateRows(spec, cwd, projectName),
+    migrationCandidates: (cwd) => migrationRows(spec, cwd || process.cwd()),
     findAncestorStore: (startDir) => ancestorStore(spec, startDir),
     discoverStores: (cwd) => discover(spec, cwd),
   });

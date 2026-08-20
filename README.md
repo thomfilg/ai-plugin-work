@@ -35,20 +35,39 @@ statusLine slot), `<worktree>/.claude/settings.local.json` (permissions),
 `~/.claude/ticket-providers.json` (user config), `~/.claude/workflows/`
 (user-authored workflows), and `~/.claude/plugins/` (the CLI's plugin cache).
 
-**Upgrading from a pre-`.workflow` install:** move each store across, then
-re-run the statusline installer so `~/.claude/settings.json` points at the new
-host path.
+### Store migrations
+
+Stores carry a `.version.json` stamp recording the layout version applied to
+them. On SessionStart each plugin brings its own stores up to the current
+version and re-stamps them, so an upgrade that moves or reshapes a store
+carries existing data forward on the next session — no manual step.
+
+| | |
+|---|---|
+| Mechanism | [`factories/storeMigration`](factories/storeMigration/) |
+| Declared by | `plugins/<plugin>/lib/migrations.js` (the list *is* the history — append, never renumber) |
+| Adopted by | synapsys |
+
+Migrations are per store directory, applied in order, stamped after each
+success, guarded by a lock beside the store, and fail-open: a migration that
+cannot complete leaves the store exactly as it was and the session continues.
+A relocation whose destination already exists **merges without clobbering** and
+keeps the source, rather than guessing which copy to discard.
+
+**Upgrading a plugin that has not adopted migrations yet** (maestro, heimdall,
+work-workflow) still needs the manual move, plus a statusline reinstall so
+`~/.claude/settings.json` points at the relocated host:
 
 ```bash
 mkdir -p ~/.workflow
-for d in work-workflow synapsys maestro heimdall \
-         synapsys-shared maestro-shared heimdall-shared \
+for d in work-workflow maestro heimdall \
+         maestro-shared heimdall-shared \
          .cache .agent-runtime statuslines; do
   [ -e ~/.claude/"$d" ] && mv ~/.claude/"$d" ~/.workflow/"$d"
 done
 [ -e ~/.claude/statusline-host.sh ] && rm -f ~/.claude/statusline-host.sh
 # per repo, for any project-local store:
-#   mkdir -p .workflow && mv .claude/synapsys .claude/heimdall .claude/maestro .workflow/ 2>/dev/null
+#   mkdir -p .workflow && mv .claude/heimdall .claude/maestro .workflow/ 2>/dev/null
 #   mv .claude/heimdall-conceal.json .workflow/ 2>/dev/null
 ```
 

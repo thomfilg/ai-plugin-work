@@ -61,6 +61,7 @@ const VENDORED_DIRS = [
   'plugins/synapsys/lib/runtime',
   'plugins/synapsys/lib/safeSubprocess',
   'plugins/synapsys/lib/storeDiscovery',
+  'plugins/synapsys/lib/storeMigration',
   'plugins/work/scripts/workflows/lib/hookEntrypoint',
   'plugins/work/scripts/workflows/lib/runtime',
   'plugins/work/scripts/workflows/lib/safeIO',
