@@ -22,7 +22,7 @@ sits — as its sibling — at the repo root and at `$HOME`:
 | `<repo>/.workflow/<plugin>/` | project-local store (synapsys memories, heimdall locks, maestro schemas) |
 | `~/.workflow/<plugin>/<project>/` | per-project global store |
 | `~/.workflow/<plugin>-shared/` | cross-project shared store |
-| `~/.workflow/work-workflow/` | work-workflow reminders, logs, inbox cursors |
+| `~/.workflow/work-workflow/` | work-workflow reminders, logs, inbox cursors, follow-up run state |
 | `~/.workflow/synapsys/` | synapsys telemetry, session ledgers, sticky state, `config.yaml`, `DOMAINS.md` |
 | `<repo>/.workflow/heimdall-conceal.{json,log}` | heimdall conceal policy + block log |
 | `~/.workflow/.cache/`, `~/.workflow/.agent-runtime/` | shared caches (env detection, update banner, runtime stamp) |
