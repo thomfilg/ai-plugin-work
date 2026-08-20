@@ -59,7 +59,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { loadMigrations } = require('./load');
-const { acquireLock, releaseLock } = require('./lock');
+const { createFileLock } = require('./lock');
 
 const DEFAULT_VERSION_FILE = '.version.json';
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
@@ -255,12 +255,30 @@ function migrateLocation(spec, location, version, now) {
   return { applied, error: null };
 }
 
+// Beside the store, never inside it: a migration may rename the store
+// directory itself, which would carry an inside-lock away mid-run.
+function migrationLockPath(dir) {
+  return path.join(path.dirname(dir), `.${path.basename(dir)}.migrating`);
+}
+
+function lockerFor(spec, now) {
+  return createFileLock({
+    lockPathFor: migrationLockPath,
+    // Age-based only: a migration has no long-lived holder process to probe,
+    // so a lock older than the timeout is assumed abandoned by a crash.
+    staleAfterMs: spec.lockTimeoutMs,
+    now,
+  });
+}
+
 function runOne(spec, location, now, result) {
   const version = currentVersion(spec, location);
   if (version === null || version >= spec.latest) return;
 
-  const lock = acquireLock(spec, location.dir, now);
-  if (!lock) {
+  const locker = lockerFor(spec, now);
+  // A live lock means another process owns this location: skip and report it
+  // rather than wait — the other process is doing the same work.
+  if (!locker.acquire(location.dir, { payload: { pid: process.pid } }).ok) {
     result.locked.push(location.dir);
     return;
   }
@@ -273,7 +291,7 @@ function runOne(spec, location, now, result) {
     if (applied.length > 0) result.migrated.push({ dir: location.dir, from: fresh, applied });
     if (error) result.errors.push({ dir: location.dir, error });
   } finally {
-    releaseLock(lock);
+    locker.release(location.dir);
   }
 }
 

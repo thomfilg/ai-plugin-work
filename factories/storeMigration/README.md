@@ -43,7 +43,7 @@ user never installed.
 | **Ordered** | Ascending `version`, each applied exactly once. Versions are the unique `YYYYMMDDHHMMSS` timestamps parsed from the filenames. |
 | **Resumable** | The stamp is written after *each* migration succeeds, so an interrupted run resumes at the first unapplied one instead of replaying the chain. |
 | **Fail-open** | `run` never throws and never writes to stderr. A throwing migration stops that location's chain only, leaves the stamp at the last success, and lands in `result.errors`. Every other location still runs. |
-| **Concurrent-safe** | Each location is guarded by an atomic `mkdir` lock placed *beside* the store — a lock inside it would vanish mid-migration when the directory is renamed. A live lock means another process owns the location: skip and report. A lock older than `lockTimeoutMs` (default 30s) is treated as abandoned and stolen. |
+| **Concurrent-safe** | Each location is guarded by an atomic exclusive-create lock placed *beside* the store — a lock inside it would vanish mid-migration when the directory is renamed. A live lock means another process owns the location: skip and report. A lock older than `lockTimeoutMs` (default 30s) is treated as abandoned and stolen. See [the shared lock](#lock--shared-with-the-conductor-and-task-claims). |
 | **Idempotent** | A store already at `LATEST_VERSION` is skipped before the lock is even taken. |
 
 ## Config
@@ -157,6 +157,34 @@ so a fresh one starts at `LATEST_VERSION` instead of replaying the chain.
 `storeDiscovery.migrationCandidates(cwd)` supplies the four disjoint roots for
 the `.claude` → `.workflow` relocation, each already paired with its
 `legacyDir`.
+
+## lock — shared with the conductor and task claims
+
+`lock.js` is not migration-specific. Three subsystems needed the same
+primitive and had grown three implementations of it:
+
+| Caller | Guards | Holder stops counting when |
+|---|---|---|
+| the migration runner | a store, while its chain runs | its mtime exceeds `lockTimeoutMs` |
+| `maestro` conductor-lock | one daemon per namespace | its pid is no longer a live other process |
+| `work-workflow` work-claims | one owner per task | never — a claim is held until released |
+
+All three are *create exclusively → inspect the holder → reclaim or refuse →
+release*. Only three things genuinely differed, so those are the config:
+`lockPathFor` (where the file sits), `staleAfterMs` / `isHolderDead` (when a
+holder stops counting), and `force` at acquire time (may a caller displace a
+live holder). Everything else — O_EXCL atomicity, bounded retry on a lost
+reclaim race, JSON payload, refuse-if-unreadable, ownership-checked release —
+lives here once.
+
+What deliberately did **not** move: ownership *policy*. Same-owner idempotent
+reclaim, the conductor's `{ok, held, forced}` shape, and work-claims'
+structured `ALREADY_CLAIMED` / `WRONG_OWNER` errors all stay with their
+callers. The shared code owns atomicity; each caller owns who may hold what.
+
+Callers reach it intra-plugin (`…/lib/storeMigration/lock`) — cross-*plugin*
+requires break on codex, but requires inside one plugin's install snapshot are
+fine, so this adds no vendored files.
 
 ## Why this shape
 
