@@ -92,7 +92,7 @@ inside a codex exec tool shell — so Claude env signals must rank LAST):
 4. **Codex model-shell signature**: `CODEX_THREAD_ID` set ⇒ `codex` (probe-verified present in
    the env of codex tool-exec shells; never set by Claude). This is what saves driver CLIs
    (`work-next.js` et al.) from misclassification when codex is launched from a Claude terminal.
-5. **Session stamp**: SessionStart hooks write `~/.claude/.agent-runtime/<sha1(cwd)>.json` =
+5. **Session stamp**: SessionStart hooks write `~/.workflow/.agent-runtime/<sha1(cwd)>.json` =
    `{runtime, sessionId, ts}` (TTL 12h); driver CLIs read it.
 6. **Claude env signals**: `CLAUDECODE=1` or `CLAUDE_CODE_SESSION_ID` ⇒ `claude`.
 7. Default `claude` — the load-bearing compatibility guarantee.
@@ -371,10 +371,12 @@ persisted in the session manifest ⇒ **mixed fleets** supported:
    `~/.codex/auth.json`. `heimdall-conceal-status.js` learns the config.toml MCP wiring shape;
    `setup-secrets-heimdall.sh` gains a documented `codex mcp`/config.toml lane.
 
-## J. State/storage: keep shared `~/.claude` stores
+## J. State/storage: keep one shared `~/.workflow` store root
 
-**Decision: KEEP one shared state home** (`~/.claude/{work-workflow,synapsys,heimdall,maestro}`
-+ project `.claude/` stores) for both runtimes (unanimous across all three designs). Rationale:
+**Decision: KEEP one shared state home** (`~/.workflow/{work-workflow,synapsys,heimdall,maestro}`
++ project `.workflow/` stores) for both runtimes (unanimous across all three designs). The root
+is `.workflow`, a SIBLING of the agent CLI's own `.claude` config dir — plugin state is never
+written inside it. Rationale:
 (a) *security* — splitting stores would let a codex session bypass heimdall locks configured
 under Claude on the same repo; (b) *continuity* — a ticket started under Claude resumes under
 codex from the same `.work-state`; mixed fleets touch the same worktrees; (c) session-scoped

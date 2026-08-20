@@ -4,7 +4,7 @@
  * Usage: node heimdall-conceal.js <path-to-file-or-folder> [repo-dir]
  *
  * Layer 2 only (no sudo). Adds anchored deny patterns to
- * <repo>/.claude/heimdall-conceal.json so the guard denies agent
+ * <repo>/.workflow/heimdall-conceal.json so the guard denies agent
  * Read/Grep/Glob/Edit/Write/MultiEdit on the path (and Bash commands that
  * reference it). Works for a single file or a whole folder (folder → every
  * path under it). Creates a guard-only config if none exists. Idempotent.
@@ -141,7 +141,7 @@ function findExistingConfig(startDir) {
   const home = os.homedir();
   let dir = path.resolve(startDir);
   for (;;) {
-    const f = path.join(dir, '.claude', 'heimdall-conceal.json');
+    const f = path.join(dir, '.workflow', 'heimdall-conceal.json');
     if (fs.existsSync(f)) return f;
     if (dir === home) return null; // bounded at $HOME, matching the hook
     const parent = path.dirname(dir);
@@ -160,7 +160,7 @@ function main() {
 
   // Reuse an ancestor config if one exists so we never create a nested config
   // that shadows it; otherwise create one at the repo root.
-  const cfgPath = findExistingConfig(repo) || path.join(repo, '.claude', 'heimdall-conceal.json');
+  const cfgPath = findExistingConfig(repo) || path.join(repo, '.workflow', 'heimdall-conceal.json');
   const { cfg, created } = loadOrCreateConfig(cfgPath);
   seedExistingCoverage(cfg);
 

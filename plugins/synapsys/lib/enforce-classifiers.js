@@ -118,7 +118,7 @@ function symbolShape(_memory, payload) {
 
 function stateDir() {
   if (process.env.SYNAPSYS_SESSION_DIR) return process.env.SYNAPSYS_SESSION_DIR;
-  return path.join(os.homedir(), '.claude', 'synapsys', '.session');
+  return path.join(os.homedir(), '.workflow', 'synapsys', '.session');
 }
 
 function safeStateId(sessionId) {

@@ -38,7 +38,7 @@ function withHome(home, fn) {
 }
 
 function sessionDir(home) {
-  return path.join(home, '.claude', 'synapsys', '.session');
+  return path.join(home, '.workflow', 'synapsys', '.session');
 }
 
 test('loadLedger/saveLedger round-trip in isolated HOME', () => {

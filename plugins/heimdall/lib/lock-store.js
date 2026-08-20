@@ -3,7 +3,7 @@
 /**
  * Heimdall lock-store discovery + config IO.
  *
- * A store lives at `.claude/heimdall/` and is identified by a `.heimdall.json`
+ * A store lives at `.workflow/heimdall/` and is identified by a `.heimdall.json`
  * marker. Unlike synapsys (one markdown file per memory), heimdall keeps
  * everything in the marker itself — the marker IS the config and holds the
  * `locks` array.
@@ -31,7 +31,7 @@ const discovery = createStoreDiscovery({
   // Heimdall's historical project naming: basename(git toplevel || cwd).
   projectNameStrategy: 'toplevel',
   // A `--kind=worktree` install from a repo directly under home writes its
-  // marker to `~/.claude/heimdall`; that legitimate marker stays discoverable,
+  // marker to `~/.workflow/heimdall`; that legitimate marker stays discoverable,
   // but the ancestor walk never continues PAST home, so sandboxed e2e tests
   // (whose tmp HOME is set via $HOME) cannot leak the real user's marker into
   // the test session.
@@ -99,6 +99,7 @@ module.exports = {
   MARKER,
   FOLDER: discovery.FOLDER,
   SHARED_FOLDER: discovery.SHARED_FOLDER,
+  ROOT_DIR: discovery.ROOT_DIR,
   SCHEMA_VERSION,
   PRECEDENCE_ORDER: discovery.PRECEDENCE_ORDER,
   safeExec: discovery.safeExec,

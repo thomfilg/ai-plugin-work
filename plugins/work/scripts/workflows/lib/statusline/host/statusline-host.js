@@ -10,8 +10,8 @@
  * order decided who showed, and re-installing was needed every session.
  *
  * Instead, ONE host script owns the slot permanently at a FIXED, checkout-
- * independent path (~/.claude/statusline-host.sh). It renders every fragment in
- * ~/.claude/statuslines/<NN>-<name>.cmd (first line = absolute renderer path,
+ * independent path (~/.workflow/statusline-host.sh). It renders every fragment in
+ * ~/.workflow/statuslines/<NN>-<name>.cmd (first line = absolute renderer path,
  * NN prefix = stacking order). Plugins add/remove ONLY their own fragment:
  *   - installing/removing one bar never disturbs the others
  *   - the registered slot never changes → new tabs/sessions just work (no reinstall)
@@ -28,12 +28,14 @@ const path = require('path');
 const os = require('os');
 
 const HOME = os.homedir();
-const HOST_PATH = path.join(HOME, '.claude', 'statusline-host.sh');
-const REGISTRY_DIR = path.join(HOME, '.claude', 'statuslines');
+const HOST_PATH = path.join(HOME, '.workflow', 'statusline-host.sh');
+const REGISTRY_DIR = path.join(HOME, '.workflow', 'statuslines');
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
 
 // Bump when HOST_SCRIPT changes so installers re-write the host in place.
-const HOST_VERSION = 1;
+// v2: host + fragment registry moved out of the agent CLI's `.claude` config
+// dir into the marketplace's own `~/.workflow` root.
+const HOST_VERSION = 2;
 
 const HOST_SCRIPT = `#!/usr/bin/env bash
 # statusline-host.sh — HOST_VERSION=${HOST_VERSION}
@@ -42,7 +44,7 @@ const HOST_SCRIPT = `#!/usr/bin/env bash
 # edit by hand; installers overwrite this file when HOST_VERSION changes.
 set -uo pipefail
 
-REG="\${CLAUDE_STATUSLINE_REGISTRY:-\$HOME/.claude/statuslines}"
+REG="\${CLAUDE_STATUSLINE_REGISTRY:-\$HOME/.workflow/statuslines}"
 
 # Claude passes session JSON on stdin; forward the SAME bytes to every renderer.
 STDIN_JSON="\$(cat 2>/dev/null || true)"

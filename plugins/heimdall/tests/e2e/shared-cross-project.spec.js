@@ -48,7 +48,7 @@ before(() => {
   process.env.HOME = fakeHome;
 
   // Place project worktrees UNDER fakeHome so findAncestorStore (which walks
-  // every ancestor of cwd looking for `<x>/.claude/heimdall/.heimdall.json`)
+  // every ancestor of cwd looking for `<x>/.workflow/heimdall/.heimdall.json`)
   // can't escape the sandbox and pick up the real user's worktree marker.
   const projectsRoot = path.join(fakeHome, 'projects');
   fs.mkdirSync(projectsRoot, { recursive: true });

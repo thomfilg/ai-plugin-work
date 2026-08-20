@@ -7,7 +7,7 @@
  *
  * Persistence: the Claude Code dispatcher runs as a fresh Node process per hook
  * event. Module-level Maps alone would never accumulate state, so every public
- * API call round-trips through `~/.claude/synapsys/.telemetry/<sessionId>.pretool-window.json`
+ * API call round-trips through `~/.workflow/synapsys/.telemetry/<sessionId>.pretool-window.json`
  * (override dir via SYNAPSYS_PRETOOL_DIR). Atomic writes via tmp + rename;
  * disabled when SYNAPSYS_TELEMETRY=0. Event-count eviction only (spec
  * §Architecture/Window). Every public function is fail-open: a thrown error
@@ -37,7 +37,7 @@ function persistDisabled() {
 
 function pretoolDir() {
   if (process.env.SYNAPSYS_PRETOOL_DIR) return process.env.SYNAPSYS_PRETOOL_DIR;
-  return path.join(os.homedir(), '.claude', 'synapsys', '.telemetry');
+  return path.join(os.homedir(), '.workflow', 'synapsys', '.telemetry');
 }
 
 // Use the shared SAFE_ID regex / hashId so pretool-window buckets state into

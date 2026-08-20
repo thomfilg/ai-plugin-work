@@ -190,7 +190,7 @@ function fireMarkerFile(home, sessionId, key) {
   const safe = String(key)
     .replace(/[^A-Za-z0-9_-]+/g, '_')
     .slice(0, 80);
-  return path.join(home, '.claude', 'synapsys', '.cache', `cq-${sessionId}-${safe}.fired`);
+  return path.join(home, '.workflow', 'synapsys', '.cache', `cq-${sessionId}-${safe}.fired`);
 }
 
 /**

@@ -21,10 +21,10 @@
  *   /maestro:orchestrate queue=… schema=opera1
  *
  * Tiers (discovered in this order):
- *   local    → <cwd>/.claude/maestro/
- *   worktree → nearest ancestor <…>/.claude/maestro/ (walks up the tree)
- *   global   → ~/.claude/maestro/<project>/
- *   shared   → ~/.claude/maestro-shared/   (cross-project; reused everywhere)
+ *   local    → <cwd>/.workflow/maestro/
+ *   worktree → nearest ancestor <…>/.workflow/maestro/ (walks up the tree)
+ *   global   → ~/.workflow/maestro/<project>/
+ *   shared   → ~/.workflow/maestro-shared/   (cross-project; reused everywhere)
  */
 
 const fs = require('node:fs');
@@ -182,6 +182,7 @@ module.exports = {
   MARKER: discovery.MARKER,
   FOLDER: discovery.FOLDER,
   SHARED_FOLDER: discovery.SHARED_FOLDER,
+  ROOT_DIR: discovery.ROOT_DIR,
   safeExec: discovery.safeExec,
   getProjectName: discovery.getProjectName,
   candidateStores: discovery.candidateStores,

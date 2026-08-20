@@ -10,12 +10,12 @@ const { loadConfig, isKillSwitchOn } = require('../lib/cortex-config.js');
 
 /**
  * Build a temporary fake $HOME containing (optionally) a
- * ~/.claude/synapsys/config.yaml file, returning the home dir path.
+ * ~/.workflow/synapsys/config.yaml file, returning the home dir path.
  */
 function makeHome(yaml) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-config-'));
   if (yaml !== undefined) {
-    const dir = path.join(home, '.claude', 'synapsys');
+    const dir = path.join(home, '.workflow', 'synapsys');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'config.yaml'), yaml, 'utf8');
   }

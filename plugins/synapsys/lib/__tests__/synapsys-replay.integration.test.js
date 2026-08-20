@@ -33,7 +33,7 @@ const REPLAY = path.resolve(__dirname, '..', '..', 'scripts', 'synapsys-replay.j
  */
 function mkFixture() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-replay-task3-'));
-  const storeDir = path.join(tmp, 'store', '.claude', 'synapsys');
+  const storeDir = path.join(tmp, 'store', '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{}');
   fs.writeFileSync(

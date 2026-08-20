@@ -23,6 +23,7 @@ const { makeFlag } = require(path.join(__dirname, 'cli-args'));
 const {
   MARKER,
   FOLDER,
+  ROOT_DIR,
   candidateStores,
   discoverStores,
   listMemories,
@@ -46,6 +47,7 @@ module.exports = {
   setupCli,
   MARKER,
   FOLDER,
+  ROOT_DIR,
   candidateStores,
   discoverStores,
   listMemories,

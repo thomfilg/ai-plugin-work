@@ -27,7 +27,7 @@ const NEXT_SCRIPT = path.join(SYNAPSYS_ROOT, 'scripts', 'synapsys-replay-next.js
 const AGENT_FILE = path.join(SYNAPSYS_ROOT, 'agents', 'synapsys-replay-judge.md');
 
 function mkStore(tmp, memories) {
-  const storeDir = path.join(tmp, 'store', '.claude', 'synapsys');
+  const storeDir = path.join(tmp, 'store', '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{}');
   for (const m of memories) {

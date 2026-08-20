@@ -6,21 +6,24 @@
  * storeDiscovery — factory for tiered, marker-gated store discovery.
  *
  * Plugins persist per-project artifacts in a "store": a directory under
- * `.claude/<folder>` gated by a marker file, so only explicitly installed
- * locations are ever read. Stores are discovered across four tiers and
- * returned in a fixed precedence order:
+ * `.workflow/<folder>` gated by a marker file, so only explicitly installed
+ * locations are ever read. `.workflow` is this marketplace's own root and sits
+ * exactly where the agent CLI's `.claude` config dir sits — as its sibling —
+ * so plugin data is never mixed into the CLI's config. Stores are discovered
+ * across four tiers and returned in a fixed precedence order:
  *
- *   local    → <cwd>/.claude/<folder>
+ *   local    → <cwd>/.workflow/<folder>
  *   worktree → nearest ancestor above cwd carrying the marker
- *   global   → ~/.claude/<folder>/<projectName>
- *   shared   → ~/.claude/<folder>-shared   (cross-project)
+ *   global   → ~/.workflow/<folder>/<projectName>
+ *   shared   → ~/.workflow/<folder>-shared   (cross-project)
  *
  * The decision matrix IS the config:
  *
- * - `folder` / `marker` name the store directory and its gate file. The
- *   shared tier always lives at `<folder>-shared`, a SIBLING of the
- *   per-project namespace, so a project whose name happens to match the
- *   shared folder can never shadow it.
+ * - `folder` / `marker` name the store directory and its gate file. `folder`
+ *   is the bare plugin name (`synapsys`); every tier materializes it under
+ *   ROOT_DIR as `.workflow/<folder>`. The shared tier always lives at
+ *   `<folder>-shared`, a SIBLING of the per-project namespace, so a project
+ *   whose name happens to match the shared folder can never shadow it.
  * - `projectNameStrategy` picks how the global tier derives its name.
  *   'git-common-dir' prefers the git common dir so a linked worktree
  *   resolves to the MAIN repo name (the common dir is `<main>/.git` for the
@@ -28,7 +31,7 @@
  *   basename, then basename(cwd). 'toplevel' is basename(toplevel || cwd).
  * - `ancestorWalkStopsAtHome` bounds the worktree ancestor walk. When true,
  *   each directory's marker is checked FIRST and the walk then stops at the
- *   user's home directory: a marker AT `$HOME/.claude/<folder>` stays
+ *   user's home directory: a marker AT `$HOME/.workflow/<folder>` stays
  *   discoverable, but the walk never continues PAST home (a sandboxed $HOME
  *   cannot leak the real user's store). When false the walk continues to
  *   the filesystem root. Either way exhaustion returns ''.
@@ -58,7 +61,10 @@ const PRECEDENCE_ORDER = Object.freeze(['local', 'worktree', 'global', 'shared']
 // Tiers rooted under os.homedir() — the ones the env gate can switch off.
 const HOME_TIERS = new Set(['global', 'shared']);
 const PROJECT_NAME_STRATEGIES = new Set(['git-common-dir', 'toplevel']);
-const CLAUDE_DIR = '.claude';
+// Marketplace-owned root for every persisted store, at the same level the
+// agent CLI's own `.claude` config dir would sit (repo root / $HOME). Plugins
+// never write inside `.claude`.
+const ROOT_DIR = '.workflow';
 
 // ── config validation ────────────────────────────────────────────────────────
 
@@ -157,13 +163,13 @@ function projectNameOf(spec, cwd) {
 function tierDirOf(spec, kind, cwd, projectName) {
   switch (kind) {
     case 'local':
-      return path.join(cwd, CLAUDE_DIR, spec.folder);
+      return path.join(cwd, ROOT_DIR, spec.folder);
     case 'worktree':
-      return path.resolve(cwd, '..', CLAUDE_DIR, spec.folder);
+      return path.resolve(cwd, '..', ROOT_DIR, spec.folder);
     case 'global':
-      return path.join(os.homedir(), CLAUDE_DIR, spec.folder, projectName);
+      return path.join(os.homedir(), ROOT_DIR, spec.folder, projectName);
     case 'shared':
-      return path.join(os.homedir(), CLAUDE_DIR, spec.sharedFolder);
+      return path.join(os.homedir(), ROOT_DIR, spec.sharedFolder);
     default:
       return '';
   }
@@ -175,7 +181,7 @@ function candidateRows(spec, cwd, projectName) {
 
 // ── ancestor walk ────────────────────────────────────────────────────────────
 
-// Nearest ancestor of startDir carrying `<ancestor>/.claude/<folder>/<marker>`.
+// Nearest ancestor of startDir carrying `<ancestor>/.workflow/<folder>/<marker>`.
 // Returns the store dir, or '' on exhaustion (filesystem root — or the home
 // directory when the walk is home-bounded; the marker AT home is still
 // checked before stopping). The walk is why a store at a worktree base still
@@ -184,7 +190,7 @@ function ancestorStore(spec, startDir) {
   const home = spec.stopsAtHome ? os.homedir() : null;
   let dir = startDir;
   for (;;) {
-    const storeDir = path.join(dir, CLAUDE_DIR, spec.folder);
+    const storeDir = path.join(dir, ROOT_DIR, spec.folder);
     if (fs.existsSync(path.join(storeDir, spec.marker))) return storeDir;
     if (dir === home) return '';
     const parent = path.dirname(dir);
@@ -239,6 +245,9 @@ function createStoreDiscovery(config) {
     MARKER: spec.marker,
     FOLDER: spec.folder,
     SHARED_FOLDER: spec.sharedFolder,
+    // Marketplace root every tier lives under, for callers that build a store
+    // path themselves instead of going through a tier.
+    ROOT_DIR,
     PRECEDENCE_ORDER,
     safeExec,
     getRepoRoot,

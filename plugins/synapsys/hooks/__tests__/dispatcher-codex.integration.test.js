@@ -62,7 +62,7 @@ function setupFixture() {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-codex-e2e-'));
   const home = path.join(base, 'home');
   const cwd = path.join(base, 'project');
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(

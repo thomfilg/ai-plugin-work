@@ -39,10 +39,10 @@ function withHomeAndEnv(home, envValue, fn) {
 }
 
 function sessionDir(home) {
-  return path.join(home, '.claude', 'synapsys', '.session');
+  return path.join(home, '.workflow', 'synapsys', '.session');
 }
 
-test('(a) safe env id is returned verbatim and ledger file lives under <HOME>/.claude/synapsys/.session/<id>.json', () => {
+test('(a) safe env id is returned verbatim and ledger file lives under <HOME>/.workflow/synapsys/.session/<id>.json', () => {
   const home = makeTmpHome();
   withHomeAndEnv(home, 'env-session-safe_123', (ledger) => {
     const sid = ledger.resolveSessionId({});

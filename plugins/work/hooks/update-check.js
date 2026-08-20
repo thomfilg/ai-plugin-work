@@ -4,7 +4,7 @@
 /**
  * update-check.js — SessionStart version banner (GH-314). Fail-open.
  *
- * Cache-only on the hook path: reads ~/.claude/.cache/, prints a banner when
+ * Cache-only on the hook path: reads ~/.workflow/.cache/, prints a banner when
  * a newer version is cached, and — at most once per 24h — spawns a detached
  * `--refresh` child to re-query the npm registry (falling back to the
  * marketplace git remote's raw package.json). The hook itself never touches
@@ -45,7 +45,7 @@ async function main() {
   );
   const info = marketplaceInfo();
   if (!info || !info.name || !info.version) return;
-  const cachePath = path.join(os.homedir(), '.claude', '.cache', `update-${info.name}.json`);
+  const cachePath = path.join(os.homedir(), '.workflow', '.cache', `update-${info.name}.json`);
 
   if (process.argv.includes('--refresh')) {
     await updateCheck.refresh({

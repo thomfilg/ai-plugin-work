@@ -4,7 +4,7 @@
 // Manual: node --test plugins/heimdall/lib/__tests__/init-shared.integration.test.js
 //
 // Covers GH-541 Task 3 scenarios (AC4, AC5):
-//   - --kind=shared writes marker at exactly ~/.claude/heimdall-shared/.heimdall.json
+//   - --kind=shared writes marker at exactly ~/.workflow/heimdall-shared/.heimdall.json
 //     (no <projectName> subdir), with marker kind === "shared".
 //   - --kind=bogus exits non-zero; stderr contains local|worktree|global|shared.
 
@@ -16,7 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const initScript = path.resolve(__dirname, '..', '..', 'scripts', 'heimdall-init.js');
-const { FOLDER, MARKER } = require(path.resolve(__dirname, '..', 'lock-store'));
+const { ROOT_DIR, FOLDER, MARKER } = require(path.resolve(__dirname, '..', 'lock-store'));
 
 let originalHome;
 let base;
@@ -44,12 +44,12 @@ function runInit(args, cwd) {
 }
 
 describe('heimdall-init.js --kind=shared', () => {
-  it('writes marker at ~/.claude/heimdall-shared/.heimdall.json with no project subdir', () => {
+  it('writes marker at ~/.workflow/heimdall-shared/.heimdall.json with no project subdir', () => {
     const cwd = fs.mkdtempSync(path.join(base, 'proj-'));
     const res = runInit(['--kind=shared', `--cwd=${cwd}`], cwd);
     assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
 
-    const expectedDir = path.join(fakeHome, '.claude', `${FOLDER}-shared`);
+    const expectedDir = path.join(fakeHome, ROOT_DIR, `${FOLDER}-shared`);
     const expectedMarker = path.join(expectedDir, MARKER);
     assert.ok(
       fs.existsSync(expectedMarker),

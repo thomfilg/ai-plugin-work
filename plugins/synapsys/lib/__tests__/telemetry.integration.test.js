@@ -45,7 +45,7 @@ test('integration: first recordFired creates .telemetry dir + .gitignore on real
       { session_id: 'real-sess' },
       'UserPromptSubmit'
     );
-    const dir = path.join(home, '.claude', 'synapsys', '.telemetry');
+    const dir = path.join(home, '.workflow', 'synapsys', '.telemetry');
     const gi = path.join(dir, '.gitignore');
     const sessFile = path.join(dir, 'real-sess.jsonl');
     assert.ok(fs.existsSync(dir));
@@ -62,7 +62,7 @@ test('integration: recordFired fail-open under EACCES on real read-only dir', ()
   withTempHome((home) => {
     const telemetry = require('../telemetry');
     // Pre-create the dir read-only.
-    const dir = path.join(home, '.claude', 'synapsys', '.telemetry');
+    const dir = path.join(home, '.workflow', 'synapsys', '.telemetry');
     fs.mkdirSync(dir, { recursive: true });
     fs.chmodSync(dir, 0o500); // r-x only
     try {
@@ -92,7 +92,7 @@ test('integration: fired → scanForCitations → recordCited writes both event 
       telemetry.recordCited(hit.memory, { session_id: 'flow' }, hit.match);
     }
 
-    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'flow.jsonl');
+    const file = path.join(home, '.workflow', 'synapsys', '.telemetry', 'flow.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 2);
     assert.equal(rows[0].event, 'fired');

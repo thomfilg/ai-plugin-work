@@ -3,7 +3,7 @@
 /**
  * Domain registry parser for synapsys (GH-513 Task 2).
  *
- * Reads `~/.claude/synapsys/DOMAINS.md` and falls back to a bundled file when
+ * Reads `~/.workflow/synapsys/DOMAINS.md` and falls back to a bundled file when
  * the user file is absent. Returns a `{ roots: Map<string, { leaves: Map<string,
  * { signal_prompt: RegExp[], signal_pretool: RegExp[] }> }> }` shape.
  *
@@ -40,7 +40,7 @@ function emptyRegistry() {
 }
 
 function userRegistryPath(home) {
-  return path.join(home, '.claude', 'synapsys', 'DOMAINS.md');
+  return path.join(home, '.workflow', 'synapsys', 'DOMAINS.md');
 }
 
 /**

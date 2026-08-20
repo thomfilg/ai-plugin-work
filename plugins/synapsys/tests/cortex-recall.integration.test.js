@@ -59,7 +59,7 @@ function cleanup(dir) {
 }
 
 function cacheFilePath(home, sessionId) {
-  return path.join(home, '.claude', 'synapsys', '.cache', `${sessionId}.json`);
+  return path.join(home, '.workflow', 'synapsys', '.cache', `${sessionId}.json`);
 }
 
 function seedCache(home, sessionId, record) {
@@ -105,9 +105,9 @@ function waitForCache(home, sessionId, attempts = 200) {
   return null;
 }
 
-/** Write a ~/.claude/synapsys/config.yaml under the test HOME. */
+/** Write a ~/.workflow/synapsys/config.yaml under the test HOME. */
 function seedConfig(home, yaml) {
-  const dir = path.join(home, '.claude', 'synapsys');
+  const dir = path.join(home, '.workflow', 'synapsys');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.yaml'), yaml, 'utf8');
 }
@@ -126,7 +126,7 @@ function writeStubRecall(home) {
 
 /** Build a local synapsys store under cwd with a single memory file. */
 function seedStore(cwd, fileName, contents) {
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ kind: 'local' }));
   fs.writeFileSync(path.join(storeDir, fileName), contents);
@@ -510,7 +510,7 @@ test('SessionStart with no session_id keys the baseline cache off the shared res
     );
     assert.equal(res.status, 0);
 
-    const cacheDir = path.join(home, '.claude', 'synapsys', '.cache');
+    const cacheDir = path.join(home, '.workflow', 'synapsys', '.cache');
     // Poll for a cache file to appear without sleeping.
     let files = [];
     for (let i = 0; i < 200; i += 1) {

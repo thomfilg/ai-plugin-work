@@ -12,9 +12,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { MARKER, FOLDER, discoverStores, readConfig, writeConfig, upsertLock, removeLock } = require(
-  path.resolve(__dirname, '..', 'lock-store')
-);
+const {
+  MARKER,
+  ROOT_DIR,
+  FOLDER,
+  discoverStores,
+  readConfig,
+  writeConfig,
+  upsertLock,
+  removeLock,
+} = require(path.resolve(__dirname, '..', 'lock-store'));
 
 let base;
 let local;
@@ -32,7 +39,7 @@ after(() => {
 describe('store discovery', () => {
   it('finds a local store once its marker exists', () => {
     assert.equal(discoverStores(local).length, 0, 'no store before init');
-    const storeDir = path.join(local, '.claude', FOLDER);
+    const storeDir = path.join(local, ROOT_DIR, FOLDER);
     writeConfig(storeDir, { kind: 'local', locks: [] });
     assert.ok(fs.existsSync(path.join(storeDir, MARKER)));
     const stores = discoverStores(local);
@@ -41,7 +48,7 @@ describe('store discovery', () => {
   });
 
   it('writeConfig round-trips through readConfig', () => {
-    const storeDir = path.join(base, 'rt', '.claude', FOLDER);
+    const storeDir = path.join(base, 'rt', ROOT_DIR, FOLDER);
     writeConfig(storeDir, { kind: 'local', locks: [{ protect: ['x'], unlockPhrase: 'edit x' }] });
     assert.deepEqual(readConfig(storeDir).locks, [{ protect: ['x'], unlockPhrase: 'edit x' }]);
   });

@@ -31,9 +31,9 @@ function writeMemoryFile(storeDir, name) {
 function makeFixture() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-stats-int-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-stats-int-home-'));
-  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  const storeDir = path.join(cwd, '.workflow', 'synapsys');
   // Telemetry lives under the FIXED home dir (matches lib/telemetry.telemetryDir()).
-  const telDir = path.join(home, '.claude', 'synapsys', '.telemetry');
+  const telDir = path.join(home, '.workflow', 'synapsys', '.telemetry');
   fs.mkdirSync(storeDir, { recursive: true });
   fs.mkdirSync(telDir, { recursive: true });
   fs.writeFileSync(

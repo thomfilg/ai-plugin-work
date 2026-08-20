@@ -14,6 +14,9 @@ const { createStoreDiscovery } = require('../storeDiscovery');
 const HOME_DRIVEN = process.platform !== 'win32';
 
 const FOLDER = 'acme';
+// Marketplace root every store lives under — a SIBLING of the agent CLI's
+// `.claude` config dir, never inside it.
+const ROOT = '.workflow';
 const MARKER = '.acme.json';
 const ENV_VAR = 'ACME_DISABLE_HOME_STORES';
 
@@ -91,6 +94,7 @@ describe('createStoreDiscovery config validation', () => {
     assert.equal(api.MARKER, MARKER);
     assert.equal(api.FOLDER, FOLDER);
     assert.equal(api.SHARED_FOLDER, `${FOLDER}-shared`);
+    assert.equal(api.ROOT_DIR, ROOT);
     assert.deepEqual([...api.PRECEDENCE_ORDER], ['local', 'worktree', 'global', 'shared']);
     assert.ok(Object.isFrozen(api.PRECEDENCE_ORDER));
     for (const fn of [
@@ -130,10 +134,10 @@ describe('candidateStores', () => {
     const cwd = path.join(os.tmpdir(), 'sd-rows', 'repo');
     const rows = makeApi().candidateStores(cwd, 'proj');
     assert.deepEqual(rows, [
-      { kind: 'local', dir: path.join(cwd, '.claude', FOLDER) },
-      { kind: 'worktree', dir: path.resolve(cwd, '..', '.claude', FOLDER) },
-      { kind: 'global', dir: path.join(os.homedir(), '.claude', FOLDER, 'proj') },
-      { kind: 'shared', dir: path.join(os.homedir(), '.claude', `${FOLDER}-shared`) },
+      { kind: 'local', dir: path.join(cwd, ROOT, FOLDER) },
+      { kind: 'worktree', dir: path.resolve(cwd, '..', ROOT, FOLDER) },
+      { kind: 'global', dir: path.join(os.homedir(), ROOT, FOLDER, 'proj') },
+      { kind: 'shared', dir: path.join(os.homedir(), ROOT, `${FOLDER}-shared`) },
     ]);
   });
 
@@ -148,8 +152,8 @@ describe('candidateStores', () => {
     try {
       process.env.HOME = fakeHome;
       const rows = api.candidateStores(cwd, 'proj');
-      assert.equal(rows[2].dir, path.join(fakeHome, '.claude', FOLDER, 'proj'));
-      assert.equal(rows[3].dir, path.join(fakeHome, '.claude', `${FOLDER}-shared`));
+      assert.equal(rows[2].dir, path.join(fakeHome, ROOT, FOLDER, 'proj'));
+      assert.equal(rows[3].dir, path.join(fakeHome, ROOT, `${FOLDER}-shared`));
       assert.notEqual(rows[2].dir, beforeRows[2].dir);
     } finally {
       if (originalHome === undefined) delete process.env.HOME;
@@ -237,7 +241,7 @@ describe('findAncestorStore (walk-to-root variant)', () => {
   it('finds the nearest ancestor store from a deeply nested start dir', () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-walk-'));
     try {
-      const storeDir = seedMarker(path.join(base, '.claude', FOLDER));
+      const storeDir = seedMarker(path.join(base, ROOT, FOLDER));
       const deep = path.join(base, 'a', 'b', 'c');
       fs.mkdirSync(deep, { recursive: true });
       assert.equal(makeApi().findAncestorStore(deep), storeDir);
@@ -283,12 +287,12 @@ describe('findAncestorStore HOME boundary', { skip: !HOME_DRIVEN }, () => {
   });
 
   beforeEach(() => {
-    fs.rmSync(path.join(fakeHome, '.claude'), { recursive: true, force: true });
-    fs.rmSync(path.join(base, '.claude'), { recursive: true, force: true });
+    fs.rmSync(path.join(fakeHome, ROOT), { recursive: true, force: true });
+    fs.rmSync(path.join(base, ROOT), { recursive: true, force: true });
   });
 
-  it('keeps a marker AT $HOME/.claude/<folder> discoverable when stopping at home', () => {
-    const storeDir = seedMarker(path.join(fakeHome, '.claude', FOLDER));
+  it('keeps a marker AT $HOME/.workflow/<folder> discoverable when stopping at home', () => {
+    const storeDir = seedMarker(path.join(fakeHome, ROOT, FOLDER));
     const api = makeApi({ ancestorWalkStopsAtHome: true });
     assert.equal(api.findAncestorStore(fakeHome), storeDir);
 
@@ -303,7 +307,7 @@ describe('findAncestorStore HOME boundary', { skip: !HOME_DRIVEN }, () => {
 
   it('never continues past $HOME when stopping at home (returns "")', () => {
     // Marker planted ABOVE the fake home: reachable only by walking past it.
-    const aboveHome = seedMarker(path.join(base, '.claude', FOLDER));
+    const aboveHome = seedMarker(path.join(base, ROOT, FOLDER));
     const sub = path.join(fakeHome, 'sub', 'dir');
     fs.mkdirSync(sub, { recursive: true });
 
@@ -339,22 +343,22 @@ describe('discoverStores', { skip: !HOME_DRIVEN }, () => {
   });
 
   beforeEach(() => {
-    fs.rmSync(path.join(fakeHome, '.claude'), { recursive: true, force: true });
+    fs.rmSync(path.join(fakeHome, ROOT), { recursive: true, force: true });
     delete process.env[ENV_VAR];
   });
 
-  // Layout: <root>/wt/.claude/<folder>       (worktree marker, via the walk)
-  //         <root>/wt/repo/.claude/<folder>  (local marker)
-  //         $HOME/.claude/<folder>/repo      (global marker)
-  //         $HOME/.claude/<folder>-shared    (shared marker)
+  // Layout: <root>/wt/.workflow/<folder>       (worktree marker, via the walk)
+  //         <root>/wt/repo/.workflow/<folder>  (local marker)
+  //         $HOME/.workflow/<folder>/repo      (global marker)
+  //         $HOME/.workflow/<folder>-shared    (shared marker)
   function seedAllTiers(root) {
     const wt = path.join(root, 'wt');
     const repo = path.join(wt, 'repo');
     fs.mkdirSync(repo, { recursive: true });
-    seedMarker(path.join(repo, '.claude', FOLDER));
-    seedMarker(path.join(wt, '.claude', FOLDER));
-    seedMarker(path.join(fakeHome, '.claude', FOLDER, 'repo'));
-    seedMarker(path.join(fakeHome, '.claude', `${FOLDER}-shared`));
+    seedMarker(path.join(repo, ROOT, FOLDER));
+    seedMarker(path.join(wt, ROOT, FOLDER));
+    seedMarker(path.join(fakeHome, ROOT, FOLDER, 'repo'));
+    seedMarker(path.join(fakeHome, ROOT, `${FOLDER}-shared`));
     return { wt, repo };
   }
 
@@ -380,10 +384,10 @@ describe('discoverStores', { skip: !HOME_DRIVEN }, () => {
     const root = fs.mkdtempSync(path.join(base, 'partial-'));
     const repo = path.join(root, 'wt', 'repo');
     fs.mkdirSync(repo, { recursive: true });
-    seedMarker(path.join(repo, '.claude', FOLDER));
-    seedMarker(path.join(fakeHome, '.claude', `${FOLDER}-shared`));
+    seedMarker(path.join(repo, ROOT, FOLDER));
+    seedMarker(path.join(fakeHome, ROOT, `${FOLDER}-shared`));
     // A store DIRECTORY without a marker must not surface.
-    fs.mkdirSync(path.join(fakeHome, '.claude', FOLDER, 'repo'), { recursive: true });
+    fs.mkdirSync(path.join(fakeHome, ROOT, FOLDER, 'repo'), { recursive: true });
 
     const kinds = makeApi()
       .discoverStores(repo)
@@ -393,9 +397,9 @@ describe('discoverStores', { skip: !HOME_DRIVEN }, () => {
 
   it('worktree tier comes from the ancestor walk, not the fixed parent row', () => {
     const root = fs.mkdtempSync(path.join(base, 'deep-'));
-    const wtStore = seedMarker(path.join(root, '.claude', FOLDER));
+    const wtStore = seedMarker(path.join(root, ROOT, FOLDER));
     // Two levels below the store base: the candidateStores parent row
-    // (<cwd>/../.claude/<folder>) has no marker, but the walk still resolves.
+    // (<cwd>/../.workflow/<folder>) has no marker, but the walk still resolves.
     const cwd = path.join(root, 'nested', 'repo');
     fs.mkdirSync(cwd, { recursive: true });
 
@@ -404,7 +408,7 @@ describe('discoverStores', { skip: !HOME_DRIVEN }, () => {
   });
 
   it('discovers the shared store from any unrelated cwd (cross-project)', () => {
-    seedMarker(path.join(fakeHome, '.claude', `${FOLDER}-shared`));
+    seedMarker(path.join(fakeHome, ROOT, `${FOLDER}-shared`));
     const cwdA = fs.mkdtempSync(path.join(base, 'projA-'));
     const cwdB = fs.mkdtempSync(path.join(base, 'projB-'));
     for (const cwd of [cwdA, cwdB]) {
@@ -412,20 +416,20 @@ describe('discoverStores', { skip: !HOME_DRIVEN }, () => {
         .discoverStores(cwd)
         .find((s) => s.kind === 'shared');
       assert.ok(shared, `expected shared store from ${cwd}`);
-      assert.equal(shared.dir, path.join(fakeHome, '.claude', `${FOLDER}-shared`));
+      assert.equal(shared.dir, path.join(fakeHome, ROOT, `${FOLDER}-shared`));
       assert.equal(shared.projectName, null);
     }
   });
 
   it('dedupes tiers that resolve to the same directory', () => {
     // A non-normalized cwd makes two tiers land on one store: the local join
-    // collapses the trailing "x/.." to <proj>/.claude/<folder>, while the
+    // collapses the trailing "x/.." to <proj>/.workflow/<folder>, while the
     // worktree walk starts at dirname(<raw cwd>) = <proj>/x and finds the
     // same marker one level up. The resolved-dir seen-set must emit ONE row.
     const root = fs.mkdtempSync(path.join(base, 'dedupe-'));
     const proj = path.join(root, 'proj');
     fs.mkdirSync(path.join(proj, 'x'), { recursive: true });
-    const storeDir = seedMarker(path.join(proj, '.claude', FOLDER));
+    const storeDir = seedMarker(path.join(proj, ROOT, FOLDER));
 
     const rawCwd = `${proj}/x/..`;
     const stores = makeApi().discoverStores(rawCwd);
@@ -526,10 +530,10 @@ describe('parity with the real synapsys call site (memory-store.js)', {
     const wt = path.join(base, 'wt');
     const repo = path.join(wt, 'repo');
     fs.mkdirSync(repo, { recursive: true });
-    seedSynapsysMarker(path.join(repo, '.claude', 'synapsys'));
-    seedSynapsysMarker(path.join(wt, '.claude', 'synapsys'));
-    seedSynapsysMarker(path.join(fakeHome, '.claude', 'synapsys', 'repo'));
-    seedSynapsysMarker(path.join(fakeHome, '.claude', 'synapsys-shared'));
+    seedSynapsysMarker(path.join(repo, ROOT, 'synapsys'));
+    seedSynapsysMarker(path.join(wt, ROOT, 'synapsys'));
+    seedSynapsysMarker(path.join(fakeHome, ROOT, 'synapsys', 'repo'));
+    seedSynapsysMarker(path.join(fakeHome, ROOT, 'synapsys-shared'));
 
     const fromPlugin = memoryStore.discoverStores(repo);
     // Sanity: the fixture must exercise all four tiers or the parity claim

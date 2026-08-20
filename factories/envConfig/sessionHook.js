@@ -27,7 +27,7 @@ const MAX_LISTED_VARS = 8;
 const MAX_WARNINGS = 10;
 
 function defaultCachePath(home = os.homedir()) {
-  return path.join(home, '.claude', '.cache', 'envconfig.json');
+  return path.join(home, '.workflow', '.cache', 'envconfig.json');
 }
 
 function readStdinCwd() {

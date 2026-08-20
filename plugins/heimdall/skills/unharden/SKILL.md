@@ -42,4 +42,4 @@ broker binary. It intentionally does NOT:
 - restore `.mcp.json` (revert via `git checkout -- .mcp.json`).
 
 To also disable the hook-level conceal guard, remove
-`.claude/heimdall-conceal.json` (the guard is a no-op without it).
+`.workflow/heimdall-conceal.json` (the guard is a no-op without it).

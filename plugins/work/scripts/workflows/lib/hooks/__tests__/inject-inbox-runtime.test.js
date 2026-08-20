@@ -41,7 +41,7 @@ describe('inject-inbox-messages — dual runtime', () => {
 
   beforeEach(() => {
     for (const f of fs.readdirSync(inboxDir)) fs.unlinkSync(path.join(inboxDir, f));
-    const cursors = path.join(tmp, '.claude', 'work-workflow', 'state', 'inbox-cursors.json');
+    const cursors = path.join(tmp, '.workflow', 'work-workflow', 'state', 'inbox-cursors.json');
     try {
       fs.unlinkSync(cursors);
     } catch {
