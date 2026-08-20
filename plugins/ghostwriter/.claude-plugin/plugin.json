@@ -1,6 +1,6 @@
 {
   "name": "ghostwriter",
-  "version": "3.85.0",
+  "version": "3.85.8",
   "description": "Keeps AI self-attribution out of the work. PreToolUse hooks inspect every Bash call that authors a git object, every file write, and every GitHub MCP post, blocking co-author trailers, \"generated with <tool>\" footers, product attribution links, tool-named session trailers, attribution written into source files, committer identities that name an AI tool, and commits made under no identity at all. Opt-in git hooks extend the same rules to commits made outside the session. Bare product mentions are always allowed.",
   "author": {
     "name": "Custom",
