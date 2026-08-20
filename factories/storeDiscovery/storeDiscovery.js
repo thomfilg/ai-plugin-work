@@ -247,49 +247,38 @@ function migrationRows(spec, cwd) {
 // directory when the walk is home-bounded; the marker AT home is still
 // checked before stopping). The walk is why a store at a worktree base still
 // resolves from a sub-directory of the worktree.
-function ancestorStoreUnder(spec, startDir, root) {
+// ONE walk, shared by discovery and by migration. They differ only in which
+// roots they accept and what they want back; duplicating the loop is how the
+// two drifted apart once already (migration kept walking only the legacy root
+// and so stopped finding a store the moment it relocated one). The home stop,
+// the root-exhaustion guard and the marker gate live here and nowhere else.
+// Returns `{ base, root }` for the nearest hit, or null when exhausted.
+function walkAncestors(spec, startDir, roots) {
   const home = spec.stopsAtHome ? os.homedir() : null;
   let dir = startDir;
   for (;;) {
-    const storeDir = path.join(dir, root, spec.folder);
-    if (fs.existsSync(path.join(storeDir, spec.marker))) return storeDir;
-    if (dir === home) return '';
-    const parent = path.dirname(dir);
-    if (parent === dir) return '';
-    dir = parent;
-  }
-}
-
-function ancestorStore(spec, startDir) {
-  return ancestorStoreUnder(spec, startDir, ROOT_DIR);
-}
-
-/**
- * Nearest ancestor of startDir holding a worktree store under EITHER root,
- * returned as the base directory (the parent of the root dir), or '' when the
- * walk is exhausted.
- *
- * Both roots, one walk, because the migration row has to keep resolving
- * ACROSS the relocation it performs. Walking only the legacy root would find
- * the store once and then never again: the relocation removes the legacy dir,
- * so the next session's walk comes up empty, falls back to the immediate
- * parent — which for a nested cwd is not the store — and the relocated store
- * silently stops being a migration location, so no LATER migration is ever
- * applied to it. Checking both at each level also keeps "nearest wins"
- * honest when a legacy store sits above an already-migrated one.
- */
-function ancestorMigrationBase(spec, startDir) {
-  const home = spec.stopsAtHome ? os.homedir() : null;
-  let dir = startDir;
-  for (;;) {
-    for (const root of [ROOT_DIR, LEGACY_ROOT_DIR]) {
-      if (fs.existsSync(path.join(dir, root, spec.folder, spec.marker))) return dir;
+    for (const root of roots) {
+      if (fs.existsSync(path.join(dir, root, spec.folder, spec.marker))) return { base: dir, root };
     }
-    if (dir === home) return '';
+    if (dir === home) return null;
     const parent = path.dirname(dir);
-    if (parent === dir) return '';
+    if (parent === dir) return null;
     dir = parent;
   }
+}
+
+// Discovery: the live root only, and it wants the store directory.
+function ancestorStore(spec, startDir) {
+  const hit = walkAncestors(spec, startDir, [ROOT_DIR]);
+  return hit ? path.join(hit.base, hit.root, spec.folder) : '';
+}
+
+// Migration: either root — a store it has already relocated must keep
+// resolving so later migrations reach it — and it wants the base directory,
+// from which both the current and legacy paths are derived.
+function ancestorMigrationBase(spec, startDir) {
+  const hit = walkAncestors(spec, startDir, [ROOT_DIR, LEGACY_ROOT_DIR]);
+  return hit ? hit.base : '';
 }
 
 // ── discovery ────────────────────────────────────────────────────────────────
