@@ -70,7 +70,11 @@ afterEach(() => {
 describe('synapsys migration declaration', () => {
   it('exposes a contiguous, positive, ascending version history', () => {
     const versions = migrations.MIGRATIONS.map((m) => m.version);
-    assert.deepEqual(versions, [...versions].sort((a, b) => a - b), 'must be ascending');
+    assert.deepEqual(
+      versions,
+      [...versions].sort((a, b) => a - b),
+      'must be ascending'
+    );
     assert.equal(new Set(versions).size, versions.length, 'must be unique');
     assert.ok(versions.every((v) => Number.isInteger(v) && v > 0));
     assert.equal(migrations.LATEST_VERSION, Math.max(...versions));

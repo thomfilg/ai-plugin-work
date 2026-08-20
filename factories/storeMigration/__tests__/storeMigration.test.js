@@ -67,7 +67,13 @@ describe('config validation', () => {
     assert.throws(bad([{ version: 0, migrate() {} }]), /positive integer/);
     assert.throws(bad([{ version: 1.5, migrate() {} }]), /positive integer/);
     assert.throws(bad([{ version: 1 }]), /"migrate" function/);
-    assert.throws(bad([{ version: 1, migrate() {} }, { version: 1, migrate() {} }]), /duplicate/);
+    assert.throws(
+      bad([
+        { version: 1, migrate() {} },
+        { version: 1, migrate() {} },
+      ]),
+      /duplicate/
+    );
   });
 
   it('derives LATEST_VERSION from the highest version regardless of input order', () => {
