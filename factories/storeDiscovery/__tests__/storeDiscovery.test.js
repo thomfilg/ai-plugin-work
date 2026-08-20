@@ -230,7 +230,57 @@ describe('migrationCandidates', () => {
     }
   });
 
-  it('falls back to the immediate parent when no legacy ancestor carries a marker', () => {
+  it('keeps resolving the worktree row AFTER relocation, so later migrations reach it', {
+    skip: !HOME_DRIVEN,
+  }, () => {
+    // Regression: walking only the legacy root found the store once and never
+    // again — the relocation removes the legacy dir, the next walk comes up
+    // empty, and the migrated store silently stops being a migration location.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-postmig-'));
+    try {
+      const wt = path.join(root, 'wt');
+      const migrated = path.join(wt, '.workflow', FOLDER);
+      fs.mkdirSync(migrated, { recursive: true });
+      fs.writeFileSync(path.join(migrated, MARKER), '{}\n');
+      const deep = path.join(wt, 'packages', 'app');
+      fs.mkdirSync(deep, { recursive: true });
+
+      const row = makeApi()
+        .migrationCandidates(deep)
+        .find((r) => r.kind === 'worktree');
+      assert.equal(row.dir, migrated, 'already-migrated store must stay a location');
+      assert.equal(row.legacyDir, path.join(wt, '.claude', FOLDER));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers the NEAREST ancestor when both roots carry a store at different levels', {
+    skip: !HOME_DRIVEN,
+  }, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-nearest-'));
+    try {
+      // Legacy store high up, already-migrated store closer to cwd.
+      const legacyHigh = path.join(root, '.claude', FOLDER);
+      fs.mkdirSync(legacyHigh, { recursive: true });
+      fs.writeFileSync(path.join(legacyHigh, MARKER), '{}\n');
+      const wt = path.join(root, 'wt');
+      const near = path.join(wt, '.workflow', FOLDER);
+      fs.mkdirSync(near, { recursive: true });
+      fs.writeFileSync(path.join(near, MARKER), '{}\n');
+      const deep = path.join(wt, 'packages', 'app');
+      fs.mkdirSync(deep, { recursive: true });
+
+      const row = makeApi()
+        .migrationCandidates(deep)
+        .find((r) => r.kind === 'worktree');
+      assert.equal(row.dir, near, 'nearest ancestor wins, mirroring discovery');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the immediate parent when no ancestor carries a marker', () => {
     const cwd = path.join(os.tmpdir(), 'sd-mig-nowalk', 'repo');
     const row = makeApi()
       .migrationCandidates(cwd)

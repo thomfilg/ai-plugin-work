@@ -183,6 +183,43 @@ describe('SessionStart migrates a legacy local store', { skip: !HOME_DRIVEN }, (
     );
   });
 
+  it('a later migration still reaches a worktree store migrated in an earlier session', () => {
+    // The whole point of the mechanism: v1 relocates, and when v2 ships it
+    // must find the SAME store — including from a nested cwd, where the
+    // legacy dir v1 walked to no longer exists.
+    seedLegacyStore(path.join(repo, '.claude', 'synapsys'));
+    const deep = path.join(repo, 'packages', 'app');
+    fs.mkdirSync(deep, { recursive: true });
+    runSessionStart(deep);
+
+    const target = path.join(repo, '.workflow', 'synapsys');
+    assert.equal(fs.existsSync(path.join(target, 'legacy-memory.md')), true, 'v1 relocated');
+
+    // Now stand up a migrator with an ADDITIONAL, later migration and confirm
+    // the relocated store is still a location it can reach.
+    const { createStoreMigrator } = require(path.resolve(__dirname, '..', 'storeMigration'));
+    const { migrationCandidates } = require(path.resolve(__dirname, '..', 'memory-store'));
+    const touched = [];
+    const next = createStoreMigrator({
+      plugin: 'synapsys',
+      locations: (cwd) => migrationCandidates(cwd),
+      migrations: [
+        { version: 20260820213000, description: 'v1', migrate() {} },
+        {
+          version: 20261231000000,
+          description: 'v2',
+          migrate: (ctx) => touched.push(ctx.dir),
+        },
+      ],
+    });
+    next.run({ cwd: deep });
+    assert.ok(
+      touched.includes(target),
+      `v2 must reach the migrated worktree store; touched=${JSON.stringify(touched)}`
+    );
+    assert.equal(next.readVersion(target), 20261231000000);
+  });
+
   it('does nothing at all when there is no legacy store', () => {
     const res = runSessionStart(repo);
     assert.equal(res.status, 0);
