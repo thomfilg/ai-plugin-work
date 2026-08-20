@@ -186,6 +186,7 @@ module.exports = {
   safeExec: discovery.safeExec,
   getProjectName: discovery.getProjectName,
   candidateStores: discovery.candidateStores,
+  migrationCandidates: discovery.migrationCandidates,
   discoverStores: discovery.discoverStores,
   parseFrontmatter,
   serializeFrontmatter,

@@ -6,7 +6,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createStoreMigrator, relocateDirectory, relocateStore } = require('../index');
+const {
+  createStoreMigrator,
+  relocateDirectory,
+  relocateFile,
+  relocatePath,
+  relocateStore,
+} = require('../index');
 
 let base;
 
@@ -340,6 +346,101 @@ describe('stamp contents', () => {
   it('readVersion reports null for an absent dir', () => {
     const { migrator } = makeMigrator({ dir: path.join(base, 'nope') }, [1]);
     assert.equal(migrator.readVersion(path.join(base, 'nope')), null);
+  });
+});
+
+describe('legacyPaths (data kept outside the store)', () => {
+  it('makes a location live when only a legacy out-of-store file exists', () => {
+    // Without this the location reads as "not installed" and the file is
+    // stranded — which for a security config means it silently stops applying.
+    const dir = path.join(base, 'root', 'plug');
+    const legacyFile = path.join(base, 'old', 'plug-config.json');
+    fs.mkdirSync(path.dirname(legacyFile), { recursive: true });
+    fs.writeFileSync(legacyFile, '{"deny":["x"]}');
+
+    const migrator = createStoreMigrator({
+      plugin: 'acme',
+      locations: () => [
+        { dir, legacyDir: path.join(base, 'old', 'plug'), legacyPaths: [legacyFile] },
+      ],
+      migrations: [{ version: 1, migrate: relocateStore() }],
+    });
+    migrator.run({ cwd: base });
+
+    const moved = path.join(base, 'root', 'plug-config.json');
+    assert.equal(fs.readFileSync(moved, 'utf8'), '{"deny":["x"]}', 'config lands beside the store');
+    assert.equal(fs.existsSync(legacyFile), false);
+  });
+
+  it('stays a no-op when neither the store nor any legacy path exists', () => {
+    const dir = path.join(base, 'root', 'plug');
+    const migrator = createStoreMigrator({
+      plugin: 'acme',
+      locations: () => [
+        { dir, legacyDir: path.join(base, 'old', 'plug'), legacyPaths: [path.join(base, 'nope')] },
+      ],
+      migrations: [{ version: 1, migrate: relocateStore() }],
+    });
+    const res = migrator.run({ cwd: base });
+    assert.deepEqual(res.migrated, []);
+    assert.equal(fs.existsSync(path.join(base, 'root')), false);
+  });
+
+  it('carries the store AND its sidecar config in one migration', () => {
+    const legacyDir = seed(path.join(base, 'old', 'plug'));
+    const legacyFile = path.join(base, 'old', 'plug-config.json');
+    fs.writeFileSync(legacyFile, 'cfg');
+    const dir = path.join(base, 'root', 'plug');
+
+    createStoreMigrator({
+      plugin: 'acme',
+      locations: () => [{ dir, legacyDir, legacyPaths: [legacyFile] }],
+      migrations: [{ version: 1, migrate: relocateStore() }],
+    }).run({ cwd: base });
+
+    assert.equal(fs.existsSync(path.join(dir, 'a.md')), true, 'store moved');
+    assert.equal(fs.readFileSync(path.join(base, 'root', 'plug-config.json'), 'utf8'), 'cfg');
+  });
+});
+
+describe('relocateFile / relocatePath', () => {
+  it('moves a file, creating the destination parent', () => {
+    const from = path.join(base, 'a.json');
+    fs.writeFileSync(from, 'x');
+    const to = path.join(base, 'deep', 'b.json');
+    assert.deepEqual(relocateFile(from, to), { moved: true, kept: false });
+    assert.equal(fs.readFileSync(to, 'utf8'), 'x');
+    assert.equal(fs.existsSync(from), false);
+  });
+
+  it('never overwrites an existing destination file', () => {
+    const from = path.join(base, 'a.json');
+    const to = path.join(base, 'b.json');
+    fs.writeFileSync(from, 'OLD');
+    fs.writeFileSync(to, 'NEW');
+    assert.deepEqual(relocateFile(from, to), { moved: false, kept: true });
+    assert.equal(fs.readFileSync(to, 'utf8'), 'NEW', 'destination wins');
+    assert.equal(fs.existsSync(from), true, 'source kept');
+  });
+
+  it('is a no-op for a missing source or a directory', () => {
+    assert.deepEqual(relocateFile(path.join(base, 'nope'), path.join(base, 'x')), {
+      moved: false,
+      kept: false,
+    });
+    const d = seed(path.join(base, 'adir'));
+    assert.deepEqual(relocateFile(d, path.join(base, 'x')), { moved: false, kept: false });
+  });
+
+  it('relocatePath dispatches on file vs directory', () => {
+    const f = path.join(base, 'f.txt');
+    fs.writeFileSync(f, 'F');
+    assert.equal(relocatePath(f, path.join(base, 'moved-f.txt')).moved, true);
+
+    const d = seed(path.join(base, 'd'));
+    const res = relocatePath(d, path.join(base, 'moved-d'));
+    assert.equal(res.moved, true);
+    assert.equal(fs.existsSync(path.join(base, 'moved-d', 'a.md')), true);
   });
 });
 

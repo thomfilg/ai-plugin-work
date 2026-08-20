@@ -17,7 +17,7 @@ const path = require('node:path');
 const { MARKER, FOLDER, getProjectName, candidateStores } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
-const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
+const { prepareStore } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 
 function parseArgs(argv) {
   const out = { kind: 'local', cwd: process.cwd() };
@@ -38,6 +38,17 @@ if (!target) {
   process.exit(1);
 }
 
+// Migrate BEFORE creating the store, and stamp only if that settled — a stamp
+// is believed on sight, so stamping over data still at the legacy path would
+// suppress the move permanently. See storeMigration.prepareStore.
+const prepared = prepareStore(args.cwd, target.dir);
+if (!prepared.stamped) {
+  console.error(
+    'note: a pending store migration did not complete, so this store is left unstamped; ' +
+      'it will be retried at the next session start'
+  );
+}
+
 fs.mkdirSync(target.dir, { recursive: true });
 const markerPath = path.join(target.dir, MARKER);
 // The shared store is cross-project, so its marker must NOT be stamped with
@@ -49,11 +60,6 @@ const marker = {
   schemaVersion: 1,
 };
 fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
-
-// A store created NOW is already at the latest layout. Stamping it here keeps
-// the SessionStart runner from treating a fresh store as un-versioned and
-// replaying the whole migration chain against it on first use.
-stampLatest(target.dir);
 
 const indexPath = path.join(target.dir, 'INDEX.md');
 if (!fs.existsSync(indexPath)) {

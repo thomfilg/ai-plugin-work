@@ -25,7 +25,9 @@
  *   - dir exists, unreadable/garbage version file → 0 (same; a corrupt stamp
  *     must not strand data at an unknown version)
  *   - dir absent, legacyDir present → 0 (the data exists, at the old path)
- *   - dir absent, legacyDir absent  → null → NOTHING TO DO. This is the
+ *   - dir absent, any `legacyPaths` entry present → 0 (same, for data the
+ *     plugin keeps outside its store — a config file beside it, say)
+ *   - dir absent, none of the above → null → NOTHING TO DO. This is the
  *     not-installed case, and it is why `run` never creates a store: a plugin
  *     the user never installed must not sprout an empty directory.
  *
@@ -57,6 +59,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { loadMigrations } = require('./load');
+const { acquireLock, releaseLock } = require('./lock');
 
 const DEFAULT_VERSION_FILE = '.version.json';
 const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
@@ -157,6 +160,15 @@ function dirExists(dir) {
   }
 }
 
+function pathExists(target) {
+  try {
+    fs.statSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Recorded version of `dir`, or UNVERSIONED when the stamp is missing/unusable. */
 function readStamp(spec, dir) {
   try {
@@ -175,6 +187,13 @@ function readStamp(spec, dir) {
 function currentVersion(spec, location) {
   if (dirExists(location.dir)) return readStamp(spec, location.dir);
   if (location.legacyDir && dirExists(location.legacyDir)) return UNVERSIONED;
+  // `legacyPaths` covers data a plugin keeps OUTSIDE its store — a config file
+  // beside it, say. Without this the location reads as "not installed" and the
+  // file is stranded at the old path forever, which for a security config
+  // means it silently stops applying.
+  if (Array.isArray(location.legacyPaths) && location.legacyPaths.some(pathExists)) {
+    return UNVERSIONED;
+  }
   return null;
 }
 
@@ -187,58 +206,6 @@ function stampVersion(spec, dir, version, now) {
     return true;
   } catch {
     return false;
-  }
-}
-
-// ── lock ─────────────────────────────────────────────────────────────────────
-
-// Beside the store, never inside it: a migration may rename `dir` itself.
-function lockPath(dir) {
-  return path.join(path.dirname(dir), `.${path.basename(dir)}.migrating`);
-}
-
-function lockIsStale(lock, spec, now) {
-  try {
-    return now() - fs.statSync(lock).mtimeMs > spec.lockTimeoutMs;
-  } catch {
-    // Vanished between the failed mkdir and this stat — treat as free.
-    return true;
-  }
-}
-
-/** Atomic acquire via mkdir. Returns the lock path, or null if another process holds it. */
-function acquireLock(spec, dir, now) {
-  const lock = lockPath(dir);
-  // The store's parent may not exist yet — the very first migration of a
-  // relocated store creates it. Without this, mkdir(lock) fails ENOENT and the
-  // location is misreported as held by another process, so the migration that
-  // matters most never runs. Only reached once there IS something to migrate.
-  try {
-    fs.mkdirSync(path.dirname(lock), { recursive: true });
-  } catch {
-    /* the mkdir below reports the real problem */
-  }
-  try {
-    fs.mkdirSync(lock, { recursive: false });
-    return lock;
-  } catch (err) {
-    if (err.code !== 'EEXIST') return null;
-    if (!lockIsStale(lock, spec, now)) return null;
-    try {
-      fs.rmSync(lock, { recursive: true, force: true });
-      fs.mkdirSync(lock, { recursive: false });
-      return lock;
-    } catch {
-      return null;
-    }
-  }
-}
-
-function releaseLock(lock) {
-  try {
-    fs.rmSync(lock, { recursive: true, force: true });
-  } catch {
-    /* best-effort */
   }
 }
 
@@ -259,6 +226,7 @@ function migrateLocation(spec, location, version, now) {
       migration.migrate({
         dir: location.dir,
         legacyDir: location.legacyDir || null,
+        legacyPaths: Array.isArray(location.legacyPaths) ? location.legacyPaths : [],
         kind: location.kind || null,
         plugin: spec.plugin,
         version: migration.version,
@@ -309,6 +277,53 @@ function runOne(spec, location, now, result) {
   }
 }
 
+/** Bring every location for `cwd` up to LATEST_VERSION. Never throws. */
+function runFor(spec, clock, cwd) {
+  const result = { migrated: [], locked: [], errors: [] };
+  let locations;
+  try {
+    locations = spec.locations(cwd) || [];
+  } catch (error) {
+    result.errors.push({ dir: null, error });
+    return result;
+  }
+  for (const location of locations) {
+    if (!isPlainObject(location) || typeof location.dir !== 'string' || !location.dir) continue;
+    try {
+      runOne(spec, location, clock, result);
+    } catch (error) {
+      result.errors.push({ dir: location.dir, error });
+    }
+  }
+  return result;
+}
+
+/**
+ * The installer-side dance, in one place because getting it wrong is silent
+ * and permanent.
+ *
+ * An installer creating a store wants to stamp it at LATEST — a brand-new
+ * store has nothing to migrate. But "new store" and "nothing to migrate" are
+ * not the same thing: an older install's data can still be sitting at a legacy
+ * path this location is responsible for. So migrate FIRST, and stamp only if
+ * that migration actually settled.
+ *
+ * `run` is fail-open — it reports a location it skipped (another process held
+ * the lock) or failed through its return value rather than throwing. Stamping
+ * regardless marks the store fully migrated while data is still at the old
+ * path, and because a stamp is believed on sight, no later session ever
+ * retries. Leaving it unstamped is the safe direction: the next run picks the
+ * work back up.
+ *
+ * @returns {{migration: object, stamped: boolean}}
+ */
+function prepareStore(spec, clock, cwd, dir) {
+  const migration = runFor(spec, clock, cwd);
+  const settled = migration.errors.length === 0 && migration.locked.length === 0;
+  if (settled && dir) stampVersion(spec, dir, spec.latest, clock);
+  return { migration, stamped: Boolean(settled && dir) };
+}
+
 function createStoreMigrator(config) {
   const spec = assertConfig(config);
   const clock = typeof config.now === 'function' ? config.now : () => Date.now();
@@ -318,23 +333,7 @@ function createStoreMigrator(config) {
    * Returns { migrated, locked, errors } — all arrays, all possibly empty.
    */
   function run(opts) {
-    const result = { migrated: [], locked: [], errors: [] };
-    let locations;
-    try {
-      locations = spec.locations((opts && opts.cwd) || process.cwd()) || [];
-    } catch (error) {
-      result.errors.push({ dir: null, error });
-      return result;
-    }
-    for (const location of locations) {
-      if (!isPlainObject(location) || typeof location.dir !== 'string' || !location.dir) continue;
-      try {
-        runOne(spec, location, clock, result);
-      } catch (error) {
-        result.errors.push({ dir: location.dir, error });
-      }
-    }
-    return result;
+    return runFor(spec, clock, (opts && opts.cwd) || process.cwd());
   }
 
   return Object.freeze({
@@ -348,6 +347,11 @@ function createStoreMigrator(config) {
     stamp: (dir, version) => stampVersion(spec, dir, version, clock),
     stampLatest: (dir) => stampVersion(spec, dir, spec.latest, clock),
     run,
+    // Positional alias for the one-liner hook call sites, so a plugin's runner
+    // module can be `module.exports = createStoreMigrator({…})` with no
+    // hand-written re-export block to keep in sync (or duplicate).
+    runMigrations: (cwd) => run({ cwd }),
+    prepareStore: (cwd, dir) => prepareStore(spec, clock, cwd, dir),
   });
 }
 

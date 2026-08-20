@@ -46,7 +46,7 @@ carries existing data forward on the next session — no manual step.
 |---|---|
 | Mechanism | [`factories/storeMigration`](factories/storeMigration/) |
 | Declared by | `plugins/<plugin>/lib/migrations/<YYYYMMDDHHMMSS>_<slug>.js` — one file per migration, discovered at load; the filename timestamp is the version |
-| Adopted by | synapsys |
+| Adopted by | synapsys, heimdall, maestro, work-workflow |
 
 Migrations are per store directory, applied in order, stamped after each
 success, guarded by a lock beside the store, and fail-open: a migration that
@@ -54,22 +54,25 @@ cannot complete leaves the store exactly as it was and the session continues.
 A relocation whose destination already exists **merges without clobbering** and
 keeps the source, rather than guessing which copy to discard.
 
-**Upgrading a plugin that has not adopted migrations yet** (maestro, heimdall,
-work-workflow) still needs the manual move, plus a statusline reinstall so
-`~/.claude/settings.json` points at the relocated host:
+What each plugin carries:
 
-```bash
-mkdir -p ~/.workflow
-for d in work-workflow maestro heimdall \
-         maestro-shared heimdall-shared \
-         .cache .agent-runtime statuslines; do
-  [ -e ~/.claude/"$d" ] && mv ~/.claude/"$d" ~/.workflow/"$d"
-done
-[ -e ~/.claude/statusline-host.sh ] && rm -f ~/.claude/statusline-host.sh
-# per repo, for any project-local store:
-#   mkdir -p .workflow && mv .claude/heimdall .claude/maestro .workflow/ 2>/dev/null
-#   mv .claude/heimdall-conceal.json .workflow/ 2>/dev/null
-```
+| Plugin | Migrated on SessionStart |
+|---|---|
+| synapsys | memory stores (all four tiers) + the whole `~/.workflow/synapsys` namespace — telemetry, session ledgers, sticky state, `config.yaml`, `DOMAINS.md` |
+| heimdall | lock stores + the conceal config and block log beside them |
+| maestro | schema stores |
+| work-workflow | `~/.workflow/work-workflow/` — reminder ledger, runner logs, inbox cursors |
+
+**Upgrading from a pre-`.workflow` install:** nothing to run — start a session
+and each plugin carries its own state across on the first SessionStart.
+
+Two things are deliberately *not* migrated, because both regenerate on their
+own: the shared caches (`.cache`, `.agent-runtime` — an update banner, env
+detection and the runtime stamp, all cheap to rebuild and written by every
+plugin, so no one plugin owns the move) and the statusline host plus its
+fragment registry, which the installer rewrites at the new path under its own
+`HOST_VERSION`. Re-run the statusline installer so `~/.claude/settings.json`
+points at the relocated host; the stale copies under `.claude` are inert.
 
 ## Install
 

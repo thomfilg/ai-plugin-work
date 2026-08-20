@@ -53,7 +53,9 @@ const VENDORED_DIRS = [
   'plugins/heimdall/lib/runtime',
   'plugins/heimdall/lib/safeSubprocess',
   'plugins/heimdall/lib/storeDiscovery',
+  'plugins/heimdall/lib/storeMigration',
   'plugins/maestro/lib/storeDiscovery',
+  'plugins/maestro/lib/storeMigration',
   'plugins/maestro/scripts/lib/runtime',
   // factories/statusline-host → per-plugin statusline installer lib/ (this + the work one below)
   'plugins/maestro/skills/install/scripts/lib',
@@ -67,6 +69,7 @@ const VENDORED_DIRS = [
   'plugins/work/scripts/workflows/lib/safeIO',
   'plugins/work/scripts/workflows/lib/safeSubprocess',
   'plugins/work/scripts/workflows/lib/statusline/host',
+  'plugins/work/scripts/workflows/lib/storeMigration',
 ];
 
 function isVendoredFile(absFile, repoRoot) {

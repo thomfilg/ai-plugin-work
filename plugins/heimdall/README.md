@@ -11,6 +11,25 @@ It generalizes the hand-rolled `protect-claude-config.js` / `protect-package-jso
 hooks into one configurable plugin, and borrows synapsys's local/worktree/global
 store model so protection travels with the repo, the worktree base, or your home.
 
+## Store version + migrations
+
+Each store carries `.version.json` — the layout version applied to that
+directory. On SessionStart, **before the conceal and secrets hooks read
+anything**, [`lib/store-migrations.js`](lib/store-migrations.js) applies
+anything pending and re-stamps.
+
+The history is [`lib/migrations/`](lib/migrations/), one file per migration
+named `<YYYYMMDDHHMMSS>_<slug>.js`; the filename timestamp *is* the version.
+
+| Version | Change |
+|---|---|
+| `20260820213000` | lock store `.claude/heimdall` → `.workflow/heimdall`, and the conceal config + block log alongside it |
+
+The conceal config is the security-critical half: the guard is
+safe-by-default-OFF, so a config left at the old path does not fail loudly — it
+silently stops concealing. It is declared as a `legacyPaths` entry so the
+migration runs even in a repo that has no lock store at all.
+
 ## Concepts
 
 A **lock block** is the tuple:
