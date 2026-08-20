@@ -55,6 +55,10 @@ const VENDOR_SETS = [
     ],
   },
   {
+    master: 'factories/storeMigration',
+    vendorDirs: ['plugins/synapsys/lib/storeMigration'],
+  },
+  {
     master: 'factories/safeIO',
     vendorDirs: ['plugins/work/scripts/workflows/lib/safeIO'],
   },

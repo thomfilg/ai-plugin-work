@@ -69,6 +69,7 @@ const { runHook } = require(path.join(__dirname, '..', 'lib', 'hookEntrypoint'))
 
 const { getSessionStartHint } = require(path.join(__dirname, '..', 'lib', 'setup-hints'));
 const { getRuntime } = require(path.join(__dirname, '..', 'lib', 'runtime', 'index'));
+const { runMigrations } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 
 // Build the activeDomains opts for selectForEvent. Delegates to the
 // shared resolver so synapsys-explain stays in lockstep. Uses the
@@ -228,6 +229,13 @@ async function dispatch(payload) {
 
   const cwd = payload.cwd || process.cwd();
   const runtimeName = getRuntime(payload).name;
+
+  // SessionStart: bring stores forward BEFORE anything reads them. An install
+  // predating a store relocation would otherwise spend its whole first session
+  // reading an empty store — including the background recall below. Fail-open
+  // by construction: runMigrations never throws, and a store it could not
+  // migrate is simply discovered where it already was.
+  if (event === 'SessionStart') runMigrations(cwd);
 
   // SessionStart: kick off the detached background recall before anything else.
   if (event === 'SessionStart') scheduleSessionRecall(payload);

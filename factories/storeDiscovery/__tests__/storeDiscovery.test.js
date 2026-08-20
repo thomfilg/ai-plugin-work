@@ -163,6 +163,161 @@ describe('candidateStores', () => {
   });
 });
 
+describe('migrationCandidates', () => {
+  it('pairs each root with its pre-ROOT_DIR location', () => {
+    const cwd = path.join(os.tmpdir(), 'sd-mig', 'repo');
+    const rows = makeApi().migrationCandidates(cwd);
+    assert.deepEqual(
+      rows.map((r) => r.kind),
+      ['local', 'worktree', 'home', 'shared']
+    );
+    for (const row of rows) {
+      assert.ok(
+        row.dir.includes(`${path.sep}.workflow${path.sep}`),
+        `${row.kind} dir under ROOT_DIR`
+      );
+      assert.ok(
+        row.legacyDir.includes(`${path.sep}.claude${path.sep}`),
+        `${row.kind} legacyDir under LEGACY_ROOT_DIR`
+      );
+      // Same geometry, only the root differs — that is the whole contract.
+      assert.equal(row.legacyDir.replace('.claude', '.workflow'), row.dir);
+    }
+  });
+
+  it('returns the per-user namespace, NOT the per-project global tier', () => {
+    // global is `~/<root>/<folder>/<project>` — inside the home row. Emitting
+    // both would hand the migrator nested locations.
+    const rows = makeApi().migrationCandidates(path.join(os.tmpdir(), 'sd-mig', 'repo'));
+    const home = rows.find((r) => r.kind === 'home');
+    assert.equal(home.dir, path.join(os.homedir(), '.workflow', FOLDER));
+  });
+
+  it('emits mutually disjoint roots — none contains another', () => {
+    const rows = makeApi().migrationCandidates(path.join(os.tmpdir(), 'sd-mig', 'repo'));
+    for (const a of rows) {
+      for (const b of rows) {
+        if (a === b) continue;
+        assert.ok(
+          !path.resolve(b.dir).startsWith(`${path.resolve(a.dir)}${path.sep}`),
+          `${b.kind} (${b.dir}) must not sit inside ${a.kind} (${a.dir})`
+        );
+      }
+    }
+  });
+
+  it('resolves the worktree row by ANCESTOR WALK, mirroring discovery', {
+    skip: !HOME_DRIVEN,
+  }, () => {
+    // A session run from deep inside a worktree must migrate the store the
+    // walk would have discovered, not just the one at <cwd>/...
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-migwalk-'));
+    try {
+      const wt = path.join(root, 'wt');
+      const legacy = path.join(wt, '.claude', FOLDER);
+      fs.mkdirSync(legacy, { recursive: true });
+      fs.writeFileSync(path.join(legacy, MARKER), '{}\n');
+      const deep = path.join(wt, 'packages', 'app');
+      fs.mkdirSync(deep, { recursive: true });
+
+      const row = makeApi()
+        .migrationCandidates(deep)
+        .find((r) => r.kind === 'worktree');
+      assert.equal(row.legacyDir, legacy, 'walk must reach the worktree base');
+      assert.equal(row.dir, path.join(wt, '.workflow', FOLDER));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps resolving the worktree row AFTER relocation, so later migrations reach it', {
+    skip: !HOME_DRIVEN,
+  }, () => {
+    // Regression: walking only the legacy root found the store once and never
+    // again — the relocation removes the legacy dir, the next walk comes up
+    // empty, and the migrated store silently stops being a migration location.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-postmig-'));
+    try {
+      const wt = path.join(root, 'wt');
+      const migrated = path.join(wt, '.workflow', FOLDER);
+      fs.mkdirSync(migrated, { recursive: true });
+      fs.writeFileSync(path.join(migrated, MARKER), '{}\n');
+      const deep = path.join(wt, 'packages', 'app');
+      fs.mkdirSync(deep, { recursive: true });
+
+      const row = makeApi()
+        .migrationCandidates(deep)
+        .find((r) => r.kind === 'worktree');
+      assert.equal(row.dir, migrated, 'already-migrated store must stay a location');
+      assert.equal(row.legacyDir, path.join(wt, '.claude', FOLDER));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers the NEAREST ancestor when both roots carry a store at different levels', {
+    skip: !HOME_DRIVEN,
+  }, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-nearest-'));
+    try {
+      // Legacy store high up, already-migrated store closer to cwd.
+      const legacyHigh = path.join(root, '.claude', FOLDER);
+      fs.mkdirSync(legacyHigh, { recursive: true });
+      fs.writeFileSync(path.join(legacyHigh, MARKER), '{}\n');
+      const wt = path.join(root, 'wt');
+      const near = path.join(wt, '.workflow', FOLDER);
+      fs.mkdirSync(near, { recursive: true });
+      fs.writeFileSync(path.join(near, MARKER), '{}\n');
+      const deep = path.join(wt, 'packages', 'app');
+      fs.mkdirSync(deep, { recursive: true });
+
+      const row = makeApi()
+        .migrationCandidates(deep)
+        .find((r) => r.kind === 'worktree');
+      assert.equal(row.dir, near, 'nearest ancestor wins, mirroring discovery');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the immediate parent when no ancestor carries a marker', () => {
+    const cwd = path.join(os.tmpdir(), 'sd-mig-nowalk', 'repo');
+    const row = makeApi()
+      .migrationCandidates(cwd)
+      .find((r) => r.kind === 'worktree');
+    assert.equal(row.dir, path.resolve(cwd, '..', '.workflow', FOLDER));
+  });
+
+  it('never emits the same dir twice', { skip: !HOME_DRIVEN }, () => {
+    // A repo directly under $HOME resolves the worktree walk onto the home
+    // namespace; the duplicate must be dropped so it is not migrated twice.
+    const originalHome = process.env.HOME;
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-migdup-'));
+    try {
+      process.env.HOME = fakeHome;
+      const legacy = path.join(fakeHome, '.claude', FOLDER);
+      fs.mkdirSync(legacy, { recursive: true });
+      fs.writeFileSync(path.join(legacy, MARKER), '{}\n');
+      const repo = path.join(fakeHome, 'myrepo');
+      fs.mkdirSync(repo, { recursive: true });
+
+      const rows = makeApi().migrationCandidates(repo);
+      const dirs = rows.map((r) => path.resolve(r.dir));
+      assert.equal(new Set(dirs).size, dirs.length, `duplicate rows: ${dirs.join(', ')}`);
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('exposes LEGACY_ROOT_DIR alongside ROOT_DIR', () => {
+    const api = makeApi();
+    assert.equal(api.ROOT_DIR, '.workflow');
+    assert.equal(api.LEGACY_ROOT_DIR, '.claude');
+  });
+});
+
 describe('getProjectName / getRepoRoot (real git repo + linked worktree)', () => {
   let base;
   let repo;

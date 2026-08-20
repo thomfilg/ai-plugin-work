@@ -63,6 +63,11 @@ const PROJECT_NAME_STRATEGIES = new Set(['git-common-dir', 'toplevel']);
 // agent CLI's own `.claude` config dir would sit (repo root / $HOME). Plugins
 // never write inside `.claude`.
 const ROOT_DIR = '.workflow';
+// Where the tiers lived before ROOT_DIR existed. Read-only history: discovery
+// never looks here, but store migrations need the old geometry to find data
+// left behind by an older install, so it is derived from the SAME tier switch
+// rather than re-hardcoded per plugin.
+const LEGACY_ROOT_DIR = '.claude';
 
 // ── config validation ────────────────────────────────────────────────────────
 
@@ -156,25 +161,83 @@ function projectNameOf(spec, cwd) {
 
 // ── tier geometry ────────────────────────────────────────────────────────────
 
-// Canonical directory for one tier. os.homedir() is deliberately read here,
-// at call time, so a reassigned $HOME is honored per call.
-function tierDirOf(spec, kind, cwd, projectName) {
+// Canonical directory for one tier under `root`. os.homedir() is deliberately
+// read here, at call time, so a reassigned $HOME is honored per call. `root`
+// is ROOT_DIR for live discovery and LEGACY_ROOT_DIR when a migration is
+// looking for data an older install left behind — the geometry is identical
+// either way, which is the whole point of taking it as a parameter.
+function tierDirUnder(spec, root, kind, cwd, projectName) {
   switch (kind) {
     case 'local':
-      return path.join(cwd, ROOT_DIR, spec.folder);
+      return path.join(cwd, root, spec.folder);
     case 'worktree':
-      return path.resolve(cwd, '..', ROOT_DIR, spec.folder);
+      return path.resolve(cwd, '..', root, spec.folder);
     case 'global':
-      return path.join(os.homedir(), ROOT_DIR, spec.folder, projectName);
+      return path.join(os.homedir(), root, spec.folder, projectName);
     case 'shared':
-      return path.join(os.homedir(), ROOT_DIR, spec.sharedFolder);
+      return path.join(os.homedir(), root, spec.sharedFolder);
     default:
       return '';
   }
 }
 
+function tierDirOf(spec, kind, cwd, projectName) {
+  return tierDirUnder(spec, ROOT_DIR, kind, cwd, projectName);
+}
+
 function candidateRows(spec, cwd, projectName) {
   return PRECEDENCE_ORDER.map((kind) => ({ kind, dir: tierDirOf(spec, kind, cwd, projectName) }));
+}
+
+// Roots a migration must carry forward, each paired with its pre-ROOT_DIR
+// location: `{ kind, dir, legacyDir }`. Deliberately NOT the four discovery
+// tiers — `global` is `~/<root>/<folder>/<project>`, which lives INSIDE
+// `~/<root>/<folder>`, and handing a migrator two locations where one
+// contains the other invites moving a parent out from under a queued child.
+// The `home` row covers the whole per-user namespace instead: every project's
+// global store plus any loose state the plugin keeps beside them. The four
+// rows returned here are mutually disjoint.
+function migrationRows(spec, cwd) {
+  const home = os.homedir();
+  const pair = (kind, tail) => ({
+    kind,
+    dir: path.join(...tail(ROOT_DIR)),
+    legacyDir: path.join(...tail(LEGACY_ROOT_DIR)),
+  });
+  // The worktree row must mirror DISCOVERY, which resolves this tier with an
+  // ancestor WALK, not a fixed parent row. A session started from
+  // `<worktree>/packages/app` discovers a store at `<worktree>/`; checking only
+  // `<cwd>/..` would leave exactly that store unmigrated and then invisible,
+  // since post-migration discovery no longer looks under the legacy root.
+  // Fall back to the immediate parent when the walk finds nothing, so an
+  // already-migrated store at `<cwd>/..` still resolves and gets stamped.
+  const base = ancestorMigrationBase(spec, path.dirname(cwd));
+  const worktree = {
+    kind: 'worktree',
+    dir: base
+      ? path.join(base, ROOT_DIR, spec.folder)
+      : path.resolve(cwd, '..', ROOT_DIR, spec.folder),
+    legacyDir: base
+      ? path.join(base, LEGACY_ROOT_DIR, spec.folder)
+      : path.resolve(cwd, '..', LEGACY_ROOT_DIR, spec.folder),
+  };
+
+  const rows = [
+    pair('local', (root) => [cwd, root, spec.folder]),
+    worktree,
+    pair('home', (root) => [home, root, spec.folder]),
+    pair('shared', (root) => [home, root, spec.sharedFolder]),
+  ];
+  // The walk can land on a row another tier already covers (a repo directly
+  // under $HOME resolves the worktree row to the home namespace). Rows must
+  // stay distinct so one location is never migrated twice.
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = path.resolve(row.dir);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ── ancestor walk ────────────────────────────────────────────────────────────
@@ -184,17 +247,38 @@ function candidateRows(spec, cwd, projectName) {
 // directory when the walk is home-bounded; the marker AT home is still
 // checked before stopping). The walk is why a store at a worktree base still
 // resolves from a sub-directory of the worktree.
-function ancestorStore(spec, startDir) {
+// ONE walk, shared by discovery and by migration. They differ only in which
+// roots they accept and what they want back; duplicating the loop is how the
+// two drifted apart once already (migration kept walking only the legacy root
+// and so stopped finding a store the moment it relocated one). The home stop,
+// the root-exhaustion guard and the marker gate live here and nowhere else.
+// Returns `{ base, root }` for the nearest hit, or null when exhausted.
+function walkAncestors(spec, startDir, roots) {
   const home = spec.stopsAtHome ? os.homedir() : null;
   let dir = startDir;
   for (;;) {
-    const storeDir = path.join(dir, ROOT_DIR, spec.folder);
-    if (fs.existsSync(path.join(storeDir, spec.marker))) return storeDir;
-    if (dir === home) return '';
+    for (const root of roots) {
+      if (fs.existsSync(path.join(dir, root, spec.folder, spec.marker))) return { base: dir, root };
+    }
+    if (dir === home) return null;
     const parent = path.dirname(dir);
-    if (parent === dir) return '';
+    if (parent === dir) return null;
     dir = parent;
   }
+}
+
+// Discovery: the live root only, and it wants the store directory.
+function ancestorStore(spec, startDir) {
+  const hit = walkAncestors(spec, startDir, [ROOT_DIR]);
+  return hit ? path.join(hit.base, hit.root, spec.folder) : '';
+}
+
+// Migration: either root — a store it has already relocated must keep
+// resolving so later migrations reach it — and it wants the base directory,
+// from which both the current and legacy paths are derived.
+function ancestorMigrationBase(spec, startDir) {
+  const hit = walkAncestors(spec, startDir, [ROOT_DIR, LEGACY_ROOT_DIR]);
+  return hit ? hit.base : '';
 }
 
 // ── discovery ────────────────────────────────────────────────────────────────
@@ -246,11 +330,14 @@ function createStoreDiscovery(config) {
     // Marketplace root every tier lives under, for callers that build a store
     // path themselves instead of going through a tier.
     ROOT_DIR,
+    // Pre-ROOT_DIR root, exposed for store migrations only.
+    LEGACY_ROOT_DIR,
     PRECEDENCE_ORDER,
     safeExec,
     getRepoRoot,
     getProjectName: (cwd) => projectNameOf(spec, cwd),
     candidateStores: (cwd, projectName) => candidateRows(spec, cwd, projectName),
+    migrationCandidates: (cwd) => migrationRows(spec, cwd || process.cwd()),
     findAncestorStore: (startDir) => ancestorStore(spec, startDir),
     discoverStores: (cwd) => discover(spec, cwd),
   });
