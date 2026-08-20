@@ -56,7 +56,12 @@ const VENDOR_SETS = [
   },
   {
     master: 'factories/storeMigration',
-    vendorDirs: ['plugins/synapsys/lib/storeMigration'],
+    vendorDirs: [
+      'plugins/synapsys/lib/storeMigration',
+      'plugins/heimdall/lib/storeMigration',
+      'plugins/maestro/lib/storeMigration',
+      'plugins/work/scripts/workflows/lib/storeMigration',
+    ],
   },
   {
     master: 'factories/safeIO',

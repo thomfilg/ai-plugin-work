@@ -2,6 +2,24 @@
 
 A Claude Code plugin that provides deterministic workflow orchestration for Jira task implementation. It uses a state machine engine to enforce exact step execution, ensuring consistent and reliable development workflows.
 
+## State version + migrations
+
+work-workflow's per-user state (`~/.workflow/work-workflow/` — reminder ledger,
+runner logs, inbox cursors) carries a `.version.json` stamp. On SessionStart,
+[`scripts/workflows/lib/store-migrations.js`](scripts/workflows/lib/store-migrations.js)
+applies anything pending and re-stamps.
+
+History: [`scripts/workflows/lib/migrations/`](scripts/workflows/lib/migrations/),
+one file per migration named `<YYYYMMDDHHMMSS>_<slug>.js`.
+
+| Version | Change |
+|---|---|
+| `20260820213000` | per-user state `~/.claude/work-workflow` → `~/.workflow/work-workflow` |
+
+The shared caches (`.cache`, `.agent-runtime`) and the statusline host are
+deliberately not migrated — both regenerate, and the caches are written by
+every plugin so no single one owns the move.
+
 ## Features
 
 - **Deterministic Workflow Engine** - State machine-driven step execution with forward/backward transitions

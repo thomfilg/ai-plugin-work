@@ -56,13 +56,15 @@ describe('heimdall-init.js --kind=shared', () => {
       `expected marker at ${expectedMarker}, got: ${res.stdout}`
     );
 
-    // No project subdir should be created under heimdall-shared.
-    const entries = fs.readdirSync(expectedDir);
-    assert.deepEqual(
-      entries.sort(),
-      [MARKER].sort(),
-      `expected only the marker in shared dir, got: ${entries.join(', ')}`
-    );
+    // No project SUBDIR should be created under heimdall-shared — that is the
+    // point of the shared tier. Assert the absence of directories rather than
+    // an exact file list, so init writing further bookkeeping files (the
+    // `.version.json` migration stamp, say) does not read as a regression.
+    const dirs = fs
+      .readdirSync(expectedDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+    assert.deepEqual(dirs, [], `expected no subdirectories in shared dir, got: ${dirs.join(', ')}`);
 
     const cfg = JSON.parse(fs.readFileSync(expectedMarker, 'utf8'));
     assert.equal(cfg.kind, 'shared');

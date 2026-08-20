@@ -39,6 +39,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const store = require(path.join(__dirname, '..', 'lib', 'schema-store'));
+const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 const {
   MARKER,
   getProjectName,
@@ -86,6 +87,8 @@ function cmdInit(args) {
     schemaVersion: 1,
   };
   fs.writeFileSync(path.join(target.dir, MARKER), `${JSON.stringify(marker, null, 2)}\n`);
+  // Fresh store → already at the latest layout, so stamp it and skip the chain.
+  stampLatest(target.dir);
 
   const indexPath = path.join(target.dir, 'INDEX.md');
   const scope = kind === 'shared' ? 'all projects' : projectName;

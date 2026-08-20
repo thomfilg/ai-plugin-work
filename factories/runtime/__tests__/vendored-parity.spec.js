@@ -115,7 +115,12 @@ describe('VENDOR_SETS table shape', () => {
       'plugins/heimdall/lib/storeDiscovery',
       'plugins/maestro/lib/storeDiscovery',
     ],
-    'factories/storeMigration': ['plugins/synapsys/lib/storeMigration'],
+    'factories/storeMigration': [
+      'plugins/synapsys/lib/storeMigration',
+      'plugins/heimdall/lib/storeMigration',
+      'plugins/maestro/lib/storeMigration',
+      'plugins/work/scripts/workflows/lib/storeMigration',
+    ],
     'factories/safeIO': ['plugins/work/scripts/workflows/lib/safeIO'],
     'factories/hookEntrypoint': [
       'plugins/ghostwriter/lib/hookEntrypoint',

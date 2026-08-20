@@ -30,6 +30,7 @@ The only subtle part, and deliberately explicit:
 | dir exists, no version file | `0` | predates versioning — run everything |
 | dir exists, corrupt version file | `0` | a bad stamp must not strand data at an unknown version |
 | dir absent, `legacyDir` present | `0` | the data exists, at the old path |
+| dir absent, any `legacyPaths` entry present | `0` | same, for data kept *outside* the store |
 | dir absent, `legacyDir` absent | `null` | **nothing to do** — never creates a store |
 
 That last row is why `run` cannot conjure an empty directory for a plugin the
@@ -52,12 +53,25 @@ user never installed.
 | `plugin` | string (required) | Stamped into every version file. |
 | `migrationsDir` | string | Directory of one-file-per-migration modules (see below). Mutually exclusive with `migrations`; one of the two is required. |
 | `migrations` | array | `{ version, description?, migrate(ctx) }`, for tests or a caller that builds its list another way. Sorted by the factory. |
-| `locations` | `(cwd) => location[]` (required) | The roots to consider. Each is `{ dir, legacyDir?, kind? }`. **Must be mutually disjoint** — handing the migrator a location nested inside another invites moving a parent out from under a queued child. |
+| `locations` | `(cwd) => location[]` (required) | The roots to consider. Each is `{ dir, legacyDir?, legacyPaths?, kind? }`. **Must be mutually disjoint** — handing the migrator a location nested inside another invites moving a parent out from under a queued child. |
 | `versionFile` | string (default `.version.json`) | Stamp filename. |
 | `lockTimeoutMs` | number (default `30000`) | Age at which a lock is considered abandoned. |
 | `now` | `() => number` | Clock injection for tests. |
 
-`migrate` receives `{ dir, legacyDir, kind, plugin, version }`.
+`migrate` receives `{ dir, legacyDir, legacyPaths, kind, plugin, version }`.
+
+### legacyPaths — data kept outside the store
+
+Some plugins keep a config *beside* the store rather than inside it
+(`<root>/plugin-config.json` next to `<root>/plugin/`). Listing those old paths
+in `legacyPaths` does two things: it makes the location count as installed even
+when no store directory exists, and `relocateStore()` carries each entry into
+the new store's parent.
+
+Without it such a file is stranded at the old path forever. That is worse than
+it sounds when the file is a security config that is *safe-by-default-off* —
+nothing errors, the feature just quietly stops applying. heimdall's conceal
+policy is exactly that case.
 
 Returned frozen API:
 
@@ -78,6 +92,10 @@ near-copies:
 | `from` absent | no-op (the common case: fresh installs, every session after the first) |
 | `to` absent | `rename(2)` — atomic on one filesystem; `EXDEV` falls back to copy-then-remove |
 | `to` present | **merge, never clobber** — entries missing from `to` are copied in, entries already there win, and `from` is *kept* |
+
+`relocateFile` is the single-file counterpart (same non-destructive rule: an
+existing destination wins and the source is kept), and `relocatePath`
+dispatches on whichever the source happens to be.
 
 That last row is the "user reinstalled before upgrading" case: a fresh empty
 store at the new path while the real data sits at the old one. Deleting the

@@ -25,7 +25,9 @@
  *   - dir exists, unreadable/garbage version file → 0 (same; a corrupt stamp
  *     must not strand data at an unknown version)
  *   - dir absent, legacyDir present → 0 (the data exists, at the old path)
- *   - dir absent, legacyDir absent  → null → NOTHING TO DO. This is the
+ *   - dir absent, any `legacyPaths` entry present → 0 (same, for data the
+ *     plugin keeps outside its store — a config file beside it, say)
+ *   - dir absent, none of the above → null → NOTHING TO DO. This is the
  *     not-installed case, and it is why `run` never creates a store: a plugin
  *     the user never installed must not sprout an empty directory.
  *
@@ -157,6 +159,15 @@ function dirExists(dir) {
   }
 }
 
+function pathExists(target) {
+  try {
+    fs.statSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Recorded version of `dir`, or UNVERSIONED when the stamp is missing/unusable. */
 function readStamp(spec, dir) {
   try {
@@ -175,6 +186,13 @@ function readStamp(spec, dir) {
 function currentVersion(spec, location) {
   if (dirExists(location.dir)) return readStamp(spec, location.dir);
   if (location.legacyDir && dirExists(location.legacyDir)) return UNVERSIONED;
+  // `legacyPaths` covers data a plugin keeps OUTSIDE its store — a config file
+  // beside it, say. Without this the location reads as "not installed" and the
+  // file is stranded at the old path forever, which for a security config
+  // means it silently stops applying.
+  if (Array.isArray(location.legacyPaths) && location.legacyPaths.some(pathExists)) {
+    return UNVERSIONED;
+  }
   return null;
 }
 
@@ -259,6 +277,7 @@ function migrateLocation(spec, location, version, now) {
       migration.migrate({
         dir: location.dir,
         legacyDir: location.legacyDir || null,
+        legacyPaths: Array.isArray(location.legacyPaths) ? location.legacyPaths : [],
         kind: location.kind || null,
         plugin: spec.plugin,
         version: migration.version,
@@ -348,6 +367,10 @@ function createStoreMigrator(config) {
     stamp: (dir, version) => stampVersion(spec, dir, version, clock),
     stampLatest: (dir) => stampVersion(spec, dir, spec.latest, clock),
     run,
+    // Positional alias for the one-liner hook call sites, so a plugin's runner
+    // module can be `module.exports = createStoreMigrator({…})` with no
+    // hand-written re-export block to keep in sync (or duplicate).
+    runMigrations: (cwd) => run({ cwd }),
   });
 }
 

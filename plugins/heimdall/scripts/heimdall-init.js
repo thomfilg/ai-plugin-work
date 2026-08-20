@@ -27,6 +27,7 @@ const {
   readConfig,
   writeConfig,
 } = require(path.join(__dirname, '..', 'lib', 'lock-store'));
+const { stampLatest } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));
 
 const args = parseArgs(process.argv);
 const kind = args.kind || 'local';
@@ -51,6 +52,10 @@ const cfg = {
   locks: existing?.locks || [],
 };
 writeConfig(target.dir, cfg);
+// A store created NOW is already at the latest layout; stamping it here keeps
+// the SessionStart runner from treating it as un-versioned and replaying the
+// whole migration chain against it on first use.
+stampLatest(target.dir);
 
 console.log(
   `initialized heimdall store at ${path.join(target.dir, MARKER)} ` +

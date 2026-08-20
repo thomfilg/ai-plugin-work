@@ -84,11 +84,65 @@ function relocateDirectory(from, to) {
 }
 
 /**
- * Migration body for a store that moved: `migrate: relocateStore()`.
- * Reads `legacyDir`/`dir` off the migration context the runner supplies.
+ * Move a single FILE, never overwriting an existing destination.
+ *
+ * The file counterpart of the above, for the config a plugin keeps beside its
+ * store rather than inside it. Same non-destructive rule: a file already at
+ * `to` wins and `from` is left alone, because the two are as likely to be
+ * "the user already reconfigured this" as they are duplicates.
+ *
+ * @returns {{moved: boolean, kept: boolean}}
  */
-function relocateStore() {
-  return (ctx) => relocateDirectory(ctx && ctx.legacyDir, ctx && ctx.dir);
+function relocateFile(from, to) {
+  if (!from || !to || from === to) return { moved: false, kept: false };
+  let stat;
+  try {
+    stat = fs.statSync(from);
+  } catch {
+    return { moved: false, kept: false };
+  }
+  if (!stat.isFile()) return { moved: false, kept: false };
+  if (fs.existsSync(to)) return { moved: false, kept: true };
+
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  try {
+    fs.renameSync(from, to);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.copyFileSync(from, to);
+    fs.rmSync(from, { force: true });
+  }
+  return { moved: true, kept: false };
 }
 
-module.exports = { relocateDirectory, relocateStore };
+/** Move whichever of file / directory `from` happens to be. */
+function relocatePath(from, to) {
+  let stat;
+  try {
+    stat = fs.statSync(from);
+  } catch {
+    return { moved: false, merged: false, kept: false };
+  }
+  return stat.isDirectory()
+    ? relocateDirectory(from, to)
+    : { merged: false, ...relocateFile(from, to) };
+}
+
+/**
+ * Migration body for a store that moved: `migrate: relocateStore()`.
+ * Reads `legacyDir`/`dir` off the migration context the runner supplies, and
+ * additionally carries every `legacyPaths` entry into the store's parent —
+ * that is where a plugin's out-of-store config sits, by construction of the
+ * tier geometry (`<root>/<file>` beside `<root>/<folder>/`).
+ */
+function relocateStore() {
+  return (ctx) => {
+    const result = relocateDirectory(ctx && ctx.legacyDir, ctx && ctx.dir);
+    for (const legacy of (ctx && ctx.legacyPaths) || []) {
+      relocatePath(legacy, path.join(path.dirname(ctx.dir), path.basename(legacy)));
+    }
+    return result;
+  };
+}
+
+module.exports = { relocateDirectory, relocateFile, relocatePath, relocateStore };
