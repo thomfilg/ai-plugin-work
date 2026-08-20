@@ -254,7 +254,20 @@ function migrateLocation(spec, location, version, now) {
     applied.push(migration.version);
     // Only stamp a store that now exists — a no-op migration on an absent
     // location must not conjure the directory it declined to create.
-    if (dirExists(location.dir)) stampVersion(spec, location.dir, migration.version, now);
+    if (!dirExists(location.dir)) continue;
+    if (stampVersion(spec, location.dir, migration.version, now)) continue;
+    // The transformation happened but the record of it did not. Continuing
+    // would stack migration N+1 on a store still recorded as pre-N, and the
+    // next session would replay BOTH. Stop here and report: the replay is then
+    // bounded to this one migration, and the operator learns the store is
+    // unwritable rather than silently re-running transformations forever.
+    return {
+      applied,
+      error: new Error(
+        `storeMigration: applied migration ${migration.version} but could not write ` +
+          `${spec.versionFile} in ${location.dir} — it will be replayed next run`
+      ),
+    };
   }
   return { applied, error: null };
 }

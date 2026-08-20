@@ -206,6 +206,61 @@ describe('migrationCandidates', () => {
     }
   });
 
+  it('resolves the worktree row by ANCESTOR WALK, mirroring discovery', {
+    skip: !HOME_DRIVEN,
+  }, () => {
+    // A session run from deep inside a worktree must migrate the store the
+    // walk would have discovered, not just the one at <cwd>/...
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-migwalk-'));
+    try {
+      const wt = path.join(root, 'wt');
+      const legacy = path.join(wt, '.claude', FOLDER);
+      fs.mkdirSync(legacy, { recursive: true });
+      fs.writeFileSync(path.join(legacy, MARKER), '{}\n');
+      const deep = path.join(wt, 'packages', 'app');
+      fs.mkdirSync(deep, { recursive: true });
+
+      const row = makeApi()
+        .migrationCandidates(deep)
+        .find((r) => r.kind === 'worktree');
+      assert.equal(row.legacyDir, legacy, 'walk must reach the worktree base');
+      assert.equal(row.dir, path.join(wt, '.workflow', FOLDER));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the immediate parent when no legacy ancestor carries a marker', () => {
+    const cwd = path.join(os.tmpdir(), 'sd-mig-nowalk', 'repo');
+    const row = makeApi()
+      .migrationCandidates(cwd)
+      .find((r) => r.kind === 'worktree');
+    assert.equal(row.dir, path.resolve(cwd, '..', '.workflow', FOLDER));
+  });
+
+  it('never emits the same dir twice', { skip: !HOME_DRIVEN }, () => {
+    // A repo directly under $HOME resolves the worktree walk onto the home
+    // namespace; the duplicate must be dropped so it is not migrated twice.
+    const originalHome = process.env.HOME;
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-migdup-'));
+    try {
+      process.env.HOME = fakeHome;
+      const legacy = path.join(fakeHome, '.claude', FOLDER);
+      fs.mkdirSync(legacy, { recursive: true });
+      fs.writeFileSync(path.join(legacy, MARKER), '{}\n');
+      const repo = path.join(fakeHome, 'myrepo');
+      fs.mkdirSync(repo, { recursive: true });
+
+      const rows = makeApi().migrationCandidates(repo);
+      const dirs = rows.map((r) => path.resolve(r.dir));
+      assert.equal(new Set(dirs).size, dirs.length, `duplicate rows: ${dirs.join(', ')}`);
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
   it('exposes LEGACY_ROOT_DIR alongside ROOT_DIR', () => {
     const api = makeApi();
     assert.equal(api.ROOT_DIR, '.workflow');

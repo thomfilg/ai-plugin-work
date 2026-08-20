@@ -135,6 +135,28 @@ describe('SessionStart migrates a legacy local store', { skip: !HOME_DRIVEN }, (
     );
   });
 
+  it('migrates a worktree store discovered from a deeply-nested cwd', () => {
+    // Pre-migration, discovery finds `<wt>/.claude/synapsys` from `<wt>/a/b`
+    // via its ancestor walk. The migration must reach the same store, or the
+    // memories become invisible the moment discovery stops looking at .claude.
+    const legacy = seedLegacyStore(path.join(repo, '.claude', 'synapsys'));
+    const deep = path.join(repo, 'packages', 'app');
+    fs.mkdirSync(deep, { recursive: true });
+
+    runSessionStart(deep);
+
+    assert.equal(fs.existsSync(legacy), false, 'walked store must be migrated');
+    const target = path.join(repo, '.workflow', 'synapsys');
+    assert.equal(fs.existsSync(path.join(target, 'legacy-memory.md')), true);
+
+    const wt = discoverStores(deep).find((s) => s.kind === 'worktree');
+    assert.ok(wt, 'migrated store must still be discoverable from the nested cwd');
+    assert.deepEqual(
+      listMemoriesFromStore(wt).map((m) => m.name),
+      ['legacy-memory']
+    );
+  });
+
   it('does nothing at all when there is no legacy store', () => {
     const res = runSessionStart(repo);
     assert.equal(res.status, 0);

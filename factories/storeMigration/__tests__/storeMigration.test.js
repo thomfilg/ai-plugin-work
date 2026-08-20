@@ -188,6 +188,29 @@ describe('failure handling', () => {
     assert.equal(readStamp(good).version, 1);
   });
 
+  it('a failed stamp stops the chain and is reported, not silently swallowed', () => {
+    // The transformation happened but the record of it did not. Continuing
+    // would stack the next migration on a store still recorded as pre-N.
+    const dir = seed(path.join(base, 'store'));
+    const calls = [];
+    const migrator = createStoreMigrator({
+      plugin: 'acme',
+      versionFile: 'ro/.version.json', // parent is a FILE → the write must fail
+      locations: () => [{ dir }],
+      migrations: [
+        { version: 1, migrate: () => calls.push(1) },
+        { version: 2, migrate: () => calls.push(2) },
+      ],
+    });
+    fs.writeFileSync(path.join(dir, 'ro'), 'not a directory');
+
+    const res = migrator.run({ cwd: base });
+    assert.deepEqual(calls, [1], 'must not run migration 2 on an unstamped store');
+    assert.equal(res.errors.length, 1);
+    assert.match(res.errors[0].error.message, /could not write/);
+    assert.match(res.errors[0].error.message, /replayed next run/);
+  });
+
   it('a throwing locations() is captured, not propagated', () => {
     const migrator = createStoreMigrator({
       plugin: 'acme',

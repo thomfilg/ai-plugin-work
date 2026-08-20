@@ -204,16 +204,43 @@ function migrationRows(spec, cwd) {
     dir: path.join(...tail(ROOT_DIR)),
     legacyDir: path.join(...tail(LEGACY_ROOT_DIR)),
   });
-  return [
+  // The worktree row must mirror DISCOVERY, which resolves this tier with an
+  // ancestor WALK, not a fixed parent row. A session started from
+  // `<worktree>/packages/app` discovers a store at `<worktree>/`; checking only
+  // `<cwd>/..` would leave exactly that store unmigrated and then invisible,
+  // since post-migration discovery no longer looks under the legacy root.
+  // Fall back to the immediate parent when the walk finds nothing, so an
+  // already-migrated store at `<cwd>/..` still resolves and gets stamped.
+  const walked = ancestorStoreUnder(spec, path.dirname(cwd), LEGACY_ROOT_DIR);
+  const worktree = walked
+    ? {
+        kind: 'worktree',
+        // `<base>/<LEGACY_ROOT_DIR>/<folder>` → the same base under ROOT_DIR.
+        dir: path.join(path.dirname(path.dirname(walked)), ROOT_DIR, spec.folder),
+        legacyDir: walked,
+      }
+    : {
+        kind: 'worktree',
+        dir: path.resolve(cwd, '..', ROOT_DIR, spec.folder),
+        legacyDir: path.resolve(cwd, '..', LEGACY_ROOT_DIR, spec.folder),
+      };
+
+  const rows = [
     pair('local', (root) => [cwd, root, spec.folder]),
-    {
-      kind: 'worktree',
-      dir: path.resolve(cwd, '..', ROOT_DIR, spec.folder),
-      legacyDir: path.resolve(cwd, '..', LEGACY_ROOT_DIR, spec.folder),
-    },
+    worktree,
     pair('home', (root) => [home, root, spec.folder]),
     pair('shared', (root) => [home, root, spec.sharedFolder]),
   ];
+  // The walk can land on a row another tier already covers (a repo directly
+  // under $HOME resolves the worktree row to the home namespace). Rows must
+  // stay distinct so one location is never migrated twice.
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = path.resolve(row.dir);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ── ancestor walk ────────────────────────────────────────────────────────────
@@ -223,17 +250,21 @@ function migrationRows(spec, cwd) {
 // directory when the walk is home-bounded; the marker AT home is still
 // checked before stopping). The walk is why a store at a worktree base still
 // resolves from a sub-directory of the worktree.
-function ancestorStore(spec, startDir) {
+function ancestorStoreUnder(spec, startDir, root) {
   const home = spec.stopsAtHome ? os.homedir() : null;
   let dir = startDir;
   for (;;) {
-    const storeDir = path.join(dir, ROOT_DIR, spec.folder);
+    const storeDir = path.join(dir, root, spec.folder);
     if (fs.existsSync(path.join(storeDir, spec.marker))) return storeDir;
     if (dir === home) return '';
     const parent = path.dirname(dir);
     if (parent === dir) return '';
     dir = parent;
   }
+}
+
+function ancestorStore(spec, startDir) {
+  return ancestorStoreUnder(spec, startDir, ROOT_DIR);
 }
 
 // ── discovery ────────────────────────────────────────────────────────────────
