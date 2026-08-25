@@ -153,6 +153,45 @@ function globBase(file) {
   return base === file ? null : base;
 }
 
+const RE_META = /[.*+?^${}()|[\]\\]/g;
+
+/**
+ * Compile a surface glob to a regex. Interior wildcards matter: a surface is
+ * commonly declared as `app/<double-star>/page.tsx`, and reducing only TRAILING
+ * globs left such a surface matching nothing but its own literal spelling.
+ *
+ *   double-star + slash → any number of whole segments
+ *   double-star          → anything, separators included
+ *   `*` → anything within one segment; `?` → one char within one segment
+ */
+function globToRegExp(file) {
+  if (!/[*?]/.test(file)) return null;
+  let out = '';
+  for (const part of file.split(/(\*\*\/|\*\*|\*|\?)/)) {
+    if (part === '') continue;
+    if (part === '**/') out += '(?:[^/]+/)*';
+    else if (part === '**') out += '.*';
+    else if (part === '*') out += '[^/]*';
+    else if (part === '?') out += '[^/]';
+    else out += part.replace(RE_META, '\\$&');
+  }
+  return new RegExp(`^${out}$`);
+}
+
+/**
+ * Is the surface path written out verbatim in the line?
+ *
+ * Needed for surfaces `PATH_TOKEN_RE` cannot tokenize — a root-level
+ * extensionless file like `Dockerfile` or `Makefile` has no `/` and no
+ * extension, so token alignment alone never sees it and a real sibling
+ * dependency silently degraded from error to warning. Boundary-anchored so
+ * `Dockerfile` does not match inside `Dockerfile.web`.
+ */
+function lineMentionsLiteral(lineText, file) {
+  const esc = file.replace(RE_META, '\\$&');
+  return new RegExp(`(?:^|[^A-Za-z0-9_@./~*-])${esc}(?![A-Za-z0-9_@.~-])`).test(lineText);
+}
+
 /**
  * Does `token` (a path written in the prose) refer to surface file `file`?
  *
@@ -165,11 +204,14 @@ function globBase(file) {
  */
 function pathRefersTo(token, file) {
   const gb = globBase(file);
-  if (gb) return token === gb || token.startsWith(`${gb}/`);
+  if (gb && (token === gb || token.startsWith(`${gb}/`))) return true;
+  const glob = globToRegExp(file);
+  if (glob) return glob.test(token);
   return token === file || file.endsWith(`/${token}`) || token.endsWith(`/${file}`);
 }
 
 function lineRefersToFile(lineText, file) {
+  if (lineMentionsLiteral(lineText, file)) return true;
   const tokens = lineText.match(PATH_TOKEN_RE) || [];
   return tokens.some((tok) => pathRefersTo(tok.replace(/\/+$/, ''), file));
 }

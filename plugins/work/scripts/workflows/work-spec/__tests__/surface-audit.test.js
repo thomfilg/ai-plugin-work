@@ -368,3 +368,75 @@ test('lineRefersToFile: suffix alignment, globs, and near-misses', () => {
   assert.equal(f('`components/other/row.tsx`', 'components/pulse/pulse-content/**'), false);
   assert.equal(f('**Goal:** expose the row', 'components/pulse/pulse-content/**'), false);
 });
+
+// ─── Surfaces the tokenizer alone cannot see ────────────────────────────────
+//
+// Path-token alignment replaced a bare-basename test, but two shapes of surface
+// have no path token to align on: a root-level extensionless file
+// (`Dockerfile`) has neither a `/` nor an extension, and a glob with an
+// INTERIOR wildcard (`app/**/page.tsx`) is not reducible to a trailing base.
+// Both degraded a real sibling dependency from a blocking error to a warning.
+
+test('root-level extensionless surface is still recognised', () => {
+  const SURF = 'Dockerfile';
+  const { root, tasksDir } = makeFixture({
+    briefContent: [
+      '# Brief',
+      '',
+      '## Constraints',
+      `- Sibling owns \`${SURF}\` and must expose \`SEED_DATABASE\`.`,
+      '',
+    ].join('\n'),
+    specContent: null,
+    surfaceFilePath: SURF,
+    surfaceFileContent: 'FROM node:22\n',
+  });
+  const manifest = { worktreeRoot: root, siblings: [{ id: 'ECHO-1', surfaces: [SURF] }] };
+  const { errors } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.ok(
+    errors.some((e) => e.includes('SEED_DATABASE') && e.includes(SURF)),
+    `expected a blocking error naming Dockerfile, got: ${JSON.stringify(errors)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('interior-glob surface matches a concrete path under it', () => {
+  const GLOB = 'app/**/page.tsx';
+  const REAL = 'app/dashboard/page.tsx';
+  const { root, tasksDir } = makeFixture({
+    briefContent: [
+      '# Brief',
+      '',
+      '## Constraints',
+      `- Read \`workbookId\` from \`${REAL}\`.`,
+      '',
+    ].join('\n'),
+    specContent: null,
+    surfaceFilePath: REAL,
+    surfaceFileContent: 'export default function Page() {}\n',
+  });
+  const manifest = { worktreeRoot: root, siblings: [{ id: 'ECHO-2', surfaces: [GLOB] }] };
+  const { errors } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.ok(
+    errors.some((e) => e.includes('workbookId')),
+    `expected a blocking error for the interior glob, got: ${JSON.stringify(errors)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('lineRefersToFile: extensionless surfaces and interior globs', () => {
+  const f = surfaceAudit.lineRefersToFile;
+  // Extensionless root files — no path token to align on, matched literally.
+  assert.equal(f('Sibling owns `Dockerfile` (build args).', 'Dockerfile'), true);
+  assert.equal(f('see `Makefile` target', 'Makefile'), true);
+  // ...but anchored, so a longer neighbour is not a match.
+  assert.equal(f('see `Dockerfile.web`', 'Dockerfile'), false);
+  // Interior globs.
+  assert.equal(f('edit `app/dashboard/page.tsx`', 'app/**/page.tsx'), true);
+  assert.equal(f('edit `app/dashboard/layout.tsx`', 'app/**/page.tsx'), false);
+  // A single star stays inside one segment.
+  assert.equal(f('edit `lib/explore.schemas.ts`', 'lib/*.schemas.ts'), true);
+  assert.equal(f('edit `lib/a/b.schemas.ts`', 'lib/*.schemas.ts'), false);
+  // Trailing globs keep working, base directory included.
+  assert.equal(f('`components/pulse/pulse-content`', 'components/pulse/pulse-content/**'), true);
+});
