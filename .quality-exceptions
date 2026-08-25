@@ -58,7 +58,6 @@ plugins/work/scripts/workflows/check/check.workflow.js
 plugins/work/scripts/workflows/check/hooks/check-start-env.js
 plugins/work/scripts/workflows/work/engine/transition-step.js
 plugins/work/scripts/workflows/check/hooks/check-validate-reports.js
-plugins/work/scripts/workflows/work-spec/lib/phases/surface_audit.js
 plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-block-write.js
 plugins/work/scripts/workflows/work/lib/task-parser.js
 plugins/work/scripts/workflows/lib/workflow-state.js
