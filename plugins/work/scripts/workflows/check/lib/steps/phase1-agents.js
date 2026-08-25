@@ -301,10 +301,8 @@ module.exports = function registerPhase1(register) {
     const changesHash = state.changesHash || 'unknown';
 
     // Ticket-worktree HEAD at this scan/dispatch (GH-308). Null → staleness
-    // validation is skipped (fail-open) but dispatch still proceeds. The
-    // worktree path rides along so an artifact-only HEAD move (a sibling
-    // commit that carried only this cycle's reports) can be told apart from a
-    // real code change.
+    // validation is skipped (fail-open) but dispatch still proceeds. The worktree
+    // rides along so an artifact-only HEAD move is not mistaken for a code change.
     const currentHead = currentWorktreeHead(state, ctx);
     const head = { sha: currentHead, worktree: ticketWorktreePath(state, ctx) };
 
