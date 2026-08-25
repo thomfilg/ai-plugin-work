@@ -243,7 +243,11 @@ test('Searched: annotations under Open Questions do not block', () => {
   const manifest = { worktreeRoot: root, relatedTo: [{ id: 'CHAR-8177', surfaces: [SURF] }] };
   const { errors, warnings } = surfaceAudit.auditArtifacts(tasksDir, manifest);
   assert.deepEqual(errors, [], `evidence prose must not block, got: ${JSON.stringify(errors)}`);
-  assert.deepEqual(warnings, [], `evidence prose must not even warn, got: ${JSON.stringify(warnings)}`);
+  assert.deepEqual(
+    warnings,
+    [],
+    `evidence prose must not even warn, got: ${JSON.stringify(warnings)}`
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -313,7 +317,11 @@ test('same basename under a different directory is not a sibling reference', () 
   });
   const manifest = { worktreeRoot: root, relatedTo: [{ id: 'CHAR-8177', surfaces: [SURF] }] };
   const { errors, warnings } = surfaceAudit.auditArtifacts(tasksDir, manifest);
-  assert.deepEqual(errors, [], `different directory must not block, got: ${JSON.stringify(errors)}`);
+  assert.deepEqual(
+    errors,
+    [],
+    `different directory must not block, got: ${JSON.stringify(errors)}`
+  );
   assert.ok(
     warnings.some((w) => w.includes('relatedTo')),
     `expected a non-blocking warning, got: ${JSON.stringify(warnings)}`
@@ -346,11 +354,17 @@ test('the sibling path itself still BLOCKS (attribution keeps its teeth)', () =>
 
 test('lineRefersToFile: suffix alignment, globs, and near-misses', () => {
   const f = surfaceAudit.lineRefersToFile;
-  assert.equal(f('see `lib/explore/explore.schemas.ts` here', 'lib/explore/explore.schemas.ts'), true);
+  assert.equal(
+    f('see `lib/explore/explore.schemas.ts` here', 'lib/explore/explore.schemas.ts'),
+    true
+  );
   assert.equal(f('see `explore.schemas.ts` here', 'lib/explore/explore.schemas.ts'), true);
   assert.equal(f('see `other/explore.schemas.ts`', 'lib/explore/explore.schemas.ts'), false);
   assert.equal(f('tasks/CHAR-8178/ticket.json', 'tasks/CHAR-8177/ticket.json'), false);
-  assert.equal(f('`components/pulse/pulse-content/row.tsx`', 'components/pulse/pulse-content/**'), true);
+  assert.equal(
+    f('`components/pulse/pulse-content/row.tsx`', 'components/pulse/pulse-content/**'),
+    true
+  );
   assert.equal(f('`components/other/row.tsx`', 'components/pulse/pulse-content/**'), false);
   assert.equal(f('**Goal:** expose the row', 'components/pulse/pulse-content/**'), false);
 });
