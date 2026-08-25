@@ -12,7 +12,10 @@
  *   1. Read related-tickets.json — collect each sibling's `surfaces[]` array
  *      of repo-relative file paths.
  *   2. From brief.md (and spec.md if present), extract every backticked
- *      identifier. Filter out built-in noise (`string`, `null`, etc.).
+ *      identifier from the doc's CLAIM regions. Evidence prose — the
+ *      `## Open Questions` section and any `Searched:` annotation — is not a
+ *      claim about a sibling surface and is skipped (see `stripEvidenceProse`).
+ *      Filter out built-in noise (`string`, `null`, etc.).
  *   3. Try to associate each identifier with a sibling-owned surface file:
  *        - dotted form `Schema.field` → match `Schema` against any surface.
  *        - generic-indexed form (`RouterOutputs[...]`) → unwrap to `RouterOutputs`.
@@ -30,32 +33,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { SPEC_PHASES } = require('../../spec-phase-registry');
-
-// Identifiers we never bother to check — common built-ins, primitives,
-// and conventional null markers. Add sparingly.
-const DENY = new Set([
-  'string',
-  'number',
-  'boolean',
-  'null',
-  'undefined',
-  'void',
-  'any',
-  'unknown',
-  'true',
-  'false',
-  'Date',
-  'Promise',
-  'Array',
-  'Record',
-  'Partial',
-  'Readonly',
-  'Omit',
-  'Pick',
-  'object',
-  'never',
-  'this',
-]);
+const {
+  DENY,
+  stripEvidenceProse,
+  extractBacktickIdentifiers,
+  normalizeIdentifier,
+  lineRefersToFile,
+} = require('../surface-tokens');
 
 const VERIFIED_HEADER = '## Verified sibling surface';
 
@@ -65,80 +49,6 @@ function readFile(p) {
   } catch {
     return null;
   }
-}
-
-/**
- * Pull every backticked token out of `text`. Returns an array of
- * { token, line } where line is the 1-based line number of the bullet
- * the token was found in (so the caller can correlate to nearby file
- * references).
- */
-function isFilePathLike(token) {
-  // Reject things that are clearly paths, not identifiers.
-  if (token.includes('/')) return true;
-  if (/\.(ts|tsx|js|jsx|json|md|yml|yaml|sql|sh|prisma|mjs|cjs)$/i.test(token)) return true;
-  return false;
-}
-
-function extractBacktickIdentifiers(text) {
-  if (!text) return [];
-  const lines = text.split('\n');
-  const out = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Backtick spans — non-greedy, single-line.
-    const re = /`([^`\n]+)`/g;
-    let m;
-    while ((m = re.exec(line)) !== null) {
-      const token = m[1].trim();
-      if (!token) continue;
-      // File paths are not identifiers — surface_audit verifies the
-      // identifiers AT those paths, not the paths themselves.
-      if (isFilePathLike(token)) continue;
-      out.push({ token, line: i + 1, lineText: line });
-    }
-  }
-  return out;
-}
-
-/**
- * Try to extract a short identifier from a backtick token that may be a
- * dotted path, generic-indexed type, or plain name. Returns either:
- *   - a string (one identifier to check) for trivial cases, or
- *   - an array of strings if the token contains multiple identifier-like
- *     subparts the caller should check individually.
- *
- * Heuristics, not parsing — biased toward false negatives (skip), not
- * false positives (block).
- */
-function normalizeIdentifier(token) {
-  // Strip type-args / generics / index access.
-  let t = token.trim();
-  if (!t) return null;
-  // Disallow tokens that include obvious code noise (parens, arrows, etc).
-  if (/[()=>{}]/.test(t)) return null;
-  // Generic-indexed: `RouterOutputs['explore']['list']['items'][number]`
-  //   → keep the leading base identifier AND the bracketed string keys.
-  if (/\[/.test(t)) {
-    const base = t.split('[')[0].trim();
-    const keys = [...t.matchAll(/\[\s*['"]([^'"]+)['"]\s*\]/g)].map((m) => m[1]);
-    const out = [base, ...keys].filter(Boolean).filter((x) => !DENY.has(x));
-    return out.length ? out : null;
-  }
-  // Dotted: `exploreItemSchema.workbookId` → check both.
-  if (t.includes('.')) {
-    const parts = t
-      .split('.')
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (!parts.length) return null;
-    const out = parts.filter((p) => /^[A-Za-z_$][\w$]*$/.test(p) && !DENY.has(p));
-    return out.length ? out : null;
-  }
-  // Plain identifier.
-  if (!/^[A-Za-z_$][\w$]*$/.test(t)) return null;
-  if (DENY.has(t)) return null;
-  return t;
 }
 
 /** The `{siblingId, file}` pairs one related-ticket entry contributes. */
@@ -236,13 +146,6 @@ function findDefiningSurface(id, surfaceFiles, resolveSurfacePath) {
   return null;
 }
 
-// A glob surface (`components/pulse/**`) has basename `**`, which would other-
-// wise match every bold markdown line. Only match a plausible filename.
-function basenameMatch(lineText, file) {
-  const bn = path.basename(file);
-  return bn.length > 3 && (bn.includes('.') || bn.includes('/')) && lineText.includes(bn);
-}
-
 /**
  * Record an identifier no surface file defines.
  *
@@ -251,9 +154,7 @@ function basenameMatch(lineText, file) {
  * WARNING otherwise, since it probably was never meant to come from a sibling.
  */
 function recordUnresolved(t, id, surfaceFiles, errors, warnings) {
-  const lineRefersToSurface = surfaceFiles.find(
-    (sf) => t.lineText.includes(sf.file) || basenameMatch(t.lineText, sf.file)
-  );
+  const lineRefersToSurface = surfaceFiles.find((sf) => lineRefersToFile(t.lineText, sf.file));
   if (lineRefersToSurface) {
     errors.push(
       `${t.source}.md mentions \`${id}\` in a bullet that references sibling-owned file \`${lineRefersToSurface.file}\`, but \`${id}\` was not found in that file. Sibling \`${lineRefersToSurface.siblingId}\` does not currently expose this identifier — escalate to the sibling owner before depending on it.`
@@ -268,8 +169,14 @@ function recordUnresolved(t, id, surfaceFiles, errors, warnings) {
 /** Every backticked identifier in brief + spec, tagged with its source doc. */
 function candidateTokens(brief, spec) {
   return [
-    ...extractBacktickIdentifiers(brief).map((t) => ({ ...t, source: 'brief' })),
-    ...extractBacktickIdentifiers(spec || '').map((t) => ({ ...t, source: 'spec' })),
+    ...extractBacktickIdentifiers(stripEvidenceProse(brief)).map((t) => ({
+      ...t,
+      source: 'brief',
+    })),
+    ...extractBacktickIdentifiers(stripEvidenceProse(spec || '')).map((t) => ({
+      ...t,
+      source: 'spec',
+    })),
   ];
 }
 
@@ -393,6 +300,8 @@ module.exports.validate = validate;
 module.exports.instructions = instructions;
 module.exports.auditArtifacts = auditArtifacts;
 module.exports.extractBacktickIdentifiers = extractBacktickIdentifiers;
+module.exports.stripEvidenceProse = stripEvidenceProse;
+module.exports.lineRefersToFile = lineRefersToFile;
 module.exports.normalizeIdentifier = normalizeIdentifier;
 module.exports.listSurfaceFiles = listSurfaceFiles;
 module.exports.renderVerifiedBlock = renderVerifiedBlock;
