@@ -197,6 +197,10 @@ Every open question MUST be emitted as a structured bullet with an explicit `sco
 
 Always emit `resolved: false` on creation. Only `local` questions may remain unresolved when handing off; `cross-ticket` and `architectural` questions block the downstream gate and must be resolved (or explicitly downgraded to `local` with a justification) before the spec step runs.
 
+### Backticks are read as surface claims
+
+The spec step's `surface_audit` reads a backticked identifier in the brief as a claim that the identifier EXISTS in the sibling-owned file named on the same line, and hard-blocks when it does not. That applies to the claim sections only — Requirements, `## Out of scope (sibling-owned)`, Constraints, Success Metrics. `## Open Questions` and every `Searched:` annotation are exempt, so write your evidence (env vars, MCP tool names, JSON fields, grep patterns) in whatever notation reads best. In the claim sections, backtick an identifier when you mean "this symbol exists", and leave prose in plain text.
+
 ## Workflow
 
 1. Read the ticket requirements provided in your prompt

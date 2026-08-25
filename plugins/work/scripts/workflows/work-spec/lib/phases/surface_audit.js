@@ -12,7 +12,10 @@
  *   1. Read related-tickets.json — collect each sibling's `surfaces[]` array
  *      of repo-relative file paths.
  *   2. From brief.md (and spec.md if present), extract every backticked
- *      identifier. Filter out built-in noise (`string`, `null`, etc.).
+ *      identifier from the doc's CLAIM regions. Evidence prose — the
+ *      `## Open Questions` section and any `Searched:` annotation — is not a
+ *      claim about a sibling surface and is skipped (see `stripEvidenceProse`).
+ *      Filter out built-in noise (`string`, `null`, etc.).
  *   3. Try to associate each identifier with a sibling-owned surface file:
  *        - dotted form `Schema.field` → match `Schema` against any surface.
  *        - generic-indexed form (`RouterOutputs[...]`) → unwrap to `RouterOutputs`.
@@ -78,6 +81,34 @@ function isFilePathLike(token) {
   if (token.includes('/')) return true;
   if (/\.(ts|tsx|js|jsx|json|md|yml|yaml|sql|sh|prisma|mjs|cjs)$/i.test(token)) return true;
   return false;
+}
+
+/**
+ * Blank out the regions of a brief/spec that are evidence, not surface claims,
+ * so their backticks are never read as "this identifier exists on a sibling".
+ *
+ *   - The whole `## Open Questions` section. Its bullets are, by construction,
+ *     things the author could NOT resolve — the opposite of a claim.
+ *   - Any `Searched:` annotation, wherever it appears. `brief-next.js` phase
+ *     `draft` REQUIRES one on every open question ("Searched: `docker/Dockerfile`
+ *     documents `SEED_DATABASE` as a build arg"), so auditing that text made the
+ *     two phases contradict each other: the brief could not pass `draft` without
+ *     the evidence line, then could not pass `surface_audit` because of it.
+ *
+ * Lines are blanked (not deleted) so reported line numbers stay accurate.
+ */
+function stripEvidenceProse(text) {
+  if (!text) return text;
+  const lines = text.split('\n');
+  let inOpenQuestions = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^##\s/.test(line)) {
+      inOpenQuestions = /^##\s+Open Questions(?=\s|$)/i.test(line);
+    }
+    if (inOpenQuestions || /^\s*(?:[-*+]\s+)?\**Searched:/i.test(line)) lines[i] = '';
+  }
+  return lines.join('\n');
 }
 
 function extractBacktickIdentifiers(text) {
@@ -236,11 +267,37 @@ function findDefiningSurface(id, surfaceFiles, resolveSurfacePath) {
   return null;
 }
 
-// A glob surface (`components/pulse/**`) has basename `**`, which would other-
-// wise match every bold markdown line. Only match a plausible filename.
-function basenameMatch(lineText, file) {
-  const bn = path.basename(file);
-  return bn.length > 3 && (bn.includes('.') || bn.includes('/')) && lineText.includes(bn);
+// Path-ish runs in a line of prose: either a token with a `/` in it, or a bare
+// filename with a source-file extension. Backticks/quotes are outside the char
+// class, so `` `lib/a.ts` `` yields `lib/a.ts`.
+const PATH_TOKEN_RE =
+  /[A-Za-z0-9_@.~-]+(?:\/[A-Za-z0-9_@.~*-]+)+|\b[A-Za-z0-9_.-]+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|sql|sh|prisma|mjs|cjs)\b/g;
+
+/** Trailing glob segments (`components/pulse/**`) reduced to their directory. */
+function globBase(file) {
+  const base = file.replace(/\/+\*+$/, '').replace(/\/+$/, '');
+  return base === file ? null : base;
+}
+
+/**
+ * Does `token` (a path written in the prose) refer to surface file `file`?
+ *
+ * Path-SUFFIX alignment, not bare-basename containment. `tasks/CHAR-8178/
+ * ticket.json` and sibling surface `tasks/CHAR-8177/ticket.json` share the
+ * basename `ticket.json` and nothing else; the old basename test tied every
+ * identifier on that line to the sibling and hard-blocked the spec phase.
+ * Generic filenames (`ticket.json`, `index.ts`, `page.tsx`, `route.ts`) made
+ * that collision routine.
+ */
+function pathRefersTo(token, file) {
+  const gb = globBase(file);
+  if (gb) return token === gb || token.startsWith(`${gb}/`);
+  return token === file || file.endsWith(`/${token}`) || token.endsWith(`/${file}`);
+}
+
+function lineRefersToFile(lineText, file) {
+  const tokens = lineText.match(PATH_TOKEN_RE) || [];
+  return tokens.some((tok) => pathRefersTo(tok.replace(/\/+$/, ''), file));
 }
 
 /**
@@ -251,9 +308,7 @@ function basenameMatch(lineText, file) {
  * WARNING otherwise, since it probably was never meant to come from a sibling.
  */
 function recordUnresolved(t, id, surfaceFiles, errors, warnings) {
-  const lineRefersToSurface = surfaceFiles.find(
-    (sf) => t.lineText.includes(sf.file) || basenameMatch(t.lineText, sf.file)
-  );
+  const lineRefersToSurface = surfaceFiles.find((sf) => lineRefersToFile(t.lineText, sf.file));
   if (lineRefersToSurface) {
     errors.push(
       `${t.source}.md mentions \`${id}\` in a bullet that references sibling-owned file \`${lineRefersToSurface.file}\`, but \`${id}\` was not found in that file. Sibling \`${lineRefersToSurface.siblingId}\` does not currently expose this identifier — escalate to the sibling owner before depending on it.`
@@ -268,8 +323,11 @@ function recordUnresolved(t, id, surfaceFiles, errors, warnings) {
 /** Every backticked identifier in brief + spec, tagged with its source doc. */
 function candidateTokens(brief, spec) {
   return [
-    ...extractBacktickIdentifiers(brief).map((t) => ({ ...t, source: 'brief' })),
-    ...extractBacktickIdentifiers(spec || '').map((t) => ({ ...t, source: 'spec' })),
+    ...extractBacktickIdentifiers(stripEvidenceProse(brief)).map((t) => ({ ...t, source: 'brief' })),
+    ...extractBacktickIdentifiers(stripEvidenceProse(spec || '')).map((t) => ({
+      ...t,
+      source: 'spec',
+    })),
   ];
 }
 
@@ -393,6 +451,8 @@ module.exports.validate = validate;
 module.exports.instructions = instructions;
 module.exports.auditArtifacts = auditArtifacts;
 module.exports.extractBacktickIdentifiers = extractBacktickIdentifiers;
+module.exports.stripEvidenceProse = stripEvidenceProse;
+module.exports.lineRefersToFile = lineRefersToFile;
 module.exports.normalizeIdentifier = normalizeIdentifier;
 module.exports.listSurfaceFiles = listSurfaceFiles;
 module.exports.renderVerifiedBlock = renderVerifiedBlock;

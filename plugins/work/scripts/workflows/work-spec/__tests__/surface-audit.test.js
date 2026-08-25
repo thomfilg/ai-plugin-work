@@ -215,3 +215,142 @@ test('a genuine sibling-file reference still BLOCKS alongside a glob surface', (
   );
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// ─── Evidence prose is not a surface claim ──────────────────────────────────
+//
+// `brief-next.js` phase `draft` REQUIRES a `Searched:` annotation on every open
+// question. Those annotations name env vars, MCP tools, JSON fields and grep
+// patterns in backticks — evidence of what was consulted, not claims that a
+// sibling exposes them. Auditing that text made `draft` and `surface_audit`
+// contradict each other: the brief could not pass one without failing the other.
+
+test('Searched: annotations under Open Questions do not block', () => {
+  const SURF = 'docker/Dockerfile';
+  const { root, tasksDir } = makeFixture({
+    briefContent: [
+      '# Brief',
+      '',
+      '## Open Questions',
+      '',
+      '- Should the seed run in CI?',
+      `  Searched: \`${SURF}\` documents \`SEED_DATABASE\` as a build arg; Linear MCP unavailable (\`mcp__linear__get_issue\` → "No such tool available").`,
+      '',
+    ].join('\n'),
+    specContent: null,
+    surfaceFilePath: SURF,
+    surfaceFileContent: 'FROM node:22\n',
+  });
+  const manifest = { worktreeRoot: root, relatedTo: [{ id: 'CHAR-8177', surfaces: [SURF] }] };
+  const { errors, warnings } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.deepEqual(errors, [], `evidence prose must not block, got: ${JSON.stringify(errors)}`);
+  assert.deepEqual(warnings, [], `evidence prose must not even warn, got: ${JSON.stringify(warnings)}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a Searched: annotation outside Open Questions is skipped too', () => {
+  const SURF = 'lib/explore/explore.schemas.ts';
+  const { root, tasksDir } = makeFixture({
+    briefContent: [
+      '# Brief',
+      '',
+      '## Constraints',
+      `- Searched: \`${SURF}\` for \`legacyFlag\` → not present.`,
+      '',
+    ].join('\n'),
+    specContent: null,
+    surfaceFilePath: SURF,
+    surfaceFileContent: '// empty\n',
+  });
+  const manifest = { worktreeRoot: root, siblings: [{ id: 'ECHO-4470', surfaces: [SURF] }] };
+  const { errors } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.deepEqual(errors, [], `got: ${JSON.stringify(errors)}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('stripEvidenceProse blanks the right lines and preserves line numbers', () => {
+  const src = [
+    '## Requirements', // 1
+    '- keep `alpha`', // 2
+    '## Open Questions', // 3
+    '- drop `beta`', // 4
+    '  Searched: `gamma`', // 5
+    '## Constraints', // 6
+    '- keep `delta`', // 7
+    '- Searched: `epsilon`', // 8
+  ].join('\n');
+  const out = surfaceAudit.stripEvidenceProse(src);
+  assert.equal(out.split('\n').length, 8, 'line count must be preserved');
+  const tokens = surfaceAudit.extractBacktickIdentifiers(out);
+  assert.deepEqual(
+    tokens.map((t) => [t.token, t.line]),
+    [
+      ['alpha', 2],
+      ['delta', 7],
+    ]
+  );
+});
+
+// ─── Sibling attribution must align on path boundaries ──────────────────────
+//
+// `tasks/CHAR-8178/ticket.json` (this ticket's own file) and sibling surface
+// `tasks/CHAR-8177/ticket.json` share the basename `ticket.json` and nothing
+// else. Bare-basename containment tied every identifier on that line to the
+// sibling. Generic filenames make the collision routine.
+
+test('same basename under a different directory is not a sibling reference', () => {
+  const SURF = 'tasks/CHAR-8177/ticket.json';
+  const { root, tasksDir } = makeFixture({
+    briefContent: [
+      '# Brief',
+      '',
+      '## Constraints',
+      '- This ticket reads `tasks/CHAR-8178/ticket.json` to resolve `relatedTo`.',
+      '',
+    ].join('\n'),
+    specContent: null,
+    surfaceFilePath: SURF,
+    surfaceFileContent: '{"id":"CHAR-8177"}\n',
+  });
+  const manifest = { worktreeRoot: root, relatedTo: [{ id: 'CHAR-8177', surfaces: [SURF] }] };
+  const { errors, warnings } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.deepEqual(errors, [], `different directory must not block, got: ${JSON.stringify(errors)}`);
+  assert.ok(
+    warnings.some((w) => w.includes('relatedTo')),
+    `expected a non-blocking warning, got: ${JSON.stringify(warnings)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the sibling path itself still BLOCKS (attribution keeps its teeth)', () => {
+  const SURF = 'tasks/CHAR-8177/ticket.json';
+  const { root, tasksDir } = makeFixture({
+    briefContent: [
+      '# Brief',
+      '',
+      '## Constraints',
+      `- Read \`${SURF}\` to resolve \`relatedTo\`.`,
+      '',
+    ].join('\n'),
+    specContent: null,
+    surfaceFilePath: SURF,
+    surfaceFileContent: '{"id":"CHAR-8177"}\n',
+  });
+  const manifest = { worktreeRoot: root, relatedTo: [{ id: 'CHAR-8177', surfaces: [SURF] }] };
+  const { errors } = surfaceAudit.auditArtifacts(tasksDir, manifest);
+  assert.ok(
+    errors.some((e) => e.includes('relatedTo') && e.includes(SURF)),
+    `expected a blocking error naming the sibling surface, got: ${JSON.stringify(errors)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('lineRefersToFile: suffix alignment, globs, and near-misses', () => {
+  const f = surfaceAudit.lineRefersToFile;
+  assert.equal(f('see `lib/explore/explore.schemas.ts` here', 'lib/explore/explore.schemas.ts'), true);
+  assert.equal(f('see `explore.schemas.ts` here', 'lib/explore/explore.schemas.ts'), true);
+  assert.equal(f('see `other/explore.schemas.ts`', 'lib/explore/explore.schemas.ts'), false);
+  assert.equal(f('tasks/CHAR-8178/ticket.json', 'tasks/CHAR-8177/ticket.json'), false);
+  assert.equal(f('`components/pulse/pulse-content/row.tsx`', 'components/pulse/pulse-content/**'), true);
+  assert.equal(f('`components/other/row.tsx`', 'components/pulse/pulse-content/**'), false);
+  assert.equal(f('**Goal:** expose the row', 'components/pulse/pulse-content/**'), false);
+});
