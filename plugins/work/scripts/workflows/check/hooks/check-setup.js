@@ -33,6 +33,12 @@ const TICKET_ID = resolveTicketId(process.argv.slice(2), process.env);
 // Shared shell helper (also used by lib/impacted-apps.js)
 const { exec } = require(path.join(__dirname, '..', 'lib', 'exec-util'));
 
+// The changes hash must ignore the workflow's own artifacts — see
+// generateChangesHash() below and lib/workflow-artifact-diff.js.
+const { codeRelevantDiff } = require(
+  path.join(__dirname, '..', '..', 'lib', 'workflow-artifact-diff')
+);
+
 // echo-6842: the orchestrator can invalidate the check evidence without the
 // diff changing, and this cache must honour that — see checkReportsCache.
 const { isEvidenceStale } = require(
@@ -73,13 +79,21 @@ function getBranchName() {
  * Generate hash from changed file contents
  * Same changes = same hash, any line change = different hash
  * Uses -w to ignore whitespace-only changes
+ *
+ * The diff EXCLUDES the workflow's own artifacts (see
+ * lib/workflow-artifact-diff.js). When TASKS_BASE sits inside the repo, the
+ * `*.check.md` reports this cycle just wrote are tracked files that the next
+ * sanctioned commit (`git add -A`) sweeps into HEAD. Hashing them made a
+ * passing check invalidate itself: new hash → `shouldPurgeReports` → the
+ * reports are deleted and every agent re-dispatched, forever. A cycle now
+ * restarts only for a real code change.
  */
 function generateChangesHash() {
   // Use -w to ignore whitespace changes (prevents false cache misses)
   const baseBranch = getBaseBranch();
-  const diff = exec(`git diff ${baseBranch}...HEAD -w`);
+  const diff = codeRelevantDiff(baseBranch);
   if (!diff) {
-    // No changes, use empty hash
+    // No changes (or no git repo), use empty hash
     return 'no-changes';
   }
 

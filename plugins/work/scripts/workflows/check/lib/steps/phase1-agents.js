@@ -51,6 +51,7 @@ const { reportStatus } = require('../report-utils');
 const {
   HEAD_LINE_RE,
   currentWorktreeHead,
+  ticketWorktreePath,
   reportIsStale,
   annotateStaleAccepted,
 } = require('../report-head-staleness');
@@ -80,7 +81,7 @@ function reportContractLines(reportPath, dispatchHead) {
     '- The report MUST start with the canonical machine-readable line `**Status:** APPROVED` (code review) / `**Status:** COMPLETE` (completion) — or `**Status:** NEEDS_WORK` when failing. Gates parse this line FIRST; prose-only verdicts parse as UNKNOWN and loop the check step.',
     `- Directly under the Status line, write the canonical line \`**Head:** <sha>\` with the ticket worktree's \`git rev-parse HEAD\` at the moment you VERIFIED the code (GH-308${
       dispatchHead ? `; HEAD at dispatch was ${dispatchHead}` : ''
-    }). Sibling agents may commit fixes while you review — the orchestrator compares your Head to the live HEAD and re-dispatches a FAILING report anchored to an older commit, so re-check HEAD right before writing the report and re-verify your findings if it moved.`,
+    }). Sibling agents may commit fixes while you review — the orchestrator compares your Head to the live HEAD and re-dispatches a FAILING report anchored to an older commit that carried real code changes, so re-check HEAD right before writing the report and re-verify your findings if it moved. A commit that carried only check reports or tasks-dir docs never costs you a re-dispatch.`,
     '- Create/update the report with the **Write tool** (not bash heredocs — they have silently failed before).',
     `- If the runner blocks and you cannot drive it to DONE, still write \`${reportPath}\` yourself with your verdict plus a \`## Workflow Note\` section describing the blocker.`,
     `- Before finishing, VERIFY the file exists and is non-empty (e.g. \`ls -l ${reportPath}\`). If it is missing or 0 bytes, write it again.`,
@@ -117,12 +118,12 @@ function markVerifiedFromCompletion(completionPath, ctx) {
  * with a visible annotation.
  * Returns { done: string[], missing: [{file, status, reportHead?}] }.
  */
-function scanReports(state, reportFolder, ctx, currentHead) {
+function scanReports(state, reportFolder, ctx, head) {
   if (!state.phase1Reports) state.phase1Reports = {};
   const done = [];
   const missing = [];
   for (const report of REPORTS) {
-    const miss = scanOneReport(state, reportFolder, ctx, currentHead, report);
+    const miss = scanOneReport(state, reportFolder, ctx, head, report);
     if (miss) missing.push(miss);
     if (state.phase1Reports[report.file].done) done.push(report.file);
   }
@@ -132,13 +133,13 @@ function scanReports(state, reportFolder, ctx, currentHead) {
 // Scan a single report file, updating its sticky tracker. Returns a missing
 // entry ({file, status, ...}) when the report still needs a dispatch, or null
 // once the tracker is (or becomes) done.
-function scanOneReport(state, reportFolder, ctx, currentHead, { file, statusType }) {
+function scanOneReport(state, reportFolder, ctx, head, { file, statusType }) {
   const tracker = state.phase1Reports[file] || (state.phase1Reports[file] = { attempts: 0 });
   if (tracker.done) return null;
   const reportPath = path.join(reportFolder, file);
   const status = reportStatus(reportPath);
   if (status !== 'present') return { file, status };
-  const miss = evaluatePresentReport(tracker, reportPath, statusType, currentHead);
+  const miss = evaluatePresentReport(tracker, reportPath, statusType, head);
   if (tracker.done && file === 'completion.check.md') {
     markVerifiedFromCompletion(reportPath, ctx);
   }
@@ -150,7 +151,8 @@ function scanOneReport(state, reportFolder, ctx, currentHead, { file, statusType
 // a {status: 'stale', ...} missing entry for a targeted re-dispatch — unless
 // its attempts cap is exhausted, in which case it is accepted as-is with a
 // visible annotation.
-function evaluatePresentReport(tracker, reportPath, statusType, currentHead) {
+function evaluatePresentReport(tracker, reportPath, statusType, head) {
+  const { sha: currentHead, worktree } = head;
   let content = '';
   try {
     content = fs.readFileSync(reportPath, 'utf8');
@@ -158,7 +160,7 @@ function evaluatePresentReport(tracker, reportPath, statusType, currentHead) {
     /* raced away — fall through, content stays '' (not stale) */
   }
   const headMatch = content.match(HEAD_LINE_RE);
-  if (reportIsStale(content, statusType, currentHead)) {
+  if (reportIsStale(content, statusType, currentHead, worktree)) {
     if (tracker.attempts < MAX_DISPATCH_ATTEMPTS) {
       return { status: 'stale', reportHead: headMatch[1], currentHead };
     }
@@ -299,10 +301,14 @@ module.exports = function registerPhase1(register) {
     const changesHash = state.changesHash || 'unknown';
 
     // Ticket-worktree HEAD at this scan/dispatch (GH-308). Null → staleness
-    // validation is skipped (fail-open) but dispatch still proceeds.
+    // validation is skipped (fail-open) but dispatch still proceeds. The
+    // worktree path rides along so an artifact-only HEAD move (a sibling
+    // commit that carried only this cycle's reports) can be told apart from a
+    // real code change.
     const currentHead = currentWorktreeHead(state, ctx);
+    const head = { sha: currentHead, worktree: ticketWorktreePath(state, ctx) };
 
-    const { missing } = scanReports(state, reportFolder, ctx, currentHead);
+    const { missing } = scanReports(state, reportFolder, ctx, head);
 
     // All reports observed (sticky) → advance.
     if (missing.length === 0) return null;
