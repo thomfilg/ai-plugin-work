@@ -30,6 +30,11 @@
 const CLEANUP_PHASES = Object.freeze({
   inputs: 'inputs',
   pr_merged_check: 'pr_merged_check',
+  // RETIRED. Absent from CLEANUP_PHASE_ORDER — nothing routes into it — but the
+  // id stays valid so a run whose cleanup-phase.json was saved while it was
+  // current can still be read and drained (see lib/phases/completion_check.js).
+  // Dropping the id would strand the merged tickets this change unblocks.
+  completion_check: 'completion_check',
   branch_cleanup: 'branch_cleanup',
   tmux_cleanup: 'tmux_cleanup',
   state_archive: 'state_archive',
@@ -50,6 +55,8 @@ const CLEANUP_PHASE_ORDER = Object.freeze([
 const CLEANUP_PHASE_TRANSITIONS = Object.freeze({
   [CLEANUP_PHASES.inputs]: Object.freeze([CLEANUP_PHASES.pr_merged_check]),
   [CLEANUP_PHASES.pr_merged_check]: Object.freeze([CLEANUP_PHASES.branch_cleanup]),
+  // Retired-phase drain edge: the only way out of persisted completion_check.
+  [CLEANUP_PHASES.completion_check]: Object.freeze([CLEANUP_PHASES.branch_cleanup]),
   [CLEANUP_PHASES.branch_cleanup]: Object.freeze([CLEANUP_PHASES.tmux_cleanup]),
   [CLEANUP_PHASES.tmux_cleanup]: Object.freeze([CLEANUP_PHASES.state_archive]),
   [CLEANUP_PHASES.state_archive]: Object.freeze([CLEANUP_PHASES.memorize]),

@@ -10,6 +10,8 @@ const { registerPhase, getPhase, hasPhase } = makePhaseRegistry('cleanup');
 
 require('./phases/inputs')(registerPhase);
 require('./phases/pr_merged_check')(registerPhase);
+// Retired, registered so in-flight runs saved at this phase can drain.
+require('./phases/completion_check')(registerPhase);
 require('./phases/branch_cleanup')(registerPhase);
 require('./phases/tmux_cleanup')(registerPhase);
 require('./phases/state_archive')(registerPhase);

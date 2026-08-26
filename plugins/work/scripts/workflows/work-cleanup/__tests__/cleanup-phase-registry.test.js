@@ -66,3 +66,28 @@ test('CLEANUP_PHASES is frozen', () => {
     CLEANUP_PHASES.bogus = 'x';
   });
 });
+
+// A run saved while `completion_check` was a real phase must still drain.
+// Deleting the id outright would have stranded exactly the merged tickets
+// removing that gate was meant to unblock — a blocking gate replaced by a
+// different blocking gate.
+test('retired completion_check is drainable but not on the forward path', () => {
+  const { getPhase } = require('../lib/phase-registry');
+
+  assert.ok(!CLEANUP_PHASE_ORDER.includes('completion_check'), 'not in the forward path');
+  assert.ok(isCleanupPhase('completion_check'), 'id stays valid so persisted state reads');
+
+  // Nothing routes INTO it any more.
+  for (const phase of CLEANUP_PHASE_ORDER) {
+    assert.ok(
+      !cleanupNextPhases(phase).includes('completion_check'),
+      `${phase} must not route into the retired phase`
+    );
+  }
+
+  // …and the only way out of it is forward, without demanding any evidence.
+  const handler = getPhase('completion_check');
+  assert.equal(handler.next, 'branch_cleanup');
+  assert.equal(handler.validate({}).ok, true);
+  assert.deepEqual(cleanupNextPhases('completion_check'), ['branch_cleanup']);
+});
