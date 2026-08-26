@@ -176,6 +176,59 @@ describe('git-backed helpers', () => {
     assert.doesNotMatch(diff, /tests\.check\.md/);
   });
 
+  it('a prefixed basename is CODE — the diff must not drop it (PR #800 review)', () => {
+    // The exclusion used to be expressed as git pathspec globs, whose `*` has
+    // no basename anchor: `:(exclude)*completion-context.json` also dropped
+    // `src/foo-completion-context.json`, and `:(exclude)*.last-commit-sha`
+    // dropped `release.last-commit-sha`. The classifier called those code, the
+    // pathspecs called them artifacts, and the hash silently ignored a real
+    // change. One grammar now answers the question.
+    const decoys = {
+      'src/foo-completion-context.json': '{"v":1}\n',
+      'release.last-commit-sha': 'v1\n',
+      'src/build.check-state.json': 'x\n',
+      'src/my.work-state.json': 'x\n',
+    };
+    for (const [rel, body] of Object.entries(decoys)) {
+      fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+      fs.writeFileSync(path.join(repo, rel), body);
+      assert.equal(isWorkflowArtifactPath(rel, 'tasks'), false, `${rel} must classify as code`);
+    }
+    git('add', '-A');
+    git('commit', '-qm', 'add decoys');
+    const from = git('rev-parse', 'HEAD');
+
+    for (const rel of Object.keys(decoys)) fs.writeFileSync(path.join(repo, rel), 'CHANGED\n');
+    git('add', '-A');
+    git('commit', '-qm', 'change the decoys');
+    const to = git('rev-parse', 'HEAD');
+
+    assert.deepEqual(
+      codeRelevantChangedFiles(from, to, repo).files.sort(),
+      Object.keys(decoys).sort()
+    );
+    assert.equal(isRealHeadDrift(from, to, repo).drift, true, 'changing these must count as drift');
+
+    git('update-ref', 'refs/heads/decoy-base', from);
+    const diff = codeRelevantDiff('decoy-base', repo);
+    for (const rel of Object.keys(decoys)) assert.match(diff, new RegExp(rel.replace('.', '\\.')));
+  });
+
+  it('a filename containing glob characters is treated as a literal path', () => {
+    const weird = 'src/a[1]*.js';
+    fs.writeFileSync(path.join(repo, weird), 'x\n');
+    git('add', '-A');
+    git('commit', '-qm', 'add glob-named file');
+    const from = git('rev-parse', 'HEAD');
+    fs.writeFileSync(path.join(repo, weird), 'y\n');
+    git('add', '-A');
+    git('commit', '-qm', 'change glob-named file');
+
+    assert.deepEqual(codeRelevantChangedFiles(from, 'HEAD', repo).files, [weird]);
+    git('update-ref', 'refs/heads/glob-base', from);
+    assert.match(codeRelevantDiff('glob-base', repo), /a\[1\]/);
+  });
+
   it('codeRelevantDiff returns null outside a git repository', () => {
     const notARepo = fs.mkdtempSync(path.join(os.tmpdir(), 'not-a-repo-'));
     try {

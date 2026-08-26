@@ -58,21 +58,6 @@ const { safeExec } = require('./safe-exec');
 const ARTIFACT_BASENAME_RE =
   /(?:^|\/)(?:[^/]*\.check\.md|\.check-state\.json|\.check-cycle\.json|\.work-state\.json|completion-context\.json|completion-verdict\.json|review-accountability\.json|\.last-commit-sha)$/;
 
-/** Pathspec globs for the rule-2 basenames — `*` spans `/` in git pathspecs. */
-const ARTIFACT_PATHSPECS = [
-  '*.check.md',
-  '*.check-state.json',
-  '.check-state.json',
-  '*.check-cycle.json',
-  '.check-cycle.json',
-  '*.work-state.json',
-  '.work-state.json',
-  '*completion-context.json',
-  '*completion-verdict.json',
-  '*review-accountability.json',
-  '*.last-commit-sha',
-];
-
 function gitOut(args, cwd) {
   return safeExec('git', args, { fallback: null, ...(cwd ? { cwd } : {}) });
 }
@@ -125,22 +110,41 @@ function isWorkflowArtifactPath(relPath, tasksBaseRel) {
 }
 
 /**
- * Pathspec arguments that exclude every workflow artifact from a git diff.
- * Prefixed with `--` so callers append them straight onto an argv.
+ * Code-relevant files changed across a diff range.
  *
+ * Everything flows through `isWorkflowArtifactPath` — deliberately, and it is
+ * why the diff is not simply built from `:(exclude)` pathspecs. Git's default
+ * pathspec globbing has no basename anchor: `:(exclude)*completion-context.json`
+ * also drops `src/foo-completion-context.json`, and `:(exclude)*.last-commit-sha`
+ * drops `release.last-commit-sha` — real files the classifier calls code. Two
+ * grammars for one question meant the exclusion half could silently hide a
+ * source change from the hash, which is precisely the failure this module
+ * forbids. One grammar, one answer.
+ *
+ * `--no-renames` keeps both sides of a rename visible: with detection on, a
+ * `src/a.js` → `tasks/GH-1/a.js` move lists only the artifact destination and
+ * the source deletion would vanish.
+ * `-z` avoids core.quotepath mangling paths with non-ASCII or special
+ * characters, which would then not match as literal pathspecs.
+ *
+ * @param {string} range — e.g. `main...HEAD` or `<sha>..<sha>`
  * @param {string} [cwd]
- * @returns {string[]}
+ * @returns {{ known: boolean, files: string[] }} `known:false` when git could
+ *   not answer (unknown ref, no repo) — callers must fail safe.
  */
-function artifactExcludePathspecs(cwd) {
-  const specs = ['--', '.'];
+function changedFilesInRange(range, cwd) {
+  const out = gitOut(['diff', '--no-renames', '--name-only', '-z', range], cwd);
+  if (out === null) return { known: false, files: [] };
   const tasksBaseRel = tasksBaseRelative(cwd);
-  if (tasksBaseRel) specs.push(`:(exclude)${tasksBaseRel}`);
-  for (const glob of ARTIFACT_PATHSPECS) specs.push(`:(exclude)${glob}`);
-  return specs;
+  const files = out
+    .split('\0')
+    .filter(Boolean)
+    .filter((f) => !isWorkflowArtifactPath(f, tasksBaseRel));
+  return { known: true, files };
 }
 
 /**
- * The `<base>...HEAD` diff with workflow artifacts excluded — the input both
+ * The `<base>...HEAD` diff restricted to code-relevant files — the input both
  * changes-hash implementations hash. Shared so the two can never drift: an
  * identical diff must yield an identical hash on both sides.
  *
@@ -153,11 +157,18 @@ function artifactExcludePathspecs(cwd) {
  */
 function codeRelevantDiff(baseBranch, cwd) {
   if (!gitOut(['rev-parse', '--git-dir'], cwd)) return null;
-  const diff = gitOut(
-    ['diff', `${baseBranch}...HEAD`, '-w', ...artifactExcludePathspecs(cwd)],
-    cwd
-  );
-  return diff === null ? '' : diff;
+  const range = `${baseBranch}...HEAD`;
+  const { known, files } = changedFilesInRange(range, cwd);
+  if (!known || files.length === 0) return '';
+  // `--literal-pathspecs`: a filename containing `*`, `?` or `[` is a literal
+  // path here, never a glob.
+  const diff = gitOut(['--literal-pathspecs', 'diff', range, '-w', '--', ...files], cwd);
+  // We KNOW code changed, so '' would be a lie in the one direction that
+  // matters — it hashes to 'no-changes' and a stale approval stands. The only
+  // realistic cause is an argv too long for a very large diff; fall back to the
+  // file list, which still moves the hash whenever the changed set moves.
+  if (diff === null) return files.join('\n');
+  return diff;
 }
 
 /**
@@ -171,15 +182,7 @@ function codeRelevantDiff(baseBranch, cwd) {
  */
 function codeRelevantChangedFiles(fromRef, toRef, cwd) {
   if (!fromRef || !toRef) return { known: false, files: [] };
-  const out = gitOut(['diff', '--name-only', `${fromRef}..${toRef}`], cwd);
-  if (out === null) return { known: false, files: [] };
-  const tasksBaseRel = tasksBaseRelative(cwd);
-  const files = out
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .filter((f) => !isWorkflowArtifactPath(f, tasksBaseRel));
-  return { known: true, files };
+  return changedFilesInRange(`${fromRef}..${toRef}`, cwd);
 }
 
 /**
@@ -214,8 +217,7 @@ function isRealHeadDrift(fromSha, toSha, cwd) {
 
 module.exports = {
   ARTIFACT_BASENAME_RE,
-  ARTIFACT_PATHSPECS,
-  artifactExcludePathspecs,
+  changedFilesInRange,
   codeRelevantChangedFiles,
   codeRelevantDiff,
   hasCodeRelevantChanges,
