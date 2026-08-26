@@ -138,6 +138,27 @@ const preservedArchivalPatterns = Object.fromEntries(
 );
 
 // Tool can be a string or array -- some runtimes emit Agent instead of Task.
+//
+// `advisory: true` (Task/Agent `description` mappings)
+// -----------------------------------------------------
+// `description` is a human-facing UI label, not a command: the orchestrator
+// writes whatever reads well ("Complete CHAR-8178 brief via brief-next"), and
+// several step names are ordinary English words. `/^complete\b/i` therefore
+// matched a *brief* dispatch and the step gate blocked it with the
+// self-contradicting "Cannot run 'brief-writer' — step complete is not
+// in_progress. Current step: brief (in_progress)". The same trap is one
+// sentence away for "check the fixture helper", "ready the migration",
+// "report on bundle size" and "cleanup dead imports".
+//
+// A label can suggest what a call is; it can never prove it. So these
+// mappings are ADVISORY: they attribute a call to a step only while that step
+// is the one in progress (where the label is corroborated by state), and they
+// never block. A match on some OTHER step is treated as the coincidence it
+// is — no block, and no evidence recorded against a step whose work has not
+// run. Nothing is lost by that: every advisory step is covered for the
+// transition gate by its own verify() entry (cleanup/ci/reports) or by
+// softSteps (ready/complete). Blocking stays with machine-checkable intent —
+// a Skill name, or a script path in a Bash command.
 function buildCommandMap(v) {
   return [
     { step: STEPS.bootstrap, verify: v.verifyBootstrap },
@@ -175,6 +196,7 @@ function buildCommandMap(v) {
       step: STEPS.cleanup,
       tool: ['Task', 'Agent'],
       field: 'description',
+      advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.cleanup}\\b`, 'i'),
     },
     { step: STEPS.cleanup, verify: v.verifyCleanup },
@@ -184,12 +206,14 @@ function buildCommandMap(v) {
       step: STEPS.ready,
       tool: ['Task', 'Agent'],
       field: 'description',
+      advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.ready}\\b`, 'i'),
     },
     {
       step: STEPS.ci,
       tool: ['Task', 'Agent'],
       field: 'description',
+      advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.ci}\\b`, 'i'),
     },
     { step: STEPS.ci, verify: v.verifyCi },
@@ -197,6 +221,7 @@ function buildCommandMap(v) {
       step: STEPS.reports,
       tool: ['Task', 'Agent'],
       field: 'description',
+      advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.reports}\\b`, 'i'),
     },
     { step: STEPS.reports, verify: v.verifyReports },
@@ -204,6 +229,7 @@ function buildCommandMap(v) {
       step: STEPS.complete,
       tool: ['Task', 'Agent'],
       field: 'description',
+      advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.complete}\\b`, 'i'),
     },
     // GH-106: Removed strict verify gate for complete step. CI/PR checks are

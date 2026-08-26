@@ -25,7 +25,7 @@ function validate(ctx) {
     return {
       ok: false,
       errors: [
-        `Memory plugin "${ctx.memory.name}" is available but \`${SENTINEL}\` is missing. Call \`${ctx.memory.remember}\` with the completion verdict, then \`touch ${p}\`.`,
+        `Memory plugin "${ctx.memory.name}" is available but \`${SENTINEL}\` is missing. Call \`${ctx.memory.rememberTool}\` with the completion verdict, then \`touch ${p}\`.`,
       ],
     };
   }
@@ -49,7 +49,7 @@ function instructions(ctx) {
     `Memory plugin: **${ctx.memory.name}**`,
     '',
     '### What you do',
-    `1. Call \`${ctx.memory.remember}\` with a concise note: ticket id, final status (COMPLETE/INCOMPLETE), key file citations, any sibling-scope gate hits.`,
+    `1. Call \`${ctx.memory.rememberTool}\` with a concise note: ticket id, final status (COMPLETE/INCOMPLETE), key file citations, any sibling-scope gate hits.`,
     `2. \`touch ${path.join(ctx.tasksDir, SENTINEL)}\` so this phase can advance.`,
     '',
   ].join('\n');

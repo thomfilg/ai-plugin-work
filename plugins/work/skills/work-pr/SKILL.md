@@ -171,12 +171,20 @@ First, push any unpushed commits:
 git push || { echo "❌ Failed to push commits"; exit 1; }
 ```
 
-Then run pr-generator:
+Then run pr-generator. `pr-next.js` is the phase runner for the `pr` step and
+only `pr-generator` / `pr-post-generator` may invoke it — never call it from
+this session, and always pass the driver line INTO the dispatch prompt so the
+agent that is allowed to run it is the one that gets told to:
 ```
 Task(pr-generator):
   Update PR for current branch with implementation details.
   Ticket: ${TICKET_ID}
   Status: Implementation complete, all checks passing
+
+  Before and after each sub-action, run
+  `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-pr-step/pr-next.js ${TICKET_ID}`
+  to validate and advance. Do NOT edit `pr-phase.json` directly. You are the
+  authorized caller — running the runner is your job, not a workaround.
 
   ${PR_DOCS ? `
   ## Project-Specific PR Rules

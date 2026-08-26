@@ -56,6 +56,15 @@ Each artifact is bound to a step and authorized agents:
 | `code-review-reply.check.md` | check | developer-nodejs-tdd, developer-react-senior, developer-devops |
 | `review-accountability.json` | follow_up | follow-up-pr |
 
+**The step column applies only while a `/work` run owns the ticket.** `/brief`,
+`/spec` and `/split-in-tasks` also run standalone, and a ticket with no
+`.work-state.json` (or one whose run is finished) has no step to be in — the
+step gate abstains there rather than refusing every write with
+`Current step: (none)`. The agent column always applies: standalone or not,
+`brief.md` still comes from `brief-writer`. Rule 5 (agent-gated scripts) has
+always behaved this way — its step check is skipped when no step is in
+progress, which is why the standalone runners themselves work.
+
 ### Agent-Gated Scripts
 
 Certain scripts require both the correct agent AND the correct step:
