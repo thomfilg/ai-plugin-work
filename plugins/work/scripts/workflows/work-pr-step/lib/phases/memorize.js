@@ -81,17 +81,42 @@ function persist(ctx) {
   }
 }
 
+/**
+ * This phase is NOT converted to the shared `memory-record` gate, and the
+ * reason is the one in the header: the `pr-generator` agent driving it has no
+ * Write tool and no memory binding, so a gate demanding an agent-supplied
+ * record would make the phase unsatisfiable again — the exact failure the
+ * runner-writes-it-itself design already fixed. The runner holds the facts, so
+ * the runner records them.
+ *
+ * Two things it did get wrong, both instances of the same pattern:
+ *
+ * 1. It auto-passed when no memory plugin was installed, so the payload was
+ *    never written at all. But the payload is runner-held FACTS about the PR;
+ *    whether a plugin exists only decides who later pushes them. Absent one,
+ *    `pr-memory.json` in the tasks dir is exactly where a later step looks.
+ * 2. It trusted `persist()` returning true. That reports the write did not
+ *    throw, not that the file holds anything — so the gate passed on its own
+ *    return value rather than on its own output. It now re-reads what it wrote
+ *    and requires the PR number to actually be in there.
+ */
 function validate(ctx) {
-  if (!ctx.memory) return { ok: true, summary: 'no memory plugin — auto-passing' };
   if (!readFile(path.join(ctx.tasksDir, 'pr-body.md'))) {
     return { ok: false, errors: [`Missing pr-body.md.`] };
   }
   if (!persist(ctx)) {
     return {
       ok: false,
+      errors: [`Could not write ${MEMORY_FILE} into ${ctx.tasksDir}. Check it is writable.`],
+    };
+  }
+  const written = readJson(path.join(ctx.tasksDir, MEMORY_FILE));
+  if (!written || written.prNumber === null || written.prNumber === undefined) {
+    return {
+      ok: false,
       errors: [
-        `Could not write ${MEMORY_FILE} / the \`${SENTINEL}\` sentinel into ${ctx.tasksDir}. ` +
-          `Check the directory is writable.`,
+        `${MEMORY_FILE} was written but carries no PR number — pr-context.json is missing ` +
+          `or has no \`prNumber\`, so there is nothing for a later step to remember.`,
       ],
     };
   }

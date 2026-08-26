@@ -4,47 +4,27 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
+const { validateMemorizePhase, memorizeInstructions } = require('../../../lib/memory-record');
+
+/** This phase's slice of the ticket's memory record. */
+const SCOPE = 'reports';
 
 const { REPORTS_PHASES } = require('../../reports-phase-registry');
 
-const SENTINEL = '.reports-memorized';
-
 function validate(ctx) {
-  if (!ctx.memory) return { ok: true, summary: 'no memory plugin detected — skipping' };
-  const p = path.join(ctx.tasksDir, SENTINEL);
-  if (!fs.existsSync(p)) {
-    return {
-      ok: false,
-      errors: [
-        `Memory plugin "${ctx.memory.name}" available but \`${SENTINEL}\` missing. Call \`${ctx.memory.rememberTool}\` with the ticket summary + final status, then \`touch ${p}\`.`,
-      ],
-    };
-  }
-  return { ok: true, summary: `memorized via ${ctx.memory.name}` };
+  return validateMemorizePhase({ scope: SCOPE, ctx });
 }
 
 function instructions(ctx) {
-  if (!ctx.memory) {
-    return [
-      '# reports-next — Phase 5 of 6: MEMORIZE',
-      '',
-      'No memory plugin — auto-advance.',
-      '',
-    ].join('\n');
-  }
-  return [
-    '# reports-next — Phase 5 of 6: MEMORIZE',
-    `Ticket: ${ctx.ticket}`,
-    '',
-    `Memory: **${ctx.memory.name}**`,
-    '',
-    `1. Call \`${ctx.memory.rememberTool}\` with: ticket id, final status, brief outcome summary.`,
-    '2. If `learnings.md` exists, include its headline Decisions/Surprises in the same call (GH-318).',
-    `3. \`touch ${path.join(ctx.tasksDir, SENTINEL)}\`.`,
-    '',
-  ].join('\n');
+  return memorizeInstructions({
+    title: '# reports-next — Phase 5 of 6: MEMORIZE',
+    scope: SCOPE,
+    ctx,
+    what: [
+      'The learnings recorded in `learnings.md`, in your own words.',
+      'Cost or duration surprises worth expecting next time.',
+    ],
+  });
 }
 
 module.exports = function register(registerPhase) {
@@ -57,4 +37,3 @@ module.exports = function register(registerPhase) {
 
 module.exports.validate = validate;
 module.exports.instructions = instructions;
-module.exports.SENTINEL = SENTINEL;

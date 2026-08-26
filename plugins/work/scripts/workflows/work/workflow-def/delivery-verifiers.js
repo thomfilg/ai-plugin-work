@@ -299,6 +299,37 @@ function verifyDocument(deps, ticketId) {
   }
 }
 
+/**
+ * `ready` is proven by its own single output: the PR is no longer a draft.
+ *
+ * It had no verify at all and sat in softSteps, so nothing confirmed the one
+ * thing the step exists to do. The cost was not a silent skip but a misleading
+ * one: a still-draft PR walked on to `ci`, whose gate refuses anything not
+ * MERGED — and GitHub will not merge a draft. So the run failed two steps
+ * later, with "not merged", which is a correct refusal carrying a diagnosis
+ * that points at the wrong step.
+ *
+ * `getPRInfo` did not even request `isDraft`; it does now.
+ *
+ * Un-softening is safe here for the same reason it was for `reports`: this
+ * runs PRE-MERGE and the gate reads the step's OWN output, so a block is
+ * always recoverable by doing the thing — `gh pr ready` — rather than by
+ * re-running someone else's check.
+ * @param {DeliveryDeps} deps
+ */
+function verifyReady(deps) {
+  try {
+    const { getPRInfo } = require(path.join(deps.workRoot, 'scripts', 'follow-up-pr.js'));
+    const prInfo = getPRInfo();
+    if (!prInfo || !prInfo.number) return false;
+    // Fail closed on an absent field: an older gh, or a fetch that dropped it,
+    // must not read as "not a draft". Only an explicit false discharges this.
+    return prInfo.isDraft === false;
+  } catch {
+    return false;
+  }
+}
+
 /** @param {DeliveryDeps} deps */
 function createDeliveryVerifiers(deps) {
   return {
@@ -306,6 +337,7 @@ function createDeliveryVerifiers(deps) {
     verifyCheck: (ticketId) => verifyCheck(deps, ticketId),
     verifyDocument: (ticketId) => verifyDocument(deps, ticketId),
     verifyPr: () => verifyPr(deps),
+    verifyReady: () => verifyReady(deps),
     verifyFollowUp: (ticketId) => verifyFollowUp(deps, ticketId),
     verifyCi: () => verifyCi(deps),
     verifyReports: (ticketId) => verifyReports(deps, ticketId),

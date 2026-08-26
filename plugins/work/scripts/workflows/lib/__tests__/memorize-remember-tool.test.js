@@ -48,14 +48,26 @@ describe('memorize phases: memory tool property', () => {
     );
   });
 
-  it('names the remember tool in every phase that mentions a memory plugin', () => {
+  // The phases are no longer copies of one another: they delegate to
+  // `lib/memory-record.js`, which builds the instruction text once. So the
+  // guard follows the delegation instead of demanding the literal in every
+  // file — and pins it in the shared module, where a regression would now hit
+  // all of them at once rather than one copy at a time.
+  it('names the remember tool in the shared instruction builder', () => {
+    const shared = fs.readFileSync(path.join(WORKFLOWS_DIR, 'lib', 'memory-record.js'), 'utf8');
+    assert.match(shared, /rememberTool/, 'the shared builder must name the tool to call');
+  });
+
+  it('every phase mentioning a memory plugin either names the tool or delegates', () => {
     for (const file of memorizePhases()) {
       const src = fs.readFileSync(file, 'utf8');
       if (!/memory/.test(src)) continue;
-      assert.match(
-        src,
-        /rememberTool/,
-        `${path.relative(WORKFLOWS_DIR, file)} should tell the agent which tool to call`
+      const namesTool = /rememberTool/.test(src);
+      const delegates = /require\([^)]*memory-record[^)]*\)/.test(src);
+      assert.ok(
+        namesTool || delegates,
+        `${path.relative(WORKFLOWS_DIR, file)} should tell the agent which tool to call, ` +
+          'or delegate to lib/memory-record.js which does'
       );
     }
   });

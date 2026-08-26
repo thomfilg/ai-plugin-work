@@ -55,6 +55,12 @@ Phases (7 total):
 
 ## Memory
 
-If a memory plugin is detected, call the configured `*_remember` tool
-in the `memorize` phase with: ticket id, branch deleted, sessions
-killed, final status, any deferred items. Then `touch .cleanup-memorized`.
+In the `memorize` phase, save: ticket id, branch deleted, sessions killed,
+final status, any deferred items. If a memory plugin is detected, call the
+configured `*_remember` tool; if not, write it to the ticket worktree docs.
+Either way, record what you saved — a `touch` no longer satisfies the phase:
+
+```bash
+node <plugin>/scripts/workflows/lib/scripts/memory-note.js record <TICKET> \
+  --scope cleanup --summary "<what you saved>"
+```

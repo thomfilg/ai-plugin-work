@@ -6,52 +6,28 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
+const { validateMemorizePhase, memorizeInstructions } = require('../../../lib/memory-record');
+
+/** This phase's slice of the ticket's memory record. */
+const SCOPE = 'ci';
 
 const { CI_PHASES } = require('../../ci-phase-registry');
 
-function readJson(p) {
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
 function validate(ctx) {
-  if (!ctx.memory) return { ok: true, summary: 'no memory plugin — auto-passing' };
-  const triage = readJson(path.join(ctx.tasksDir, 'ci-triage.json'));
-  if (!triage) return { ok: true, summary: 'no triage file — nothing to memorize' };
-  if (triage.memorized !== true) {
-    return {
-      ok: false,
-      errors: [
-        `ci-triage.json does not have \`"memorized": true\`. After calling \`${ctx.memory.rememberTool}\` with the failure classifications (esp. flakes + pre-existing), set "memorized": true in ci-triage.json.`,
-      ],
-    };
-  }
-  return { ok: true, summary: 'CI patterns memorized' };
+  return validateMemorizePhase({ scope: SCOPE, ctx });
 }
 
 function instructions(ctx) {
-  if (!ctx.memory)
-    return [
-      `# ci-next — Phase 7 of 8: MEMORIZE`,
-      `Ticket: ${ctx.ticket}`,
-      '',
-      'No memory plugin. Auto-advancing.',
-      '',
-    ].join('\n');
-  return [
-    `# ci-next — Phase 7 of 8: MEMORIZE (${ctx.memory.name})`,
-    `Ticket: ${ctx.ticket}`,
-    '',
-    `Call \`${ctx.memory.rememberTool}\` with the failure classifications from ci-triage.json (especially \`flake\` and \`pre-existing\` entries — these are the most valuable for future tickets).`,
-    '',
-    'When the save completes, set `"memorized": true` in ci-triage.json.',
-    '',
-  ].join('\n');
+  return memorizeInstructions({
+    title: '# ci-next — Phase 7 of 8: MEMORIZE',
+    scope: SCOPE,
+    ctx,
+    what: [
+      'Failure classifications from `ci-triage.json`, especially known flakes.',
+      'Pre-existing failures that this ticket is not responsible for.',
+      'Any job that needed a re-run, and why it was judged a flake.',
+    ],
+  });
 }
 
 module.exports = function register(r) {

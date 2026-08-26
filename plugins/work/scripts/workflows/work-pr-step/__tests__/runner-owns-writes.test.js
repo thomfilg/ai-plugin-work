@@ -342,8 +342,12 @@ describe('memorize owns the sentinel and the payload', () => {
     assert.match(r.errors.join('\n'), /Missing pr-body\.md/);
   });
 
-  it('auto-passes when no memory plugin is installed', () => {
-    assert.equal(memorize.validate(mkCtx({})).ok, true);
+  // It used to auto-pass with no memory plugin, which meant the payload was
+  // never written at all. But the payload is runner-held FACTS about the PR;
+  // whether a plugin is installed only decides who later pushes them. So the
+  // record is now required either way — and still blocks without pr-body.md.
+  it('still requires the payload when no memory plugin is installed', () => {
+    assert.equal(memorize.validate(mkCtx({})).ok, false);
   });
 });
 

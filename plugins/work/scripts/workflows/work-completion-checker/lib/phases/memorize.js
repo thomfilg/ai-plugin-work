@@ -6,53 +6,27 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
+const { validateMemorizePhase, memorizeInstructions } = require('../../../lib/memory-record');
+
+/** This phase's slice of the ticket's memory record. */
+const SCOPE = 'completion';
 
 const { COMPLETION_PHASES } = require('../../completion-phase-registry');
 
-const SENTINEL = '.completion-memorized';
-
 function validate(ctx) {
-  if (!ctx.memory) {
-    return {
-      ok: true,
-      summary: 'no memory plugin detected — skipping memorize',
-    };
-  }
-  const p = path.join(ctx.tasksDir, SENTINEL);
-  if (!fs.existsSync(p)) {
-    return {
-      ok: false,
-      errors: [
-        `Memory plugin "${ctx.memory.name}" is available but \`${SENTINEL}\` is missing. Call \`${ctx.memory.rememberTool}\` with the completion verdict, then \`touch ${p}\`.`,
-      ],
-    };
-  }
-  return { ok: true, summary: `memorized via ${ctx.memory.name}` };
+  return validateMemorizePhase({ scope: SCOPE, ctx });
 }
 
 function instructions(ctx) {
-  if (!ctx.memory) {
-    return [
-      '# completion-next — Phase 10 of 11: MEMORIZE',
-      `Ticket: ${ctx.ticket}`,
-      '',
-      'No memory plugin detected — skipping. I will auto-advance.',
-      '',
-    ].join('\n');
-  }
-  return [
-    '# completion-next — Phase 10 of 11: MEMORIZE',
-    `Ticket: ${ctx.ticket}`,
-    '',
-    `Memory plugin: **${ctx.memory.name}**`,
-    '',
-    '### What you do',
-    `1. Call \`${ctx.memory.rememberTool}\` with a concise note: ticket id, final status (COMPLETE/INCOMPLETE), key file citations, any sibling-scope gate hits.`,
-    `2. \`touch ${path.join(ctx.tasksDir, SENTINEL)}\` so this phase can advance.`,
-    '',
-  ].join('\n');
+  return memorizeInstructions({
+    title: '# completion-next — Phase 10 of 11: MEMORIZE',
+    scope: SCOPE,
+    ctx,
+    what: [
+      'What the completion check verified, and what it could not.',
+      'Gaps accepted deliberately, with the reason they were accepted.',
+    ],
+  });
 }
 
 module.exports = function register(registerPhase) {
@@ -65,4 +39,3 @@ module.exports = function register(registerPhase) {
 
 module.exports.validate = validate;
 module.exports.instructions = instructions;
-module.exports.SENTINEL = SENTINEL;

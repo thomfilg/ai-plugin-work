@@ -56,6 +56,12 @@ Re-run after each phase action. The runner writes
 
 ## Memory
 
-If a memory plugin is detected, call the configured `*_remember` tool
-in the `memorize` phase with: ticket id, task index, verdict, key
-kind-specific findings. Then `touch .task-review-memorized`.
+In the `memorize` phase, save: ticket id, task index, verdict, key
+kind-specific findings. If a memory plugin is detected, call the configured
+`*_remember` tool; if not, write it to the ticket worktree docs. Either way,
+record what you saved — a `touch` no longer satisfies the phase:
+
+```bash
+node <plugin>/scripts/workflows/lib/scripts/memory-note.js record <TICKET> \
+  --scope task_review --summary "<what you saved>"
+```

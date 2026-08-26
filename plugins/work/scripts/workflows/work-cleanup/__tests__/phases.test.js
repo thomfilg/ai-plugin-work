@@ -139,10 +139,41 @@ test('state_archive passes when all sections + Status present', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('memorize passes when no memory plugin is detected', () => {
+// `memorize` no longer passes just because no memory plugin is installed. The
+// sentinel it used to accept (`touch .cleanup-memorized`) proved a touch ran,
+// not that anything was saved — a check that passes without the thing it
+// checks for. It now needs a recorded summary, and absent a memory plugin that
+// record goes to the ticket worktree docs rather than nowhere.
+test('memorize BLOCKS with no record, even when no memory plugin is detected', () => {
   const { root, tasksDir } = makeTasksDir();
-  const r = memorize.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, true);
+  const r = memorize.validate({ tasksDir, ticket: 'ECHO-7777', worktreeRoot: null });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join('\n'), /memory-note\.js record/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('memorize passes once a substantive docs record exists', () => {
+  const { root, tasksDir, worktreeRoot } = makeTasksDir();
+  const notePath = path.join(tasksDir, 'cleanup-memory.md');
+  fs.writeFileSync(notePath, 'x'.repeat(250));
+  fs.writeFileSync(
+    path.join(tasksDir, '.memory-records.json'),
+    JSON.stringify({
+      ticket: 'ECHO-7777',
+      records: [
+        {
+          scope: 'cleanup',
+          sink: 'docs',
+          path: notePath,
+          summary:
+            'Deleted feature/x locally and on the remote, killed both ECHO-7777 tmux sessions, ' +
+            'and left the worktree in place because it still held untracked scratch files.',
+        },
+      ],
+    })
+  );
+  const r = memorize.validate({ tasksDir, ticket: 'ECHO-7777', worktreeRoot });
+  assert.equal(r.ok, true, JSON.stringify(r));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -172,8 +203,10 @@ test('every destructive phase works with NO completion.check.md at all', () => {
     const ctx = { ticket: 'T-1', tasksDir };
     assert.equal(branch_cleanup.validate(ctx).ok, true, 'branch_cleanup');
     assert.equal(state_archive.validate(ctx).ok, true, 'state_archive');
-    assert.equal(memorize.validate(ctx).ok, true, 'memorize');
     assert.equal(done.validate(ctx).ok, true, 'done');
+    // `memorize` is excluded deliberately: it has its own requirement (a
+    // recorded summary) which is unrelated to completion evidence, and is
+    // covered by its own cases above.
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

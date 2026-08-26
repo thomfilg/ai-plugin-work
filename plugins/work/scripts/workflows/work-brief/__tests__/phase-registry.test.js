@@ -52,13 +52,20 @@ describe('lib/phase-registry — modular brief phase dispatcher', () => {
     assert.deepEqual(v.errors || [], []);
   });
 
-  it('memorize: no memory plugin → auto-advance (ok:true with summary)', () => {
+  // No longer auto-advances on a missing memory plugin. "There is nowhere to
+  // save it" was never true — absent a plugin the record goes to the ticket
+  // worktree docs, which is where a later run looks anyway. The phase keeps
+  // its WAIT signal (ok:false, EMPTY errors) rather than hard-blocking: an
+  // agent that has not got there yet is not a failure.
+  it('memorize: no memory plugin → still needs a record, and WAITs for it', () => {
     const v = getPhase(BRIEF_PHASES.memorize).validate({
+      ticket: 'ECHO-1',
       memory: null,
       tasksDir: '/tmp/nonexistent',
+      worktreeRoot: null,
     });
-    assert.equal(v.ok, true);
-    assert.match(v.summary, /no-memory-plugin/);
+    assert.equal(v.ok, false);
+    assert.deepEqual(v.errors || [], [], 'waiting, not blocked');
   });
 
   it('inputs handler returns useful errors when manifest missing', () => {
