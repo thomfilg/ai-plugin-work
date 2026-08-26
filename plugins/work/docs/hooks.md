@@ -206,6 +206,33 @@ Repeat `init` calls with unchanged state are silent — pass `--show-guard` to
 node session-guard.js init TICKET-123 /work --show-guard
 ```
 
+### When the Stop hook allows a stop
+
+Its other job — the one agents feel — is refusing to let a `/work` run be
+abandoned mid-flight. A held session blocks the stop (exit 2) with the next
+command to run. It releases (exit 0) only when:
+
+| Release | Why |
+|---|---|
+| No active session for this ticket/worktree | Nothing to hold |
+| The session is revealed (workflow finished) | The run is over |
+| `abort workflow` in the stop message | Explicit operator escape |
+| A user-review checkpoint: `brief_gate`, `spec_gate`, `tasks` | These wait on a human |
+| A `/check` run is **in flight** | `/check` drives itself through its own auto-advance hook; two drivers fight |
+| The stand-down cap is reached (GH-752) | A rate-limited or abandoned session must not re-fire forever |
+
+Every other step — `implement`, `commit`, `task_review`, `pr`, `ready`,
+`follow_up`, `ci`, `cleanup`, `reports` — is held.
+
+The `/check` release is the subtle one, and it read `status === 'in_progress'
+|| currentStep` for a while. `check-next.js` never clears `currentStep` when a
+run ends (it stops at `11_output`), so from the first `/check` onward the
+release was permanently on for that ticket and every step after `check` went
+unguarded — the visible symptom being an agent that opens the PR and then stops
+to ask whether it should go on to follow-up. `lib/check-state-status.js` is now
+the single reader of "is the check still running", shared with `check-next.js`
+so the two definitions cannot diverge again.
+
 ## Error Logging
 
 **File:** `scripts/workflows/lib/hook-error-log.js`
