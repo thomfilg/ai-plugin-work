@@ -13,6 +13,8 @@ const path = require('path');
 
 // Cached TASKS_BASE resolution — loaded once per invocation
 const getConfig = require(path.join(__dirname, '..', '..', 'get-config'));
+// Shared with check-next.js so "the check is still running" has ONE definition.
+const { isCheckRunInProgress } = require(path.join(__dirname, '..', '..', 'check-state-status'));
 
 let _tasksBase;
 /**
@@ -202,13 +204,18 @@ function readWorkState(ticketId) {
   }
 }
 
-/** True when a /check state file marks the workflow as currently running. */
-function hasActiveCheckState(resolvedBase, stateName) {
+/**
+ * /check state file names, in precedence order: the canonical one, then the
+ * legacy name kept for tickets in flight across the check2 → check rename.
+ */
+const CHECK_STATE_FILES = ['.check-state.json', '.check2-state.json'];
+
+/** Parsed /check state, or null when the file is absent or corrupt. */
+function readCheckState(resolvedBase, stateName) {
   try {
-    const state = JSON.parse(fs.readFileSync(path.join(resolvedBase, stateName), 'utf-8'));
-    return Boolean(state?.status === 'in_progress' || state?.currentStep);
+    return JSON.parse(fs.readFileSync(path.join(resolvedBase, stateName), 'utf-8'));
   } catch {
-    return false; /* not found or corrupt */
+    return null; /* not found or corrupt */
   }
 }
 
@@ -230,11 +237,22 @@ function isCheckWorkflowActive(ticketId) {
     // Guard against path traversal — resolved path must stay under tasksBase
     if (!resolvedBase.startsWith(path.resolve(tasksBase) + path.sep)) return false;
 
-    // Check the script-driven /check state file (fall back to the legacy
-    // .check2-state.json name for in-flight tickets that predate the rename)
-    return ['.check-state.json', '.check2-state.json'].some((stateName) =>
-      hasActiveCheckState(resolvedBase, stateName)
-    );
+    // The FIRST file that exists decides — canonical first, legacy only as a
+    // fallback, mirroring check-next.js migrateLegacyState. Asking `.some()`
+    // instead let a stale legacy file outvote the live one: a failed rename
+    // leaves `.check2-state.json` behind while saveState keeps writing the
+    // canonical path, so a mid-run legacy state could re-open this bypass over
+    // a terminal canonical state and un-guard every post-check step again
+    // (PR #801 review).
+    //
+    // `currentStep` is never cleared when a check finishes, so reading it alone
+    // left the bypass permanently ON after the first /check. The shared reader
+    // treats a terminal status as "not running".
+    for (const stateName of CHECK_STATE_FILES) {
+      const state = readCheckState(resolvedBase, stateName);
+      if (state) return isCheckRunInProgress(state);
+    }
+    return false;
   } catch {
     return false;
   }
