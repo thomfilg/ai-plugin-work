@@ -4586,7 +4586,7 @@ describe('enforce-step-workflow', () => {
     });
   });
 
-  describe('cleanup -> reports transition (#105)', () => {
+  describe('cleanup -> complete transition (#105)', () => {
     const ORCHESTRATOR_PATH = path.join(
       __dirname,
       '..',
@@ -4604,35 +4604,32 @@ describe('enforce-step-workflow', () => {
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} reports` },
+        // `complete`, not `reports`: reports now runs BEFORE cleanup, so
+        // cleanup's forward edge is the terminal step.
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} complete` },
       });
       assert.equal(code, 0, 'Should allow forward transition with cleanup evidence');
     });
 
     it('allows transition when no tmux session exists in test environment', async () => {
       writeWorkState(makeStepStatus('cleanup', WORK_STEPS));
-      // No step evidence — cleanup relies on verifyCleanup instead.
-      // GH-283 R8 strengthened verifyCleanup: tmux-absence alone is no longer
-      // sufficient; the completion_check phase must have written
-      // `completion.check.md` carrying the canonical `**Status:** COMPLETE`
-      // line. Provide that marker so verify passes on tmux-absence.
+      // No step evidence — cleanup relies on verifyCleanup instead. That verify
+      // no longer reads completion.check.md (someone else's pre-merge artifact,
+      // which post-merge could only strand a shipped ticket). It reads
+      // cleanup's OWN record, so that is what the test provides.
       fs.writeFileSync(
-        path.join(TASKS_DIR, 'completion.check.md'),
-        '# Completion Check\n\n**Status:** COMPLETE\n'
+        path.join(TASKS_DIR, 'cleanup-summary.md'),
+        '## Branch\nx\n## Tmux sessions\nx\n## Worktree\nx\nStatus: DONE\n'
       );
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} reports` },
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} complete` },
       });
-      // verifyCleanup requires BOTH tmux-session absence AND completion
-      // evidence. In the test environment no tmux session exists for this
-      // ticket and the completion marker is present, so verify passes.
-      assert.equal(
-        code,
-        0,
-        'Should pass via verify — no tmux session + completion evidence present'
-      );
+      // verifyCleanup requires BOTH tmux-session absence AND cleanup's own
+      // record. No tmux session exists for this ticket in the test
+      // environment, and cleanup-summary.md is present, so verify passes.
+      assert.equal(code, 0, 'Should pass via verify — no tmux session + cleanup record present');
     });
   });
 
