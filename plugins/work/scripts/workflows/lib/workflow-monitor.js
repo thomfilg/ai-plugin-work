@@ -23,7 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execFileSync, execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const IDLE_HARD_THRESHOLD = 15 * 60; // 15 min
 const RETRY_LOOP_THRESHOLD = 20;
@@ -204,24 +204,36 @@ function recordFingerprint(ticket, fp) {
 // file locks for the worktree's likely DB files. Best-effort, fail-open.
 function captureDiagnosticSnapshot(ticket, tasksBase) {
   const lines = [];
-  const tryRun = (cmd, label) => {
+  const record = (label, out) => {
+    const text = String(out || '').trim();
+    if (!text) return;
+    lines.push(`--- ${label} ---`);
+    lines.push(text);
+  };
+  // Ticket ids and worktree paths reach this function from --tasks-base and
+  // $WORKTREES_BASES, so every probe runs argv-style: no shell, nothing to
+  // interpolate, and the matching/heading/limiting happens here in JS.
+  const tryExec = (file, args, options = {}) => {
     try {
-      const out = execSync(cmd, {
+      return execFileSync(file, args, {
         encoding: 'utf-8',
         timeout: 3000,
         stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-      if (out) {
-        lines.push(`--- ${label} ---`);
-        lines.push(out);
-      }
+        ...options,
+      });
     } catch {
-      /* fail-open */
+      return '';
     }
   };
+  const grepLines = (out, needle, limit) =>
+    String(out || '')
+      .split('\n')
+      .filter((l) => l.includes(needle))
+      .slice(0, limit)
+      .join('\n');
 
   // tmux sessions matching the ticket
-  tryRun(`tmux ls 2>/dev/null | grep -E '${ticket}' || true`, 'tmux sessions');
+  record('tmux sessions', grepLines(tryExec('tmux', ['ls']), ticket, Infinity));
 
   // worktree path = parent(tasksBase) + likely worktree dir naming. We don't
   // know the exact worktree path, so check the parent for *<ticket>* dirs.
@@ -230,16 +242,28 @@ function captureDiagnosticSnapshot(ticket, tasksBase) {
     const matches = fs.readdirSync(worktreeParent).filter((e) => e.includes(ticket));
     if (matches.length > 0) {
       const worktree = path.join(worktreeParent, matches[0]);
-      // lsof on common DB files inside the worktree
-      tryRun(
-        `cd "${worktree}" && lsof prisma/*.db 2>/dev/null | head -10 || true`,
-        `lsof prisma/*.db in ${matches[0]}`
-      );
+      // lsof on common DB files inside the worktree (glob expanded here, not by a shell)
+      let dbFiles = [];
+      try {
+        dbFiles = fs
+          .readdirSync(path.join(worktree, 'prisma'))
+          .filter((e) => e.endsWith('.db'))
+          .map((e) => path.join('prisma', e));
+      } catch {
+        /* no prisma dir */
+      }
+      if (dbFiles.length > 0) {
+        const out = tryExec('lsof', dbFiles, { cwd: worktree });
+        record(`lsof prisma/*.db in ${matches[0]}`, out.split('\n').slice(0, 10).join('\n'));
+      }
       // Listening processes on common dev ports
-      tryRun(
-        `lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -E ':3000|:5173|:5432' | head -5 || true`,
-        'listening ports'
-      );
+      const listening = tryExec('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN']);
+      const ports = String(listening)
+        .split('\n')
+        .filter((l) => l.includes(':3000') || l.includes(':5173') || l.includes(':5432'))
+        .slice(0, 5)
+        .join('\n');
+      record('listening ports', ports);
     }
   } catch {
     /* fail-open */

@@ -6,12 +6,13 @@
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
 const CLI_PATH = path.join(__dirname, '..', 'tdd-phase-state.js');
+const { splitArgs } = require('../../lib/__tests__/_helpers/split-args');
 
 function createTempHome() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-state-'));
@@ -63,7 +64,7 @@ function createTempGitRepo() {
 function runCli(args, homeDir, cwd) {
   try {
     const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
-    const stdout = execSync(`node ${CLI_PATH} ${args}`, {
+    const stdout = execFileSync(process.execPath, [CLI_PATH, ...splitArgs(args)], {
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -87,7 +88,7 @@ function runCli(args, homeDir, cwd) {
 function runCliNoTokenSkip(args, homeDir) {
   try {
     const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
-    const stdout = execSync(`node ${CLI_PATH} ${args}`, {
+    const stdout = execFileSync(process.execPath, [CLI_PATH, ...splitArgs(args)], {
       encoding: 'utf8',
       env: {
         ...process.env,

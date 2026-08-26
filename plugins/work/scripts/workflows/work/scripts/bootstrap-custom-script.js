@@ -44,9 +44,11 @@ function loadEnvrcFromDirs(candidateDirs) {
     seen.add(envrcPath);
     if (!fs.existsSync(envrcPath)) continue;
 
+    // The path is a positional argument ($1), never spliced into the script
+    // text — envrcPath is derived from caller-supplied directories.
     const result = spawnSync(
       'bash',
-      ['-c', `set -a; source "${envrcPath}" >/dev/null 2>&1; env -0`],
+      ['-c', 'set -a; . "$1" >/dev/null 2>&1; env -0', 'bash', envrcPath],
       { encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024 }
     );
 

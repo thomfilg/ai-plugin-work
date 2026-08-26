@@ -11,7 +11,7 @@
  * 5. PR body contains a wiki link for visual documentation
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -115,7 +115,7 @@ function getAllFrontendApps() {
 function getAffectedApps() {
   try {
     const scriptPath = path.join(REPO_DIR, 'scripts', 'get-affected.js');
-    const result = execSync(`node "${scriptPath}" main json`, {
+    const result = execFileSync(process.execPath, [scriptPath, 'main', 'json'], {
       encoding: 'utf8',
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe'],

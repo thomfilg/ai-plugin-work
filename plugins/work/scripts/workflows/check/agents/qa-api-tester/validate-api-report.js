@@ -157,7 +157,10 @@ function validateHttpFile(content) {
   }
 
   // Warning check: Secrets potentially exposed (non-blocking, just warn)
-  const hasPotentialSecrets = /(Authorization|X-API-Key|Cookie):\s*[^<\n]+[^REDACTED\n]/i.test(
+  // A header whose value is neither a `<placeholder>` nor a redacted stand-in.
+  // `[^REDACTED\n]` was a character class, so it only ever excluded the letters
+  // R/E/D/A/C/T (with E and D duplicated) rather than the word REDACTED.
+  const hasPotentialSecrets = /(Authorization|X-API-Key|Cookie):[ \t]*(?![ \t<])(?!.*REDACTED)[^\n]+/i.test(
     content
   );
   if (hasPotentialSecrets) {

@@ -894,7 +894,10 @@ describe('transition-step.js (GH-693): commit-evidence gate', () => {
         if (response instanceof Error) throw response;
         return response;
       }
-      return orig(cmd, args, opts);
+      // Nothing under test reaches this branch. Forwarding to the real
+      // execFileSync would let an unstubbed call shell out for real, with a
+      // command and argv the test never chose — fail loudly instead.
+      throw new Error(`unstubbed child process in test double: ${cmd} ${JSON.stringify(args)}`);
     };
     try {
       return fn(calls);

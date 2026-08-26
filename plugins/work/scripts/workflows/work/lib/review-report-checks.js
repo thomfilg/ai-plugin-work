@@ -67,7 +67,10 @@ const QA_SIGNALS = {
   hasGoogleTest: [
     /###\s*External\s*Connectivity\s*\(google\.com\)/i,
     /google\.com.*Status:\s*(✅|SUCCESS|FAILED|❌)/i,
-    /Status:.*google\.com/i,
+    // Line-anchored (`m`): a single report line carrying both the status and the
+    // host. Unanchored, this reads as a hostname check that any surrounding host
+    // would satisfy (CodeQL js/regex/missing-regexp-anchor).
+    /^.*Status:.*google\.com.*$/im,
   ],
   hasHealthCheck: [
     /###\s*App\s*Health\s*Check/i,
