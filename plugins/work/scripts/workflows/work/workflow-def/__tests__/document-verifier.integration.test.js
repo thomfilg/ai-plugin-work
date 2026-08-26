@@ -72,9 +72,18 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+/**
+ * Write the note into the TASKS DIR, not the worktree.
+ *
+ * resolveTicketWorktree returns null in-process here — lib/config caches its
+ * bases at require time, before beforeEach sets them — so the tasks dir is the
+ * containment root the gate actually has. An earlier version of this test put
+ * the note in the worktree and passed only because containment was skipped
+ * entirely on an unresolvable worktree; that hole is what this file now pins
+ * shut, so the test has to stop relying on it.
+ */
 function writeDocNote() {
-  const file = path.join(worktree, 'docs', 'work-notes', `${TICKET}.md`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const file = path.join(tasksDir, 'work-notes.md');
   fs.writeFileSync(file, `# ${TICKET}\n\n${GOOD_SUMMARY}\n${'detail. '.repeat(30)}`);
   return file;
 }
@@ -100,6 +109,13 @@ describe('verifyDocument', () => {
   it('is false for a placeholder summary, however long', () => {
     const file = writeDocNote();
     appendNote(tasksDir, TICKET, { sink: SINKS.docs, path: file, summary: '-'.repeat(200) });
+    assert.equal(makeVerifiers().verifyDocument(TICKET), false);
+  });
+
+  it('is false for a note pointing outside every containment root', () => {
+    const outside = path.join(root, 'outside.md');
+    fs.writeFileSync(outside, 'x'.repeat(400));
+    appendNote(tasksDir, TICKET, { sink: SINKS.docs, path: outside, summary: GOOD_SUMMARY });
     assert.equal(makeVerifiers().verifyDocument(TICKET), false);
   });
 

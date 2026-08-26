@@ -287,6 +287,7 @@ function verifyDocument(deps, ticketId) {
       notes: readNotes(dir),
       memoryConfigured: Boolean(detectMemoryPlugin()),
       worktreeRoot: resolveTicketWorktree(ticketId) || null,
+      tasksDir: dir,
     }).ok;
   } catch {
     return false;

@@ -174,6 +174,38 @@ describe('document-note.js record → verify', () => {
   });
 });
 
+describe('document-note.js — an unresolvable worktree narrows the target', () => {
+  /** Point WORKTREES_BASE at nothing so resolveTicketWorktree gives up. */
+  function noWorktree() {
+    return { WORKTREES_BASE: path.join(root, 'absent'), REPO_NAME: 'nope' };
+  }
+
+  it('sink falls back to work-notes.md in the tasks dir', () => {
+    const { code, out } = run(['sink', TICKET], noWorktree());
+    assert.equal(code, 0);
+    assert.match(out, /^docs\t/);
+    assert.ok(out.includes(path.join(tasksDir, 'work-notes.md')));
+  });
+
+  it('records and verifies a note written to that fallback path', () => {
+    fs.writeFileSync(path.join(tasksDir, 'work-notes.md'), `# ${TICKET}\n${'detail. '.repeat(40)}`);
+    const rec = run(['record', TICKET, '--summary', GOOD_SUMMARY], noWorktree());
+    assert.equal(rec.code, 0, rec.err);
+    assert.equal(run(['verify', TICKET], noWorktree()).code, 0);
+  });
+
+  it('refuses a readable file outside every root', () => {
+    // The gate is about the note being where a later run looks — not about
+    // some file, somewhere, being long enough.
+    const outside = path.join(root, 'outside.md');
+    fs.writeFileSync(outside, 'x'.repeat(400));
+    const rec = run(['record', TICKET, '--path', outside, '--summary', GOOD_SUMMARY], noWorktree());
+    assert.equal(rec.code, 1);
+    assert.match(rec.err, /NOT satisfied/);
+    assert.equal(run(['verify', TICKET], noWorktree()).code, 1);
+  });
+});
+
 describe('document-note.js usage', () => {
   it('exits 2 without a command or ticket', () => {
     assert.equal(run([]).code, 2);

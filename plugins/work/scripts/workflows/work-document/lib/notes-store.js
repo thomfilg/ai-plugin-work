@@ -101,15 +101,30 @@ function isInside(root, p) {
 }
 
 /**
- * Re-check a docs note against the filesystem: the file must still be inside
- * the worktree, still exist, and still hold at least MIN_DOC_CHARS.
- * `worktreeRoot` null (unresolvable worktree) drops only the containment
- * clause — existence and substance still have to hold.
+ * Where a docs note is allowed to live: the ticket's worktree, or — when that
+ * cannot be resolved — the ticket's tasks dir. Never nowhere.
+ *
+ * An earlier cut dropped the containment clause entirely on an unresolvable
+ * worktree, on the theory that existence and substance still held. They do,
+ * but of the WRONG file: `/etc/services` is readable and long, and it
+ * satisfied the gate. The point of this step is that the note is somewhere a
+ * later run will look, so an unresolvable worktree narrows the target rather
+ * than removing it.
  */
-function docFileHolds(notePath, worktreeRoot) {
-  if (!notePath) return false;
+function allowedRoots({ worktreeRoot, tasksDir }) {
+  return [worktreeRoot, tasksDir].filter(Boolean).map((r) => path.resolve(r));
+}
+
+/**
+ * Re-check a docs note against the filesystem: the file must sit under one of
+ * the allowed roots, still exist, and still hold at least MIN_DOC_CHARS.
+ * No resolvable root at all → false: nothing can be proven, and this step runs
+ * pre-merge where a refusal costs only a re-run.
+ */
+function docFileHolds(notePath, roots) {
+  if (!notePath || roots.length === 0) return false;
   const abs = path.resolve(notePath);
-  if (worktreeRoot && !isInside(path.resolve(worktreeRoot), abs)) return false;
+  if (!roots.some((root) => isInside(root, abs))) return false;
   try {
     return fs.readFileSync(abs, 'utf8').trim().length >= MIN_DOC_CHARS;
   } catch {
@@ -118,10 +133,10 @@ function docFileHolds(notePath, worktreeRoot) {
 }
 
 /** Is this one note valid on its own terms? */
-function noteIsValid(note, worktreeRoot) {
+function noteIsValid(note, roots) {
   if (!note || !summaryIsSubstantial(note.summary)) return false;
   if (note.sink === SINKS.memory) return Boolean(note.memory && note.tool);
-  if (note.sink === SINKS.docs) return docFileHolds(note.path, worktreeRoot);
+  if (note.sink === SINKS.docs) return docFileHolds(note.path, roots);
   return false;
 }
 
@@ -133,11 +148,13 @@ function noteIsValid(note, worktreeRoot) {
  * system, and a docs file — however good — does not discharge that. Without
  * one, the worktree docs file is the only sink there is.
  *
- * @param {{notes: object[], memoryConfigured: boolean, worktreeRoot: ?string}} input
+ * @param {{notes: object[], memoryConfigured: boolean, worktreeRoot: ?string,
+ *          tasksDir: ?string}} input
  * @returns {{ok: boolean, reason: string, valid: object[]}}
  */
-function evaluateNotes({ notes, memoryConfigured, worktreeRoot }) {
-  const valid = (notes || []).filter((n) => noteIsValid(n, worktreeRoot));
+function evaluateNotes({ notes, memoryConfigured, worktreeRoot, tasksDir }) {
+  const roots = allowedRoots({ worktreeRoot, tasksDir });
+  const valid = (notes || []).filter((n) => noteIsValid(n, roots));
   if (valid.length === 0) {
     return { ok: false, reason: reasonForNoValidNote(notes, memoryConfigured), valid };
   }
@@ -166,7 +183,7 @@ function reasonForNoValidNote(notes, memoryConfigured) {
   return (
     `${notes.length} note(s) recorded but none valid — a note needs a summary of at least ` +
     `${MIN_SUMMARY_CHARS} substantive characters, and a docs note needs its file to still ` +
-    `exist under the worktree with at least ${MIN_DOC_CHARS} characters`
+    `exist under the ticket worktree (or its tasks dir) with at least ${MIN_DOC_CHARS} characters`
   );
 }
 
@@ -175,6 +192,7 @@ module.exports = {
   MIN_SUMMARY_CHARS,
   MIN_DOC_CHARS,
   SINKS,
+  allowedRoots,
   notesPath,
   readNotes,
   appendNote,

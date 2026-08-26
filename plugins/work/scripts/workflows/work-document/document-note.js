@@ -38,9 +38,15 @@ const { appendNote, readNotes, evaluateNotes, SINKS, summaryIsSubstantial, MIN_S
 
 const SCRIPT = 'document-note.js';
 
-/** `docs/work-notes/<TICKET>.md` inside the ticket's worktree. */
-function defaultDocsPath(ticket, worktreeRoot) {
-  return worktreeRoot ? path.join(worktreeRoot, 'docs', 'work-notes', `${ticket}.md`) : '';
+/**
+ * `docs/work-notes/<TICKET>.md` inside the ticket's worktree — or, when that
+ * cannot be resolved, `work-notes.md` in the ticket's tasks dir. Both are
+ * places a later run looks; the gate requires the note to be under one of
+ * them, so this never returns a path the gate would then reject.
+ */
+function defaultDocsPath(ticket, worktreeRoot, tasksDir) {
+  if (worktreeRoot) return path.join(worktreeRoot, 'docs', 'work-notes', `${ticket}.md`);
+  return tasksDir ? path.join(tasksDir, 'work-notes.md') : '';
 }
 
 function parseFlags(argv) {
@@ -76,7 +82,7 @@ function cmdSink(ctx) {
     );
     return 0;
   }
-  const docs = defaultDocsPath(ctx.ticket, ctx.worktreeRoot);
+  const docs = defaultDocsPath(ctx.ticket, ctx.worktreeRoot, ctx.tasksDir);
   process.stdout.write(
     `docs\t${docs || '(worktree unresolved)'}\n` +
       `No memory plugin is configured. Write the note to the worktree, then record it:\n` +
@@ -115,8 +121,10 @@ function buildNote(ctx, flags) {
     );
   }
   const notePath =
-    typeof flags.path === 'string' ? flags.path : defaultDocsPath(ctx.ticket, ctx.worktreeRoot);
-  if (!notePath) die('--path is required (the ticket worktree could not be resolved)');
+    typeof flags.path === 'string'
+      ? flags.path
+      : defaultDocsPath(ctx.ticket, ctx.worktreeRoot, ctx.tasksDir);
+  if (!notePath) die('--path is required (neither the worktree nor the tasks dir resolved)');
   return { sink: SINKS.docs, path: path.resolve(notePath), summary };
 }
 
@@ -127,6 +135,7 @@ function cmdRecord(ctx, flags) {
     notes,
     memoryConfigured: Boolean(ctx.memory),
     worktreeRoot: ctx.worktreeRoot,
+    tasksDir: ctx.tasksDir,
   });
   if (!verdict.ok) {
     process.stderr.write(
@@ -145,6 +154,7 @@ function cmdVerify(ctx) {
     notes: readNotes(ctx.tasksDir),
     memoryConfigured: Boolean(ctx.memory),
     worktreeRoot: ctx.worktreeRoot,
+    tasksDir: ctx.tasksDir,
   });
   if (!verdict.ok) {
     process.stderr.write(`document step NOT satisfied: ${verdict.reason}\n`);

@@ -50,7 +50,7 @@ function writeDoc(relPath, chars = MIN_DOC_CHARS + 20) {
 }
 
 const evaluate = (notes, memoryConfigured) =>
-  evaluateNotes({ notes, memoryConfigured, worktreeRoot: worktree });
+  evaluateNotes({ notes, memoryConfigured, worktreeRoot: worktree, tasksDir });
 
 describe('summaryIsSubstantial', () => {
   it('rejects a summary that is too short to say anything', () => {
@@ -174,12 +174,39 @@ describe('evaluateNotes — a docs note is re-read, not trusted', () => {
     assert.equal(evaluate(notes, false).ok, false);
   });
 
-  it('still requires existence and substance when the worktree is unresolvable', () => {
+  it('falls back to the tasks dir when the worktree is unresolvable — it does not stop checking', () => {
+    // An earlier cut dropped containment entirely here, so any readable file
+    // of sufficient length passed the hard gate. The note has to be somewhere
+    // a later run looks, so the target narrows instead of disappearing.
+    const inTasks = path.join(tasksDir, 'work-notes.md');
+    fs.writeFileSync(inTasks, 'x'.repeat(MIN_DOC_CHARS + 20));
+    const unresolved = (notes) =>
+      evaluateNotes({ notes, memoryConfigured: false, worktreeRoot: null, tasksDir });
+
+    assert.equal(unresolved([{ sink: SINKS.docs, path: inTasks, summary: GOOD_SUMMARY }]).ok, true);
+
+    const elsewhere = path.join(root, 'elsewhere.md');
+    fs.writeFileSync(elsewhere, 'x'.repeat(MIN_DOC_CHARS + 20));
+    assert.equal(
+      unresolved([{ sink: SINKS.docs, path: elsewhere, summary: GOOD_SUMMARY }]).ok,
+      false,
+      'a readable file outside every root must not satisfy the gate'
+    );
+
+    fs.rmSync(inTasks);
+    assert.equal(
+      unresolved([{ sink: SINKS.docs, path: inTasks, summary: GOOD_SUMMARY }]).ok,
+      false
+    );
+  });
+
+  it('fails closed when neither the worktree nor the tasks dir resolves', () => {
     const file = writeDoc('docs/work-notes/GH-800.md');
     const notes = [{ sink: SINKS.docs, path: file, summary: GOOD_SUMMARY }];
-    assert.equal(evaluateNotes({ notes, memoryConfigured: false, worktreeRoot: null }).ok, true);
-    fs.rmSync(file);
-    assert.equal(evaluateNotes({ notes, memoryConfigured: false, worktreeRoot: null }).ok, false);
+    assert.equal(
+      evaluateNotes({ notes, memoryConfigured: false, worktreeRoot: null, tasksDir: null }).ok,
+      false
+    );
   });
 });
 
