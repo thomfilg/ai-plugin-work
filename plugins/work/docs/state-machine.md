@@ -239,7 +239,13 @@ The generic workflow engine supports any workflow (not just /work). It provides:
 
 Each workflow provides a `workflow-definition.js` that returns:
 - `steps` — Ordered step array
-- `commandMap` — Step-to-tool-pattern mappings
+- `commandMap` — Step-to-tool-pattern mappings. An entry marked
+  `advisory: true` matches a human-written label (a Task/Agent `description`)
+  rather than a command: it attributes a call to its step only while that step
+  is in progress, and it never blocks. Blocking belongs to machine-checkable
+  intent — a Skill name or a script path in a Bash command — because step names
+  like `check`, `ready`, `complete` and `cleanup` are ordinary English words
+  that collide with any label a caller happens to write.
 - `verify()` functions — Evidence checks
 - `archivalPatterns` — Cleanup rules for backward transitions
 - `evidenceRequirements` — Required files per step

@@ -17,7 +17,7 @@
  */
 
 const { dispatchTargetAgent } = require('../../agent-identity');
-const { matchToolToStep, isExempt } = require('./command-matching');
+const { matchToolToMapping, isExempt } = require('./command-matching');
 const { evaluateTransitionGate, formatTransitionBlockMessage } = require('./transition-gate');
 const { evaluateStepGate, formatStepBlockMessage } = require('./step-gate');
 const {
@@ -116,9 +116,25 @@ function computeCheckStateActive(deps, wf, matchedStep, currentStep, ctx) {
   return checkState?.status === 'in_progress';
 }
 
+/**
+ * Resolve the step a tool call belongs to, honouring `advisory` mappings.
+ *
+ * An advisory mapping (a Task/Agent `description` pattern — see the note in
+ * workflows/work/workflow-definition.js) matches a human-written label, which
+ * is evidence of intent only while the state machine agrees. Off the step it
+ * names, the match is a word coincidence: return null so the caller neither
+ * blocks the call nor files evidence against a step that has not run.
+ */
+function resolveMatchedStep(wf, ctx, currentStep) {
+  const mapping = matchToolToMapping(ctx.toolName, ctx.toolInput, wf.commandIndex);
+  if (!mapping) return null;
+  if (mapping.advisory && mapping.step !== currentStep) return null;
+  return mapping.step;
+}
+
 // Rule 1: step command gate for one workflow. Returns { message, action } or null.
 function checkStepPre(deps, wf, currentStep, ctx) {
-  const matchedStep = matchToolToStep(ctx.toolName, ctx.toolInput, wf.commandIndex);
+  const matchedStep = resolveMatchedStep(wf, ctx, currentStep);
   if (!matchedStep) return null; // Not a step command for this workflow → skip
 
   const stepResult = evaluateStepGate({
@@ -217,7 +233,7 @@ function recordWorkflowPost(deps, wf, ctx) {
   }
 
   // Map tool call to step and record evidence
-  const matchedStep = matchToolToStep(ctx.toolName, ctx.toolInput, wf.commandIndex);
+  const matchedStep = resolveMatchedStep(wf, ctx, currentStep);
   if (!matchedStep) return;
 
   if (shouldSkipPrEvidence(deps, wf, matchedStep, ctx.ticketId)) return;

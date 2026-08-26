@@ -149,6 +149,36 @@ describe('agent-authorization: isExemptScriptInvocation', () => {
     assert.equal(r, false);
   });
 
+  // The tmux relaunch is the sanctioned escape for a runner that outlives the
+  // Bash timeout. Vector 3 finds the script inside the quoted payload either
+  // way; if the exemption cannot, the wrapped call is refused while the
+  // identical direct call is allowed.
+  it('exempts a trusted script wrapped in a tmux session', () => {
+    const opts = {
+      exemptScripts: new Set(['agent-authorization.js']),
+      safeSubcommands: safeMap,
+      trustedDirs,
+      protectedBasenames: new Set(['.work-state.json', '.follow-up-state.json']),
+    };
+    const direct = `node ${realScript} ABC-1 --init --pr 5`;
+    const wrapped = `tmux new-session -d -s repo-ABC-1 "${direct}"`;
+    assert.equal(isExemptScriptInvocation(direct, opts), true);
+    assert.equal(isExemptScriptInvocation(wrapped, opts), true);
+  });
+
+  it('still rejects an unsafe sub-command hidden inside a tmux payload', () => {
+    const r = isExemptScriptInvocation(
+      `tmux new-session -d -s s "node ${realScript} set-step ABC-1 brief in_progress"`,
+      {
+        exemptScripts: new Set(['agent-authorization.js']),
+        safeSubcommands: { 'agent-authorization.js': new Set(['get']) },
+        trustedDirs,
+        protectedBasenames: new Set(),
+      }
+    );
+    assert.equal(r, false);
+  });
+
   it('returns false when script is exempt by basename but lives outside trusted dirs', () => {
     // /tmp file with the exempt basename should NOT be trusted
     const tmpFile = path.join(os.tmpdir(), `workflow-engine.js`);

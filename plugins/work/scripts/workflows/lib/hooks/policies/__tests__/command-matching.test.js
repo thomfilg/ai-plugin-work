@@ -12,6 +12,7 @@ const {
   NODE_INVOKE_PATTERN_SRC,
   getNodeInvocations,
   buildCommandIndex,
+  matchToolToMapping,
   matchToolToStep,
   isExempt,
   parseTransition,
@@ -63,6 +64,45 @@ describe('command-matching: getNodeInvocations', () => {
   it('matches node calls on separate lines', () => {
     const matches = getNodeInvocations('node a.js\nnode b.js');
     assert.equal(matches.length, 2);
+  });
+
+  // A runner handed to tmux (the sanctioned escape for a script that outlives
+  // the Bash timeout) is the SAME invocation as the direct call. Vector 3's
+  // INTERPRETER_PATTERN always saw through the quotes; when this side did not,
+  // the exemption could not answer for a call the detector had already found.
+  it('sees a node call inside a tmux new-session payload', () => {
+    const matches = getNodeInvocations(
+      'tmux new-session -d -s repo-ABC-1 "node /p/follow-up-next.js ABC-1 --init --pr 5"'
+    );
+    assert.equal(matches.length, 1);
+    const captured = matches[0][1] || matches[0][2] || matches[0][3];
+    assert.equal(captured, '/p/follow-up-next.js');
+  });
+
+  it('sees a node call inside a single-quoted tmux payload', () => {
+    const matches = getNodeInvocations("tmux new-session -d -s s 'node /p/x.js TICKET'");
+    assert.equal(matches.length, 1);
+    const captured = matches[0][1] || matches[0][2] || matches[0][3];
+    assert.equal(captured, '/p/x.js');
+  });
+
+  it('sees a node call inside bash -lc / sh -c payloads', () => {
+    for (const cmd of ['bash -lc "node /p/x.js T"', `sh -c 'node /p/x.js T'`]) {
+      const matches = getNodeInvocations(cmd);
+      assert.equal(matches.length, 1, cmd);
+      assert.equal(matches[0][1] || matches[0][2] || matches[0][3], '/p/x.js');
+    }
+  });
+
+  it('does not let the wrapper prefix swallow a neighbouring command', () => {
+    const matches = getNodeInvocations('tmux ls; node /p/x.js T');
+    assert.equal(matches.length, 1);
+    assert.equal(matches[0][1] || matches[0][2] || matches[0][3], '/p/x.js');
+  });
+
+  it('leaves the closing quote out of the captured path', () => {
+    const matches = getNodeInvocations('bash -c "node /p/x.js"');
+    assert.equal(matches[0][1] || matches[0][2] || matches[0][3], '/p/x.js');
   });
 
   it('exposes a stable pattern source string', () => {
@@ -177,5 +217,32 @@ describe('command-matching: parseTransition', () => {
       (id) => `GH-${id.replace('#', '')}`
     );
     assert.equal(r.ticket, 'GH-123');
+  });
+});
+
+describe('command-matching: matchToolToMapping', () => {
+  const index = buildCommandIndex([
+    {
+      step: 'complete',
+      tool: 'Task',
+      field: 'description',
+      pattern: /^complete\b/i,
+      advisory: true,
+    },
+    { step: 'tasks', tool: 'Skill', field: 'skill', pattern: /^split-in-tasks$/ },
+  ]);
+
+  it('returns the whole mapping so callers can read its flags', () => {
+    const m = matchToolToMapping('Task', { description: 'Complete the brief' }, index);
+    assert.equal(m.step, 'complete');
+    assert.equal(m.advisory, true);
+  });
+
+  it('returns null when nothing matches', () => {
+    assert.equal(matchToolToMapping('Task', { description: 'draft a brief' }, index), null);
+  });
+
+  it('keeps matchToolToStep answering with just the step', () => {
+    assert.equal(matchToolToStep('Skill', { skill: 'split-in-tasks' }, index), 'tasks');
   });
 });

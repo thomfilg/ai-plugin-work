@@ -11,9 +11,14 @@ module.exports = function prStep(add, s, ctx) {
   // (inputs → diff_audit → description_draft → validate_description →
   // create_or_update → attachments → memorize → done). Skip if rework
   // since rework is a forced single-shot.
+  // The runner is agent-gated (pr-generator / pr-post-generator only), so this
+  // hint is addressed to the agent the skill dispatches — NOT to the session
+  // reading it. Running pr-next.js here is blocked with "not running in an
+  // authorized agent", and a session that tries anyway burns a turn on a
+  // refusal, so the hint says who it is for and how to forward it.
   const driverHint = rework
     ? ''
-    : `\n\nBefore and after each sub-action, run \`node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-pr-step/pr-next.js ${ticket || t}\` to validate and advance. Do NOT edit \`pr-phase.json\` directly.`;
+    : `\n\nThe pr step is phase-driven by \`pr-next.js\`, which ONLY the pr-generator and pr-post-generator agents may run — a Bash call from this session is blocked by design, so do not make one. Instead include this instruction verbatim in the prompt the skill dispatches to pr-generator / pr-post-generator:\n  "Before and after each sub-action, run \`node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-pr-step/pr-next.js ${ticket || t}\` to validate and advance. Do NOT edit \`pr-phase.json\` directly."`;
 
   if (rework) {
     add(STEPS.pr, 'RUN', `/work-pr ${ticket} --force`, 'REWORK: Force update', {

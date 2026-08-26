@@ -1917,26 +1917,31 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'quality-checker should be allowed when /check is active');
     });
 
-    it('still blocks check agents when /check is NOT active', async () => {
+    // These two need a call that the step gate actually blocks. A Task/Agent
+    // `description` is no longer one: those mappings are advisory (a label is
+    // not a command — see workflows/work/workflow-definition.js), so a
+    // "cleanup …" label outside the cleanup step is now a no-op, not a block.
+    // The Skill mappings are real commands and still gate, so they carry the
+    // /check-bypass assertions instead.
+    it('still blocks a step command when /check is NOT active', async () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
-      // No /check workflow state written — quality-checker has no /work step mapping,
-      // so we test with a description-pattern agent like cleanup that maps to a /work step
+      // No /check workflow state written.
       const { code, stderr } = await runHook({
-        tool_name: 'Agent',
-        tool_input: { subagent_type: 'general-purpose', description: 'cleanup kill session' },
+        tool_name: 'Skill',
+        tool_input: { skill: 'work-workflow:check' },
       });
-      assert.equal(code, 2, 'cleanup agent should be blocked when cleanup step is not in_progress');
+      assert.equal(code, 2, 'check skill should be blocked when the check step is not in_progress');
       assert.ok(stderr.includes('BLOCKED'), 'should include BLOCKED message');
     });
 
-    it('still blocks non-check agents even when /check is active', async () => {
+    it('does not extend the /check bypass to calls that are not check agents', async () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
       writeWorkflowState({ '1_setup': 'completed', '4_phase1_agents': 'in_progress' }, 'check');
       const { code, stderr } = await runHook({
-        tool_name: 'Agent',
-        tool_input: { subagent_type: 'general-purpose', description: 'cleanup kill session' },
+        tool_name: 'Skill',
+        tool_input: { skill: 'work-workflow:check' },
       });
-      assert.equal(code, 2, 'cleanup agent should still be blocked');
+      assert.equal(code, 2, 'the bypass is keyed on the dispatched agent, not on /check alone');
       assert.ok(stderr.includes('BLOCKED'), 'should include BLOCKED message');
     });
 
@@ -5537,6 +5542,90 @@ describe('enforce-step-workflow', () => {
           `Vector 3: stderr must contain BLOCKED; got:\n${stderr}`
         );
       });
+    });
+  });
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CHAR-8178 field report — three blocks that each stopped a run dead
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('CHAR-8178 regressions', () => {
+    // A Task/Agent `description` is a UI label. `/^complete\b/i` matched the
+    // brief dispatch "Complete CHAR-8178 brief via brief-next" and the gate
+    // refused it, naming a step nobody had asked for.
+    it('allows a brief dispatch whose label happens to start with "Complete"', async () => {
+      writeWorkState(makeStepStatus('brief', WORK_STEPS));
+      const { code, stderr } = await runHook({
+        tool_name: 'Agent',
+        tool_input: {
+          subagent_type: 'work-workflow:brief-writer',
+          description: 'Complete CHAR-8178 brief via brief-next',
+          prompt: 'drive brief-next.js',
+        },
+      });
+      assert.equal(code, 0, `label collision must not block; stderr=${stderr}`);
+    });
+
+    it('records no complete-step evidence for that label', async () => {
+      writeWorkState(makeStepStatus('brief', WORK_STEPS));
+      const input = {
+        tool_name: 'Agent',
+        tool_input: {
+          subagent_type: 'work-workflow:brief-writer',
+          description: 'Complete CHAR-8178 brief via brief-next',
+          prompt: 'drive brief-next.js',
+        },
+      };
+      await runHook(input, 'PostToolUse');
+      assert.equal(readEvidence()['complete'], undefined);
+    });
+
+    // The tmux relaunch is the escape for a runner that outlives the Bash
+    // timeout. Vector 3 saw the script inside the quoted payload; the
+    // exemption did not, so the wrapped call was refused while the identical
+    // direct call was allowed.
+    it('allows a tmux-wrapped follow-up-next.js, like the direct call', async () => {
+      writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
+      const runner = path.join(__dirname, '..', '..', 'follow-up', 'follow-up-next.js');
+      const direct = `node ${runner} ${TEST_TICKET} --init --pr 5`;
+
+      const bare = await runHook({ tool_name: 'Bash', tool_input: { command: direct } });
+      assert.equal(bare.code, 0, `direct call must stay allowed; stderr=${bare.stderr}`);
+
+      const wrapped = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `tmux new-session -d -s repo-${TEST_TICKET} "${direct}"` },
+      });
+      assert.equal(wrapped.code, 0, `tmux-wrapped call must match it; stderr=${wrapped.stderr}`);
+    });
+
+    // Standalone `/brief`: no /work run owns the ticket, so there is no step
+    // to be in — and the brief-writer could not save the brief it had just
+    // spent 18 minutes producing.
+    it('lets the brief-writer save brief.md with no /work run active', async () => {
+      if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(TASKS_DIR, 'brief.md'), content: '# Brief\n' },
+        },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'brief-writer' }
+      );
+      assert.equal(code, 0, `standalone brief must be writable; stderr=${stderr}`);
+    });
+
+    it('still holds the step boundary while a /work run IS active', async () => {
+      writeWorkState(makeStepStatus('spec', WORK_STEPS));
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: path.join(TASKS_DIR, 'brief.md'), content: '# Brief\n' },
+        },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'brief-writer' }
+      );
+      assert.equal(code, 2, 'brief.md at the spec step must still be blocked');
+      assert.match(stderr, /none of the allowed step\(s\)/);
     });
   });
 });
