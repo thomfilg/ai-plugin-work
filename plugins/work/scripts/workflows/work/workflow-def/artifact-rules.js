@@ -128,6 +128,19 @@ function buildArtifactRules({ STEPS, workRoot }) {
       agents: ['developer-nodejs-tdd', 'developer-react-senior', 'developer-devops'],
     },
     { basename: 'review-accountability.json', step: STEPS.follow_up, agents: ['follow-up-pr'] },
+    // The document step's receipt, scoped to the step and its agent — the same
+    // posture as every other artifact here. `agents: []` would mean NO agent
+    // restriction (see protect-artifact-files checkAgentGate), which is the
+    // opposite of what this file needs.
+    //
+    // What this does and does not buy: writes are confined to the documenter
+    // during the document step, and `document-note.js` is the sanctioned way to
+    // produce a well-formed receipt. It is not tamper-proof against that agent
+    // hand-writing one — nothing here is. The verification that does not rest
+    // on trust is the docs sink, which the gate re-reads off disk; a
+    // memory-sink note rests on the agent having really called the tool,
+    // exactly as every memorize phase in this plugin already does.
+    { basename: '.document-notes.json', step: STEPS.document, agents: ['work-documenter'] },
   ];
 }
 

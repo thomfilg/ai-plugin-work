@@ -113,6 +113,10 @@ function snapshotCompanionToken(stateCliBasename, ticketId, runnerScriptName) {
   }
 }
 
+// Shared with the `document` step's planner and verifier — one detector, so
+// "no memory plugin" can never mean different things on the two sides.
+const { detectMemoryPlugin } = require('../detect-memory-plugin');
+
 function mintCompanionToken(snap) {
   if (!snap) return false;
   try {
@@ -123,30 +127,6 @@ function mintCompanionToken(snap) {
   } catch {
     return false;
   }
-}
-
-function detectMemoryPlugin(env = process.env) {
-  try {
-    const { loadMemoryPluginCandidates } = require('../../work-brief/lib/memory-plugin-config');
-    const home = require('node:os').homedir();
-    const candidates = loadMemoryPluginCandidates(env);
-    for (const c of candidates) {
-      for (const base of c.manifestGlob) {
-        const dir = path.join(home, base);
-        if (!fs.existsSync(dir)) continue;
-        let entries;
-        try {
-          entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-          continue;
-        }
-        if (entries.some((e) => c.probe.test(e.name))) return c;
-      }
-    }
-  } catch {
-    /* memory plugin module is brief-specific; absence is fine */
-  }
-  return null;
 }
 
 function readRelatedManifest(tasksDir) {

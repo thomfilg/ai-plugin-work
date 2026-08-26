@@ -77,7 +77,7 @@ describe('step-meta — current step + position', () => {
 
   it('counts completed / total for the position badge', () => {
     const { completed, total } = stepPosition(stateAt('implement'));
-    assert.equal(total, 19);
+    assert.equal(total, 20); // + document, between ready and follow_up
     assert.equal(completed, 8); // ticket..tasks_gate
   });
 });
@@ -205,7 +205,7 @@ describe('render-line — full composition', () => {
     });
     const line = buildLine('FUT-50', s, 10 * 60000); // 10m in → green
     assert.ok(line.includes('⚙ FUT-50'));
-    assert.ok(line.includes('▶ implement (8/19)'));
+    assert.ok(line.includes('▶ implement (8/20)'));
     assert.ok(line.includes('task 1/7: seed db'));
     assert.ok(line.includes(GREEN));
     assert.ok(line.includes('10m'));

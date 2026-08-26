@@ -289,7 +289,8 @@ describe('work-orchestrator.js', () => {
       assert.ok(result.steps.includes('ticket'));
       assert.ok(result.steps.includes('complete'));
       // GH-244: added spec_gate between spec and tasks.
-      assert.equal(result.steps.length, 19);
+      // document: added between ready and follow_up.
+      assert.equal(result.steps.length, 20);
     });
 
     it('should include follow_up in steps', async () => {
@@ -297,9 +298,13 @@ describe('work-orchestrator.js', () => {
       assert.ok(result.steps.includes('follow_up'));
     });
 
-    it('should have ready transitions including follow_up', async () => {
+    it('should have ready transitions including document', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['ready'].includes('follow_up'));
+      // `document` sits between ready and follow_up — ready no longer reaches
+      // follow_up directly, so the note gate cannot be stepped over.
+      assert.ok(result.transitions['ready'].includes('document'));
+      assert.ok(!result.transitions['ready'].includes('follow_up'));
+      assert.ok(result.transitions['document'].includes('follow_up'));
     });
 
     it('should have follow_up transitions including ci and implement', async () => {
@@ -633,10 +638,11 @@ describe('work-orchestrator.js', () => {
   });
 
   describe('state machine logic', () => {
-    it('should have 19 steps total', async () => {
+    it('should have 20 steps total', async () => {
       const { result } = await runOrchestrator(['graph']);
       // GH-244: added spec_gate between spec and tasks.
-      assert.equal(result.steps.length, 19);
+      // document: added between ready and follow_up.
+      assert.equal(result.steps.length, 20);
     });
 
     it('should not allow self-transitions (except complete)', async () => {
@@ -802,10 +808,24 @@ describe('work-orchestrator.js', () => {
       assert.ok(completeStep.agentPrompt.includes('finish'));
     });
 
-    it('should use Bash agent for reports', async () => {
+    it('should dispatch the reports-writer agent for reports', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const reportsStep = result.plan.find((s) => s.step === 'reports');
-      assert.equal(reportsStep.agentType, 'Bash');
+      // Was 'Bash': a one-shot heredoc that wrote cost-report.md and returned,
+      // leaving reports-next.js (and its memorize phase) unreachable.
+      assert.equal(reportsStep.agentType, 'reports-writer');
+      assert.match(reportsStep.agentPrompt, /reports-next\.js/);
+      assert.match(reportsStep.agentPrompt, /cost-report\.md/);
+    });
+
+    it('never DEFERs the document step', async () => {
+      const { result } = await runOrchestrator([TEST_TICKET]);
+      const documentStep = result.plan.find((s) => s.step === 'document');
+      // "nothing to record" is the outcome the step exists to prevent, so it
+      // has no DEFER branch at all.
+      assert.equal(documentStep.action, 'RUN');
+      assert.equal(documentStep.agentType, 'work-documenter');
+      assert.match(documentStep.agentPrompt, /document-note\.js/);
     });
 
     it('should use skill for bootstrap', async () => {
@@ -927,7 +947,7 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should allow linear transition pr → ready → follow_up → ci', async () => {
+    it('should allow linear transition pr → ready → document → follow_up → ci', async () => {
       // pr and follow_up verify functions require external tools (gh, git) that
       // are unavailable in test. Use direct state to start at ready, then verify
       // the graph edges ready→follow_up and follow_up→ci are valid transitions.
@@ -960,18 +980,33 @@ describe('work-orchestrator.js', () => {
         })
       );
       try {
-        // ready → follow_up (ready is soft — no verify)
-        const { result: r1 } = await runOrchestrator(['transition', TEST_TICKET, 'follow_up']);
-        assert.equal(r1.success, true, `ready → follow_up: ${JSON.stringify(r1)}`);
+        // ready → document (ready is soft — no verify)
+        const { result: r1 } = await runOrchestrator(['transition', TEST_TICKET, 'document']);
+        assert.equal(r1.success, true, `ready → document: ${JSON.stringify(r1)}`);
         assert.equal(r1.from, 'ready');
-        assert.equal(r1.to, 'follow_up');
+        assert.equal(r1.to, 'document');
 
-        // follow_up → ci: follow_up verify (isPRGateReady) fires.
-        // It will fail in test, which is correct — the verify gate blocks until
-        // the PR is ready. Verify the graph edge is valid via transitions query.
-        const { result: r2 } = await runOrchestrator(['transitions', TEST_TICKET]);
-        assert.equal(r2.currentStep, 'follow_up');
-        assert.ok(r2.allowed.includes('ci'), 'ci should be an allowed transition from follow_up');
+        // document → follow_up: the note gate fires and BLOCKS, because no note
+        // has been recorded. That is the step's whole purpose, so assert the
+        // refusal rather than routing around it.
+        const { result: rGate } = await runOrchestrator(['transition', TEST_TICKET, 'follow_up']);
+        assert.equal(rGate.error, true, 'document must not advance without a note');
+        assert.equal(rGate.gate, 'step-verify');
+        assert.equal(rGate.step, 'document');
+        const { result: rAllowed } = await runOrchestrator(['transitions', TEST_TICKET]);
+        assert.equal(
+          rAllowed.currentStep,
+          'document',
+          'the blocked transition left us on document'
+        );
+        assert.ok(rAllowed.allowed.includes('follow_up'), 'document → follow_up is a valid edge');
+
+        // follow_up → ci is checked from the graph rather than by walking: the
+        // run cannot reach follow_up here (the note gate holds it on document,
+        // correctly), and follow_up's own verify (isPRGateReady) needs a real
+        // PR anyway.
+        const { result: r2 } = await runOrchestrator(['graph']);
+        assert.ok(r2.transitions.follow_up.includes('ci'), 'follow_up → ci is a valid edge');
       } finally {
         cleanupTempWorkState(TEST_TICKET);
       }

@@ -119,13 +119,13 @@ commit → task_review ─── (issues found) ──────────�
     │    check ─────────── (issues found) ────────┤
     │         │                                   │
     │         ▼ (pass)                            │
-    │    pr → ready → follow_up ── (changes) ─────┤
+    │    pr → ready → document → follow_up ─(chg)─┤
     │                     │                       │
     │                     ▼ (pass)                │
     │                ci ──────── (failed) ────────┘
     │                     │
     │                     ▼ (pass)
-    │              cleanup → reports → complete
+    │              reports → cleanup → complete
     │                                     │
     └─────────────────────────────────────┘
                   (self-loop for retries)

@@ -22,6 +22,7 @@ const checkStep = require('./check');
 const taskAdvanceStep = require('./task-advance');
 const prStep = require('./pr');
 const readyStep = require('./ready');
+const documentStep = require('./document');
 const followUpStep = require('./follow-up');
 const ciStep = require('./ci');
 const cleanupStep = require('./cleanup');
@@ -52,10 +53,11 @@ const STEP_PIPELINE = [
   taskAdvanceStep,
   prStep,
   readyStep,
+  documentStep,
   followUpStep,
   ciStep,
-  cleanupStep,
   reportsStep,
+  cleanupStep,
   completeStep,
 ];
 
@@ -71,6 +73,10 @@ module.exports = {
   specGateStep,
   // tasks_gate: export so tests can reference the Gate C handler directly.
   tasksGateStep,
+  // document: exported so tests can reference the note gate without knowing
+  // its position. It runs after readyStep and before followUpStep, and never
+  // DEFERs — see steps/document.js.
+  documentStep,
   // GH-211 Task 5.2: export taskReviewStep as a named handle so external
   // consumers (and tests) can reference the per-task review gate without
   // knowing its position in STEP_PIPELINE. The gate runs between commitStep
