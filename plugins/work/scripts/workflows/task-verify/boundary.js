@@ -15,6 +15,35 @@ const { buildObservations } = require('./observe');
 const { evaluate } = require('./verdict-engine');
 
 /**
+ * Base-branch candidates for the merge-base fallback, in order.
+ *
+ * An injected BASE_BRANCH wins (the test/caller contract). Otherwise this
+ * goes through the canonical resolver — config.getDiffBaseCandidates(), which
+ * is BASE_BRANCH → origin/HEAD symbolic-ref → probe(main, dev, master) — the
+ * same list the check/code-checker/completion-checker scope diffs use.
+ *
+ * Hardcoding `main` here was not equivalent: on a dev-based repo BOTH
+ * `origin/main` and `main` fail to resolve, resolveTaskBaseRef returns null,
+ * and every boundary on the ticket reports a mechanism failure — which the
+ * outcome gate advances past with a `runner-unknown` flag. A task can then
+ * reach `completed` without the verifier ever having looked at it.
+ */
+function baseBranchCandidates(repoDir, env) {
+  if (env && env.BASE_BRANCH) {
+    const bare = String(env.BASE_BRANCH).replace(/^origin\//, '');
+    return [`origin/${bare}`, bare];
+  }
+  try {
+    const config = require(path.join(__dirname, '..', 'lib', 'config'));
+    const candidates = config.getDiffBaseCandidates({ cwd: repoDir });
+    if (Array.isArray(candidates) && candidates.length > 0) return candidates;
+  } catch {
+    /* fall through to the literal default below */
+  }
+  return ['origin/main', 'main'];
+}
+
+/**
  * The task's base ref: per-task bookkeeping first, merge base as fallback.
  *
  * A `.last-commit-sha` that EXISTS but does not resolve in repoDir is a
@@ -32,8 +61,11 @@ function resolveTaskBaseRef(repoDir, tasksDir, env = process.env) {
   if (sha) {
     return resolveRef(repoDir, sha) ? sha : null;
   }
-  const base = env.BASE_BRANCH || 'main';
-  return mergeBase(repoDir, `origin/${base}`, 'HEAD') || mergeBase(repoDir, base, 'HEAD');
+  for (const ref of baseBranchCandidates(repoDir, env)) {
+    const base = mergeBase(repoDir, ref, 'HEAD');
+    if (base) return base;
+  }
+  return null;
 }
 
 /** Scope entries for task N from the canonical parser; null when unknown. */
@@ -72,4 +104,4 @@ function observeBoundary({ repoDir, tasksDir, taskNum, taskType, baseRef, baseWo
   return { observations, result: evaluate(observations, taskType), baseRef: resolvedBase };
 }
 
-module.exports = { resolveTaskBaseRef, taskScopeGlobs, observeBoundary };
+module.exports = { baseBranchCandidates, resolveTaskBaseRef, taskScopeGlobs, observeBoundary };

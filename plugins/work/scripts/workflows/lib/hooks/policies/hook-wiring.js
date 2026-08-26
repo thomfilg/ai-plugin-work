@@ -34,6 +34,15 @@ function buildProtectors(deps, loadStateFile, exemptScripts) {
         ? deps.workSteps.find((s) => state.stepStatus[s] === 'in_progress') || null
         : null;
     },
+    // Rule 4's step gate applies only while a /work run owns the ticket.
+    // `/brief`, `/spec` and `/split-in-tasks` are documented standalone
+    // commands; without a run there is no `.work-state.json` and so no step,
+    // and gating on one made those commands unable to save their own output.
+    // Same test the per-workflow loop uses (`workflow.isActive`), so a
+    // finished or never-started run reads as standalone and an in-flight one
+    // keeps every step boundary it has today.
+    isWorkflowActive: (ticketId) =>
+      loadStateFile(ticketId, '.work-state.json')?.status === 'in_progress',
     isRunningInAgent: deps.isRunningInAgent,
     getTicketId: deps.getTicketId,
   });

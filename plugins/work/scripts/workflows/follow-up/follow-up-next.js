@@ -22,7 +22,6 @@
 
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 
 const { detectDefaultBranch, loadPrDiffFiles } = require('./lib/repo-meta');
@@ -249,6 +248,11 @@ function stepOnce(state, ticketId, ctx) {
 
 function getNextInstruction(ticketId, prNumber) {
   const state = loadOrInitState(ticketId, prNumber);
+  // Persist BEFORE the first step: `monitor` blocks in-process for the CI wait,
+  // and a run killed mid-wait used to leave nothing on disk (`--init` deletes
+  // the state file, the instruction file is written only after the wait), so
+  // state-file-first recovery had nothing to read. See the durability test.
+  saveState(ticketId, state);
 
   const tasksDir = path.join(TASKS_BASE, ticketId);
   const worktreeDir = worktreeDirOrCwd(WORKTREES_BASE, MAIN_WORKTREE_FOLDER, ticketId);
@@ -330,35 +334,7 @@ function main() {
   const providerConfig = tp.getProviderConfig({ skipPrompt: true });
   const safeName = tp.sanitizeTicketIdForPath(ticketRaw, providerConfig);
 
-  if (isInit) {
-    const markerDir = path.join(TASKS_BASE, safeName);
-    fs.mkdirSync(markerDir, { recursive: true });
-    // Force-reset any existing state (e.g., stale "complete" from previous run)
-    const existingState = path.join(markerDir, '.follow-up-state.json');
-    if (fs.existsSync(existingState)) fs.unlinkSync(existingState);
-    const { ownerStamp } = require(path.join(__dirname, '..', 'work', 'lib', 'marker'));
-    fs.writeFileSync(
-      path.join(markerDir, '.follow-up-orchestrator.pid'),
-      JSON.stringify({
-        ticket: safeName,
-        startedAt: new Date().toISOString(),
-        workflow: '/follow-up',
-        ...ownerStamp(),
-      })
-    );
-    // Register session guard so Stop hook blocks abandonment.
-    // Idempotent: a parent /work session for the same ticket is reused.
-    try {
-      const { spawnSync } = require('child_process');
-      const sessionGuardPath = path.join(__dirname, '..', 'lib', 'hooks', 'session-guard.js');
-      spawnSync('node', [sessionGuardPath, 'init', safeName, '/follow-up'], {
-        stdio: 'inherit',
-        timeout: 5000,
-      });
-    } catch {
-      /* fail-open — session guard is advisory */
-    }
-  }
+  if (isInit) require('./lib/init-run').initRun(TASKS_BASE, safeName);
 
   const instruction = getNextInstruction(safeName, prNumber);
 

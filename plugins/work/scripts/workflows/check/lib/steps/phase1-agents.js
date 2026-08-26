@@ -56,6 +56,7 @@ const {
   annotateStaleAccepted,
 } = require('../report-head-staleness');
 const { T, getRuntime } = require('../../../lib/instruction-vocab');
+const { describeMissing, buildExhaustedInstruction } = require('./phase1-missing');
 
 // Max times we ask the orchestrator to (re-)dispatch an agent for the same
 // missing/empty report before blocking with an actionable error.
@@ -279,20 +280,10 @@ function buildDelegate(file, state, ctx, reportFolder, changesHash, dispatchHead
   );
 }
 
-// Human-readable description of why a report is missing (GH-343: distinguish
-// "agent finished but the file was never created" from "file was truncated").
-function describeMissing(m, reportFolder) {
-  const full = path.join(reportFolder, m.file);
-  if (m.status === 'stale') {
-    return (
-      `${full} is HEAD-STALE — its failing verdict was verified at Head ${m.reportHead} but the ` +
-      `worktree HEAD has since moved to ${m.currentHead} (a sibling agent committed fixes ` +
-      `mid-review, GH-308); its findings may already be fixed. Re-verify against the CURRENT code`
-    );
-  }
-  return m.status === 'empty'
-    ? `${full} exists but is EMPTY (0 bytes — truncated by a write race; the agent likely finished but its report was clobbered)`
-    : `${full} was never created (the agent completed without writing its report file)`;
+/** The one agent allowed to write a given phase-1 report (artifact-rules.js). */
+function ownerAgent(file) {
+  const entry = REPORTS.find((r) => r.file === file);
+  return entry ? entry.agent : "the report's owning agent";
 }
 
 module.exports = function registerPhase1(register) {
@@ -320,22 +311,14 @@ module.exports = function registerPhase1(register) {
         (m) => state.phase1Reports[m.file].attempts >= MAX_DISPATCH_ATTEMPTS
       );
       if (exhausted.length > 0) {
-        return {
-          type: 'check_instruction',
-          action: 'blocked',
-          state: {
-            ticket: state.ticketId,
-            currentStep: '5_phase1_agents',
-            progress: stepProgress('5_phase1_agents'),
-          },
-          reason:
-            `Phase-1 agent(s) completed but their report is still missing after ` +
-            `${MAX_DISPATCH_ATTEMPTS} dispatch attempts:\n` +
-            exhausted.map((m) => `- ${describeMissing(m, reportFolder)}`).join('\n') +
-            `\nDo NOT re-dispatch. Recover the verdict from the agent transcript and write the ` +
-            `report yourself with the Write tool (include the Changes hash ${changesHash}), ` +
-            `then re-run check-next.js.`,
-        };
+        return buildExhaustedInstruction({
+          exhausted,
+          ownerAgent,
+          reportFolder,
+          changesHash,
+          maxAttempts: MAX_DISPATCH_ATTEMPTS,
+          ticketId: state.ticketId,
+        });
       }
     }
 
