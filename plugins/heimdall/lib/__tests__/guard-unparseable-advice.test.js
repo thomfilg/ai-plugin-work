@@ -117,7 +117,7 @@ describe('coarse-fallback advice', () => {
     const { message } = procSub();
     assert.match(message, /could not parse this command/);
     assert.match(message, /whole-string check/);
-    assert.match(message, /READING or RUNNING a script that merely lives under a protected/);
+    assert.match(message, /READING or RUNNING a script\nthat merely lives under a protected path/);
   });
 
   it('names the fragment that failed to parse and the construct that broke it', () => {
@@ -147,6 +147,50 @@ describe('coarse-fallback advice', () => {
     assert.match(r.message, /MATCH: bash-write \.claude/);
     assert.doesNotMatch(r.message, /RE-ISSUE IT IN A SHAPE/);
     assert.doesNotMatch(r.message, /ONLY IF the re-issued command/);
+  });
+});
+
+// Both findings from the Greptile review on PR #802. Each reproduced before
+// the fix: the agent was told to ask for an unlock that could not have helped.
+describe('every coarse-fallback match carries the advice, not just absolute-path', () => {
+  it('advises on a legacy MARKER match — matchType alone cannot tell it from an exact one', () => {
+    // Unparseable (process substitution) + a RELATIVE marker write: the legacy
+    // template matcher returns 'marker', the same string a structured block
+    // returns. Only the `coarse` flag separates them.
+    const r = run('diff <(echo a) b > /tmp/x.txt && sed -i s/a/b/ .claude/settings.json');
+    assert.equal(r.exitCode, 2);
+    assert.match(r.message, /MATCH: bash-write \.claude/);
+    assert.match(r.message, /RE-ISSUE IT IN A SHAPE/);
+    // States what the marker lane actually saw, not the absolute-path claim.
+    assert.match(r.message, /matched a write-shaped pattern and `\.claude`/);
+    assert.doesNotMatch(r.message, /saw a write token somewhere/);
+  });
+
+  it('keeps the absolute-path wording on the absolute-path lane', () => {
+    const r = run(`diff <(cat ${path.join(repo, '.claude', 'settings.json')}) b > /tmp/d.txt`);
+    assert.match(r.message, /saw a write token somewhere and .*\.claude somewhere/);
+  });
+});
+
+describe('nested failures are diagnosed where they happen', () => {
+  // `parses` used to check top-level segments only, while the structured
+  // matcher recurses into executed strings — so a broken `bash -c "…"` payload
+  // was reported as "a de-quoted variant failed", pointing away from the fix.
+  const nested = () =>
+    run(`bash -c "diff <(echo a) b" > /tmp/y.txt; rm -rf ${path.join(repo, '.claude', 'hooks')}`);
+
+  it('points at the innermost failing string, not the wrapper', () => {
+    const { message } = nested();
+    assert.match(message, /Could not parse:\n {2}diff <\(echo a\) b\n/);
+    assert.match(message, /Unmodeled here: process substitution/);
+  });
+
+  it('no longer blames a de-quoted variant when this very text fails', () => {
+    assert.doesNotMatch(nested().message, /literal command parses/);
+  });
+
+  it('failingFragment descends through the executed string', () => {
+    assert.equal(failingFragment('bash -c "diff <(echo a) b" > /tmp/y.txt'), 'diff <(echo a) b');
   });
 });
 

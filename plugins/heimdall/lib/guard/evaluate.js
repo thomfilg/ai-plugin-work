@@ -224,15 +224,15 @@ function evaluateBash(toolInput, entries, unlocked, ctx) {
 
   // Block on the first targeted entry still locked — a compound command may
   // write to several protected paths; one unlocked entry must not allow the rest.
-  for (const { entry, matchType } of bashTargets(command, entries, ctx)) {
+  for (const { entry, matchType, coarse } of bashTargets(command, entries, ctx)) {
     if (isEntryUnlocked(entry, unlocked)) continue;
-    const coarse = matchType === 'absolute-path';
     const matchContext =
-      (coarse ? 'bash-absolute-path-write ' : 'bash-write ') + path.basename(entry.dir);
-    // `absolute-path` is the unparseable-command fallback: write token anywhere
-    // + protected dir anywhere, operands unresolved. Say so and ask for a
-    // parseable re-issue first — an unlock cannot fix an unparseable command.
-    const opts = coarse ? { ...ctx, advice: unparseableAdvice(command, entry) } : ctx;
+      (matchType === 'absolute-path' ? 'bash-absolute-path-write ' : 'bash-write ') +
+      path.basename(entry.dir);
+    // `coarse` is the unparseable-command fallback — BOTH its match types, not
+    // just `absolute-path`: operands were never resolved either way. Say so and
+    // ask for a parseable re-issue first; an unlock cannot fix a parse failure.
+    const opts = coarse ? { ...ctx, advice: unparseableAdvice(command, entry, matchType) } : ctx;
     return block('Bash command targets protected path', entry, matchContext, opts);
   }
 

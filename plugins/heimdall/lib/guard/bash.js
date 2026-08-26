@@ -291,6 +291,12 @@ function legacyEntryWriteMatch(entry, v, dirPresent) {
  * GH-655 fail-closed across variants). Variants the scanner cannot parse fall
  * back to the legacy template matcher, so only affirmatively-parsed commands
  * can be newly allowed.
+ *
+ * Returns { matchType, coarse } — `coarse` marks the legacy fallback, whose
+ * operands were never resolved. BOTH of its match types are coarse: the
+ * `marker` one is indistinguishable from a structured block by matchType
+ * alone, so callers that need the distinction (the block message) must read
+ * `coarse`, not matchType.
  */
 function entryWriteMatch(entry, v, ctx) {
   const dirPresent =
@@ -304,21 +310,25 @@ function entryWriteMatch(entry, v, ctx) {
   let sawUnparseable = false;
   for (const s of v.all) {
     const r = structuredEntryMatch(s, entry, ctx);
-    if (r.verdict === VERDICT.BLOCK) return 'marker';
+    if (r.verdict === VERDICT.BLOCK) return { matchType: 'marker', coarse: false };
     if (r.verdict === VERDICT.UNPARSEABLE) sawUnparseable = true;
   }
   if (!sawUnparseable) return null;
-  return legacyEntryWriteMatch(entry, v, dirPresent);
+  const legacy = legacyEntryWriteMatch(entry, v, dirPresent);
+  return legacy ? { matchType: legacy, coarse: true } : null;
 }
 
-/** Every protected target the command writes to: [{ entry, matchType }, ...]. */
+/**
+ * Every protected target the command writes to:
+ * [{ entry, matchType, coarse }, ...].
+ */
 function bashTargets(command, entries, ctx) {
   if (!command) return [];
   const v = commandVariants(command);
   const out = [];
   for (const entry of entries) {
-    const matchType = entryWriteMatch(entry, v, ctx);
-    if (matchType) out.push({ entry, matchType });
+    const match = entryWriteMatch(entry, v, ctx);
+    if (match) out.push({ entry, ...match });
   }
   return out;
 }
