@@ -225,7 +225,12 @@ describe('workflow-definition: check verify with per-task TDD (GH-259 Task 7.2)'
   });
 });
 
-describe('workflow-definition: reports verify with per-task dirs (GH-259 Task 7.2)', () => {
+describe('workflow-definition: reports verify checks its own artifacts', () => {
+  // GH-259 Task 7.2 used to pin reports against per-task TDD evidence, on the
+  // theory that reports was a last line of defence. It never was: reports was
+  // a soft step, so stepVerifyGate skipped the verify entirely. It now gates
+  // on the two files the step exists to produce, which is both enforceable and
+  // recoverable after the merge.
   const tmpDirs = [];
   after(() => {
     for (const d of tmpDirs) {
@@ -237,69 +242,60 @@ describe('workflow-definition: reports verify with per-task dirs (GH-259 Task 7.
     }
   });
 
-  it('reports verify passes when tasks.md exists and all taskN/ have valid tdd-phase.json', () => {
+  const REPORT = [
+    '# Reports',
+    '## Overview',
+    'x',
+    '## Brief / Spec / Tasks',
+    'x',
+    '## QA',
+    'x',
+    '## Code review',
+    'x',
+    '## Completion',
+    'x',
+    '## CI / Follow-up',
+    'x',
+    'Status: COMPLETE',
+    '',
+  ].join('\n');
+
+  function seed(ticketId, { report = REPORT, cost = '# Cost\n' } = {}) {
     const tmp = makeTmpDir();
     tmpDirs.push(tmp);
-    const ticketId = 'GH-270';
     const dir = path.join(tmp, ticketId);
     fs.mkdirSync(dir, { recursive: true });
-
-    // Required approved files at ticket root
-    fs.writeFileSync(path.join(dir, 'code-review.check.md'), 'Status: APPROVED');
-    fs.writeFileSync(path.join(dir, 'tests.check.md'), 'Status: APPROVED');
-    fs.writeFileSync(path.join(dir, 'completion.check.md'), 'Status: COMPLETE');
-    fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), 'Status: APPROVED');
-
-    // tasks.md with per-task evidence
-    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n## Task 1\n');
-    const task1 = path.join(dir, 'task1');
-    fs.mkdirSync(task1, { recursive: true });
-    fs.writeFileSync(
-      path.join(task1, 'tdd-phase.json'),
-      JSON.stringify({ cycles: [{ red: { ts: 1 }, green: { ts: 2 } }] })
-    );
-
+    if (report !== null) fs.writeFileSync(path.join(dir, 'reports.md'), report);
+    if (cost !== null) fs.writeFileSync(path.join(dir, 'cost-report.md'), cost);
     const { workflow } = createWorkflowDefinition(makeDeps(tmp));
-    const verify = getVerify(workflow, STEPS.reports);
-    assert.equal(verify(ticketId), true);
+    return getVerify(workflow, STEPS.reports);
+  }
+
+  it('passes when reports.md and cost-report.md are both present and well-formed', () => {
+    assert.equal(seed('GH-270')('GH-270'), true);
   });
 
-  it('reports verify fails when tasks.md exists and a taskN/ lacks valid tdd evidence', () => {
-    const tmp = makeTmpDir();
-    tmpDirs.push(tmp);
-    const ticketId = 'GH-271';
-    const dir = path.join(tmp, ticketId);
-    fs.mkdirSync(dir, { recursive: true });
-
-    fs.writeFileSync(path.join(dir, 'code-review.check.md'), 'Status: APPROVED');
-    fs.writeFileSync(path.join(dir, 'tests.check.md'), 'Status: APPROVED');
-    fs.writeFileSync(path.join(dir, 'completion.check.md'), 'Status: COMPLETE');
-    fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), 'Status: APPROVED');
-
-    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n## Task 1\n');
-    const task1 = path.join(dir, 'task1');
-    fs.mkdirSync(task1, { recursive: true });
-    // no tdd-phase.json in task1
-
-    const { workflow } = createWorkflowDefinition(makeDeps(tmp));
-    const verify = getVerify(workflow, STEPS.reports);
-    assert.equal(verify(ticketId), false);
+  it('fails when reports.md is missing — the observed defect', () => {
+    assert.equal(seed('GH-271', { report: null })('GH-271'), false);
   });
 
-  it('reports verify passes in single-task mode (no tasks.md)', () => {
-    const tmp = makeTmpDir();
-    tmpDirs.push(tmp);
-    const ticketId = 'GH-272';
-    const dir = path.join(tmp, ticketId);
-    fs.mkdirSync(dir, { recursive: true });
+  it('fails when cost-report.md is missing', () => {
+    assert.equal(seed('GH-272', { cost: null })('GH-272'), false);
+  });
 
-    fs.writeFileSync(path.join(dir, 'code-review.check.md'), 'Status: APPROVED');
-    fs.writeFileSync(path.join(dir, 'tests.check.md'), 'Status: APPROVED');
-    fs.writeFileSync(path.join(dir, 'completion.check.md'), 'Status: COMPLETE');
-    fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), 'Status: APPROVED');
+  it('fails when reports.md is missing a required section', () => {
+    const partial = REPORT.replace('## Code review\nx\n', '');
+    assert.equal(seed('GH-273', { report: partial })('GH-273'), false);
+  });
 
-    const { workflow } = createWorkflowDefinition(makeDeps(tmp));
-    const verify = getVerify(workflow, STEPS.reports);
-    assert.equal(verify(ticketId), true);
+  it('fails when reports.md has no final Status line', () => {
+    const noStatus = REPORT.replace('Status: COMPLETE', '');
+    assert.equal(seed('GH-274', { report: noStatus })('GH-274'), false);
+  });
+
+  it('does not depend on check evidence or per-task TDD dirs', () => {
+    // No *.check.md, no tasks.md, no taskN/ — a merged ticket whose check
+    // artifacts were archived must still be able to finish reports.
+    assert.equal(seed('GH-275')('GH-275'), true);
   });
 });

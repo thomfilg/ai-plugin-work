@@ -225,43 +225,6 @@ function verifyTaskReview(deps, ticketId) {
 }
 
 /**
- * GH-283 R8: strict canonical completion-status matcher. Mirrors the
- * completion_check phase's regex EXACTLY — intentionally rejects the
- * `APPROVED` / `NOT_APPLICABLE` aliases so a mis-marked report cannot pass
- * step verification.
- */
-const STATUS_COMPLETE_RE = /^\s*\*\*Status:\*\*\s*COMPLETE\b/im;
-
-/**
- * GH-283 R8: completion evidence is present iff `<tasksDir>/completion.check.md`
- * exists AND contains the canonical `**Status:** COMPLETE` line. Fail-CLOSED on
- * every failure mode: an unresolvable tasks-dir (`TASKS_BASE` unset or
- * `safeTicketPath` throwing) means "completion evidence NOT proven" and returns
- * `false`, exactly as a missing/wrong-status file does. This keeps the P1
- * `verifyCleanup` backstop consistent with the primary `completion_check`
- * phase, which already fails closed on an unresolvable dir — closing the
- * residual cleanup bypass for a misconfigured/tampered runner (GH-283).
- * @param {StepDeps} deps
- * @returns {boolean} true=COMPLETE, false=unresolvable-dir OR present-but-wrong/missing
- */
-function completionEvidencePresent(deps, ticketId) {
-  let dir;
-  try {
-    dir = ticketDir(deps, ticketId);
-  } catch {
-    return false; // tasks-dir unresolvable → fail closed (evidence not proven)
-  }
-  if (!dir) return false; // unresolvable dir → fail closed
-  let raw;
-  try {
-    raw = fs.readFileSync(path.join(dir, 'completion.check.md'), 'utf-8');
-  } catch {
-    return false; // absent or unreadable → fail closed
-  }
-  return STATUS_COMPLETE_RE.test(raw);
-}
-
-/**
  * GH-283: probe whether the `<ticketId>-dev` tmux session exists. Returns a
  * TRI-STATE so the caller can fail closed on "cannot prove":
  *   - `false` → session provably GONE (`tmux has-session` exited 1).
@@ -296,13 +259,24 @@ function defaultTmuxHasSession(ticketId) {
 }
 
 /**
- * GH-283 R8: cleanup is proven only when BOTH the dev tmux session is gone
- * AND completion evidence (`**Status:** COMPLETE`) is present. This closes the
- * runner-bypass gap where skipping the completion_check phase left no marker
- * yet cleanup still verified on tmux-absence alone. Fail-CLOSED throughout:
- * an unresolvable tasks-dir returns `false` (no tmux-only fallback), matching
- * the primary completion_check phase and closing the residual bypass for a
- * misconfigured/tampered runner (GH-283).
+ * Cleanup is proven when the dev tmux session is gone. That is cleanup's own
+ * work, and it is the only thing this step can be held to.
+ *
+ * It used to ALSO demand completion evidence (`**Status:** COMPLETE` in
+ * completion.check.md — GH-283 R8), as a second line against a tampered runner
+ * skipping the completion_check phase. That requirement is removed: cleanup
+ * runs POST-MERGE, and re-asserting a pre-merge quality gate there strands
+ * shipped tickets. When a run reaches cleanup without that stamp — an
+ * interrupted completion-check dispatch is enough — the only way out is a
+ * fresh ~20-minute completion-checker run to produce a bookkeeping artifact
+ * for code that is already merged, or an operator override. The gate cannot
+ * un-merge the PR, so it buys no safety at that point; it only blocks
+ * housekeeping.
+ *
+ * Completion is still enforced where it can change the outcome, BEFORE the
+ * merge: `verifyCheck` and the check-to-PR gate require the same
+ * completion.check.md to leave `check`, and `verifyReports` declares it too.
+ * A ticket cannot reach a PR without it.
  *
  * The tmux probe is tri-state (see {@link defaultTmuxHasSession}): only a
  * genuine `tmux has-session` exit-1 counts as "gone". A tmux exec that fails
@@ -312,15 +286,11 @@ function defaultTmuxHasSession(ticketId) {
  * @param {StepDeps} deps
  */
 function verifyCleanup(deps, ticketId) {
-  // 1) tmux dev session must be PROVABLY gone.
+  // tmux dev session must be PROVABLY gone. Only a proven-gone (false) result
+  // passes; `true` (still up) and `null` (indeterminate: ENOENT / timeout /
+  // permission / non-1 status) both fail closed.
   const tmuxProbe = deps.tmuxHasSession || defaultTmuxHasSession;
-  const sessionExists = tmuxProbe(ticketId); // true=exists, false=gone, null=unknown
-  // Only a proven-gone (false) result passes. `true` (still up) and `null`
-  // (indeterminate: ENOENT/timeout/permission/non-1 status) both fail closed.
-  if (sessionExists !== false) return false;
-
-  // 2) completion evidence must be present (fail-closed on unresolvable dir).
-  return completionEvidencePresent(deps, ticketId);
+  return tmuxProbe(ticketId) === false;
 }
 
 /** @param {StepDeps} deps */

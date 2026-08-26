@@ -85,9 +85,13 @@ const SCRIPT_GATES = [
     ['task-review-phase-state.js'],
   ],
   ['task-review-phase-state.js', ['task-reviewer', 'code-checker'], 'task_review'],
-  // Self-paced reports runner: phases the cross-step summary loop
-  // during the second-to-last `reports` step (aggregates artifacts from
-  // brief/spec/tasks/qa/code-review/completion + CI history).
+  // The document step's note writer: the ONLY path to `.document-notes.json`.
+  // Gated to the `document` step so a later step cannot back-fill the receipt
+  // for a note that was never saved.
+  ['document-note.js', ['work-documenter'], 'document'],
+  // Self-paced reports runner: phases the cross-step summary loop during the
+  // `reports` step (aggregates artifacts from brief/spec/tasks/qa/code-review/
+  // completion + CI history), which now runs after ci and before cleanup.
   ['reports-next.js', ['reports-writer'], 'reports', ['reports-phase-state.js']],
   ['reports-phase-state.js', ['reports-writer'], 'reports'],
   // Self-paced cleanup runner: phases the per-ticket cleanup loop

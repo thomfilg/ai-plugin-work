@@ -91,7 +91,7 @@ describe('work-state.js', () => {
       cleanupTempWorkState(TICKET);
     });
 
-    it('should create state with all 19 steps as pending', async () => {
+    it('should create state with all 20 steps as pending', async () => {
       const { result, code } = await runWorkState(['init', TICKET]);
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET);
@@ -102,8 +102,9 @@ describe('work-state.js', () => {
       assert.equal(result.errors.length, 0);
 
       const steps = Object.keys(result.stepStatus);
-      // GH-244: 19 steps — added spec_gate between spec and tasks.
-      assert.equal(steps.length, 19);
+      // GH-244: added spec_gate between spec and tasks.
+      // document: added between ready and follow_up → 20 steps.
+      assert.equal(steps.length, 20);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }
@@ -124,10 +125,11 @@ describe('work-state.js', () => {
         'check',
         'pr',
         'ready',
+        'document', // records what the run learned, before follow-up churn
         'follow_up',
         'ci',
-        'cleanup',
-        'reports',
+        'reports', // reads the merged outcome, so it runs before cleanup
+        'cleanup', // tears the worktree down last
         'complete',
       ];
       assert.deepEqual(steps, expectedSteps);
@@ -168,8 +170,8 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      // GH-244: 19 steps — added spec_gate between spec and tasks.
-      assert.equal(Object.keys(result.stepStatus).length, 19);
+      // GH-244: added spec_gate; document: added between ready and follow_up.
+      assert.equal(Object.keys(result.stepStatus).length, 20);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }

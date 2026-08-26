@@ -30,10 +30,11 @@ const BUDGET_MIN = Object.freeze({
   check: 30,
   pr: 20,
   ready: 10,
+  document: 15,
   follow_up: 60,
   ci: 30,
-  cleanup: 10,
   reports: 10,
+  cleanup: 10,
   complete: 1,
 });
 

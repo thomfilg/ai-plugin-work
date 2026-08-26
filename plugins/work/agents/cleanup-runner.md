@@ -2,7 +2,7 @@
 name: cleanup-runner
 description: |
   Per-ticket cleanup agent invoked during the `cleanup` workflow step
-  (between ci and reports). Deletes the feature branch, kills tmux
+  (after reports, last before complete). Deletes the feature branch, kills tmux
   sessions scoped to the ticket id, and archives the cleanup record.
   Refuses to act unless the PR is verified MERGED.
   CRITICAL: This agent must NEVER invoke itself via Task tool — do the

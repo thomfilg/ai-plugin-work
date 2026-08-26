@@ -33,6 +33,10 @@ const STEPS = Object.freeze({
   check: 'check',
   pr: 'pr',
   ready: 'ready',
+  // Record what the run learned, while it still remembers. Sits BEFORE
+  // follow_up because follow-up churn is where the context gets overwritten,
+  // and after the merge nobody comes back to write it down.
+  document: 'document',
   follow_up: 'follow_up',
   ci: 'ci',
   cleanup: 'cleanup',
@@ -58,10 +62,15 @@ const STEP_ORDER = Object.freeze([
   STEPS.check,
   STEPS.pr,
   STEPS.ready,
+  STEPS.document, // must sit between ready and follow_up
   STEPS.follow_up,
   STEPS.ci,
-  STEPS.cleanup,
+  // reports reads the merged outcome (CI history, final diff), so it runs
+  // after ci; cleanup tears the worktree and tmux session down, so it runs
+  // last — reading artifacts after cleanup has archived them was the wrong
+  // way round.
   STEPS.reports,
+  STEPS.cleanup,
   STEPS.complete,
 ]);
 
@@ -119,6 +128,9 @@ const RETRY_EDGES = {
   [STEPS.ci]: [STEPS.implement, STEPS.check, STEPS.follow_up], // CI failed → fix code; GH-299: recheck; ci-gate rollback when PR un-mergeable (conflicts, base-branch churn, new review changes)
   [STEPS.cleanup]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.reports]: [STEPS.check], // GH-299: recheck on new commits
+  // No backward edge for `document`: its gate blocks the forward transition
+  // until a note is recorded, and the fix is to record one here — not to
+  // re-run an earlier step.
 };
 
 // Generate linear forward edges from STEP_ORDER, merge retry edges
