@@ -282,6 +282,10 @@ function handleSeparator(sc) {
   const two = sc.text.slice(sc.i, sc.i + 2);
   const isTwo = two === '&&' || two === '||';
   if (!isTwo && !ONE_CHAR_SEP_RE.test(sc.text[sc.i])) return null;
+  // Flush a redirect target glued to the separator (`2>/dev/null; cmd`, `>x&& y`):
+  // endTok resolves the pending redirect, exactly as the whitespace path does.
+  // Only a target-less redirect (`ls > ; echo`) is still malformed.
+  sc.endTok();
   if (sc.pendingRedirect) return DONE;
   sc.endSeg();
   sc.i += isTwo ? 2 : 1;
