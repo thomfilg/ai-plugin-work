@@ -570,12 +570,21 @@ describe('session-guard', () => {
       assert.equal(r.code, 2, 'should block stop without /check');
     });
 
+    // A finished check ALWAYS leaves `currentStep` behind — check-next.js never
+    // clears it, so the real file reads `{status:'complete', currentStep:'11_output'}`.
+    // These two cases carry that shape deliberately. Without `currentStep` the
+    // fixture cannot reproduce the bug it is meant to guard: the suppression
+    // condition was `status === 'in_progress' || currentStep`, so a
+    // `currentStep`-less state passed while every real one turned the bypass on
+    // permanently — and the guard stopped protecting pr, ready, follow_up, ci,
+    // cleanup and reports. The reported symptom was an agent creating the PR and
+    // then stopping to ask whether to continue to follow-up.
     it('still blocks stop when /check has completed', async () => {
       await runCli(['init', CHECK_TICKET, '/work'], {
         WORKTREES_BASE: TEMP_WB,
         TASKS_BASE: TEMP_TASKS,
       });
-      writeCheckState({ status: 'complete' });
+      writeCheckState({ status: 'complete', currentStep: '11_output' });
 
       const r = await runHook({ stop_message: '' }, 'Stop', {
         WORKTREES_BASE: TEMP_WB,
@@ -583,6 +592,56 @@ describe('session-guard', () => {
         SESSION_GUARD_TICKET_ID: CHECK_TICKET,
       });
       assert.equal(r.code, 2, 'should block stop when /check completed');
+    });
+
+    it('still blocks stop when /check ended in needs_work', async () => {
+      await runCli(['init', CHECK_TICKET, '/work'], {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+      });
+      writeCheckState({ status: 'needs_work', currentStep: '11_output' });
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+        SESSION_GUARD_TICKET_ID: CHECK_TICKET,
+      });
+      assert.equal(r.code, 2, 'a needs_work verdict means work remains — hold the agent');
+    });
+
+    it('the completed-check block names the /work step the agent must continue', async () => {
+      await runCli(['init', CHECK_TICKET, '/work'], {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+      });
+      writeCheckState({ status: 'complete', currentStep: '11_output' });
+      // /work sits at `pr` — the step after check, where agents were stopping to
+      // ask about follow-up. The index comes from the registry, not a literal:
+      // `.work-state.json` stores it 1-based (see work-state.js), and the
+      // registry carries a `tasks_gate` step the prose step list omits.
+      const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
+      fs.writeFileSync(
+        path.join(TEMP_TASKS, CHECK_TICKET, '.work-state.json'),
+        JSON.stringify({
+          ticketId: CHECK_TICKET,
+          currentStep: STEP_ORDER.indexOf('pr') + 1,
+          status: 'in_progress',
+        })
+      );
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+        SESSION_GUARD_TICKET_ID: CHECK_TICKET,
+      });
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, /DO NOT STOP/);
+      assert.match(r.stderr, /Current step: pr/);
+      try {
+        fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, '.work-state.json'));
+      } catch {
+        /* best effort */
+      }
     });
   });
 

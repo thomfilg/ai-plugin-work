@@ -13,6 +13,8 @@ const path = require('path');
 
 // Cached TASKS_BASE resolution — loaded once per invocation
 const getConfig = require(path.join(__dirname, '..', '..', 'get-config'));
+// Shared with check-next.js so "the check is still running" has ONE definition.
+const { isCheckRunInProgress } = require(path.join(__dirname, '..', '..', 'check-state-status'));
 
 let _tasksBase;
 /**
@@ -206,7 +208,11 @@ function readWorkState(ticketId) {
 function hasActiveCheckState(resolvedBase, stateName) {
   try {
     const state = JSON.parse(fs.readFileSync(path.join(resolvedBase, stateName), 'utf-8'));
-    return Boolean(state?.status === 'in_progress' || state?.currentStep);
+    // `currentStep` is never cleared when a check finishes, so reading it alone
+    // left this bypass permanently ON after the first /check — and the guard
+    // stopped protecting pr, ready, follow_up, ci, cleanup and reports. The
+    // shared reader treats a terminal status as "not running".
+    return isCheckRunInProgress(state);
   } catch {
     return false; /* not found or corrupt */
   }
