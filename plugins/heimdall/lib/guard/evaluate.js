@@ -15,6 +15,7 @@ const { isReadOnlyBashCommand, bashTargets } = require('./bash');
 const { promptSmugglesPhrase } = require('./task');
 const { findUnlockedPhrases, isEntryUnlocked } = require('./transcript');
 const { checkScriptBypass } = require('./scripts-bypass');
+const { unparseableAdvice } = require('./bash-advice');
 const { shimPath, runsExternalScript, buildShimRewrite } = require('./fsguard');
 const { canonicalToolKind, parseApplyPatch } = require('../runtime/tools');
 const { sniffFormat } = require('../runtime/transcript');
@@ -74,9 +75,18 @@ function blockMessage(reason, entry, matchContext, opts = {}) {
   // See GH-585 (AC8 from GH-541).
   const origin = entry && entry.kind === 'shared' ? ' (shared)' : '';
   let msg = `BLOCKED (heimdall)${origin}: ${reason}\n`;
+  // The coarse-fallback lane leads with WHY the match is imprecise and how to
+  // re-issue the command, so the unlock instruction below reads as the second
+  // step it is. Every other lane matched an operand exactly — no advice, and
+  // its message stays byte-identical.
+  if (opts.advice) msg += opts.advice;
   if (entry) {
     if (origin) {
       msg += `This lock comes from your shared (cross-project) heimdall store, not this project.\n`;
+    }
+    if (opts.advice) {
+      // No trailing newline: the unlock instruction below opens with one.
+      msg += `\nONLY IF the re-issued command is still blocked is the write real — then:`;
     }
     const phrase = entry.unlockPhrase || `edit ${path.basename(entry.dir)}`;
     msg +=
@@ -205,10 +215,14 @@ function evaluateBash(toolInput, entries, unlocked, ctx) {
   // write to several protected paths; one unlocked entry must not allow the rest.
   for (const { entry, matchType } of bashTargets(command, entries, ctx)) {
     if (isEntryUnlocked(entry, unlocked)) continue;
+    const coarse = matchType === 'absolute-path';
     const matchContext =
-      (matchType === 'absolute-path' ? 'bash-absolute-path-write ' : 'bash-write ') +
-      path.basename(entry.dir);
-    return block('Bash command targets protected path', entry, matchContext, ctx);
+      (coarse ? 'bash-absolute-path-write ' : 'bash-write ') + path.basename(entry.dir);
+    // `absolute-path` is the unparseable-command fallback: write token anywhere
+    // + protected dir anywhere, operands unresolved. Say so and ask for a
+    // parseable re-issue first — an unlock cannot fix an unparseable command.
+    const opts = coarse ? { ...ctx, advice: unparseableAdvice(command, entry) } : ctx;
+    return block('Bash command targets protected path', entry, matchContext, opts);
   }
 
   return evaluateBashScripts(command, entries, unlocked, ctx);
