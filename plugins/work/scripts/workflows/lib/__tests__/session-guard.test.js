@@ -609,6 +609,31 @@ describe('session-guard', () => {
       assert.equal(r.code, 2, 'a needs_work verdict means work remains — hold the agent');
     });
 
+    it('a stale legacy state does not outvote a terminal canonical state', async () => {
+      // A failed rename in check-next.js migrateLegacyState leaves
+      // .check2-state.json behind, while saveState keeps writing the canonical
+      // path — so the legacy file can sit there mid-run forever. Asking "is ANY
+      // of these active?" let it re-open the bypass over the live terminal
+      // state and un-guard every post-check step (PR #801 review). Canonical
+      // wins; legacy is only a fallback.
+      await runCli(['init', CHECK_TICKET, '/work'], {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+      });
+      writeCheckState({ status: 'complete', currentStep: '11_output' });
+      writeCheckState(
+        { status: 'in_progress', currentStep: '5_phase1_agents' },
+        '.check2-state.json'
+      );
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+        SESSION_GUARD_TICKET_ID: CHECK_TICKET,
+      });
+      assert.equal(r.code, 2, 'the live canonical state is terminal — hold the agent');
+    });
+
     it('the completed-check block names the /work step the agent must continue', async () => {
       await runCli(['init', CHECK_TICKET, '/work'], {
         WORKTREES_BASE: TEMP_WB,
