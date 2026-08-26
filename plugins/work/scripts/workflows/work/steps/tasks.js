@@ -52,7 +52,12 @@ module.exports = function tasksStep(add, s, ctx) {
   // requirements_extract / draft / traceability / kind_assign /
   // gherkin_link / memorize phases all gate the artifact before
   // tasks_gate runs.
-  const driverHint = `\n\nDuring execution, run \`node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-tasks/tasks-next.js ${safeName}\` after each phase to validate and advance. Do NOT edit \`tasks-phase.json\` directly.`;
+  // Addressed to the split-in-tasks AGENT, not to the session reading this:
+  // tasks-next.js is agent-gated to `split-in-tasks`, so a Bash call from the
+  // orchestrator is refused with "not running in an authorized agent". Say so
+  // and say who must carry the line, instead of handing the session a command
+  // it is forbidden to run.
+  const driverHint = `\n\nDuring execution, \`tasks-next.js\` drives the phases — and ONLY the split-in-tasks agent may run it (a Bash call from this session is blocked by design, so do not make one). Include this line verbatim in the prompt the skill dispatches to split-in-tasks:\n  "After each phase, run \`node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-tasks/tasks-next.js ${safeName}\` to validate and advance. Do NOT edit \`tasks-phase.json\` directly."`;
   // ECHO-4453 prevention: surface the TDD-cycle-per-task rule directly in the
   // dispatch prompt so the decomposer never splits RED/GREEN/REFACTOR across
   // tasks. tasks-gate's validateTddCycle() catches violations but a clear

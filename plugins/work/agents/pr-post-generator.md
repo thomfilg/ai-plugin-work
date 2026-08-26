@@ -31,6 +31,20 @@ You enhance PR descriptions with visual documentation and test results AFTER the
 ## HARD BOUNDARIES — WORKFLOW STATE
 If a runner or state transition wedges, STOP and report `BLOCKED: <detail>` to the orchestrator — never invoke `work-state.js`, `session-guard.js`, or `work.workflow.js` mutating subcommands.
 
+`pr-next.js` is NOT on that list. It is the `pr` step's phase runner, and the
+hook allow-list for it is exactly `pr-generator` and `pr-post-generator` — the
+orchestrator is refused with *"not running in an authorized agent"*. So when
+your prompt tells you to run
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-pr-step/pr-next.js <TICKET>
+```
+
+run it, and follow the phase it returns. Refusing does not make the step safer;
+it wedges it, because no other caller exists. The runner writes its own
+artifacts (`pr-context.json`, `pr-memory.json`, the `pr-phase.json` state) —
+you never write those yourself, and you never edit `pr-phase.json` directly.
+
 ## FABRICATION GUARD
 
 **Test-evidence rule (zero tolerance):** every `PASS`, `FAIL`, "stability run",

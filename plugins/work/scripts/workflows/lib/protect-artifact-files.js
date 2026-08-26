@@ -151,7 +151,12 @@ function matchWriteTarget(artifacts, toolName, toolInput, hookData) {
   return matched ? { bn: matched.bn, filePath: cmd, rule: matched.rule } : null;
 }
 
-/** Check 1: Step must be in_progress (primary step or any allowedSteps). */
+/**
+ * Check 1: Step must be in_progress (primary step or any allowedSteps).
+ *
+ * Skipped entirely when no /work run owns the ticket — see the
+ * `isWorkflowActive` note on createArtifactProtector.
+ */
 function checkStepGate(rule, currentStep, bn) {
   const stepAllowed =
     currentStep === rule.step ||
@@ -231,10 +236,33 @@ function checkContentGuard(rule, toolName, toolInput, currentStep, bn) {
  * @param {(hookData: object) => string|null} [opts.getTicketId]
  *   Extracts ticket ID from hook data or environment. If omitted, checks are skipped.
  *
+ * @param {(ticketId: string) => boolean} [opts.isWorkflowActive]
+ *   Returns true when a workflow run currently owns the ticket. The step gate
+ *   only runs when it does. Defaults to () => true (always gate).
+ *
+ *   Every artifact here has a documented standalone entry point — `/brief`,
+ *   `/spec`, `/split-in-tasks` all run without `/work`. Their steps live in
+ *   `.work-state.json`, which only a `/work` run creates: with no run there is
+ *   no step, so a gate keyed on "is my step in_progress" answered "(none)" and
+ *   refused the write AFTER the agent had done the whole job — the standalone
+ *   brief-writer produced its 164-line brief, wrote every side artifact, and
+ *   then could not save brief.md. No route out of it existed either: the
+ *   allowlisted `work-state.js init` marks every step `pending`, `set-step` is
+ *   deliberately not allowlisted, and writing the state file by hand is
+ *   Rule 3. The gate answers "is this write in the right PART of a run", which
+ *   is not a question about a ticket that has no run — so it abstains, and the
+ *   agent gate (which asks WHO is writing, and holds either way) decides.
+ *
  * @returns {{ check: (toolName: string, toolInput: object, hookData?: object) => ArtifactCheckResult }}
  */
 function createArtifactProtector(opts) {
-  const { artifacts, getStepInProgress, isRunningInAgent = () => true, getTicketId } = opts;
+  const {
+    artifacts,
+    getStepInProgress,
+    isRunningInAgent = () => true,
+    getTicketId,
+    isWorkflowActive = () => true,
+  } = opts;
 
   function check(toolName, toolInput, hookData) {
     const target = matchWriteTarget(artifacts, toolName, toolInput, hookData);
@@ -250,12 +278,27 @@ function createArtifactProtector(opts) {
       return { blocked: false };
     }
 
-    const currentStep = getStepInProgress(ticketId);
+    return runGates({ bn, filePath, rule, ticketId, toolName, toolInput, hookData });
+  }
+
+  /** Checks 1–4, in order. The first blocked verdict wins. */
+  function runGates(t) {
+    const currentStep = getStepInProgress(t.ticketId);
+    // Standalone mode: no /work run owns this ticket, so there is no step to
+    // be in and the step gate has nothing to say. The agent gate below still
+    // decides WHO may write the artifact.
+    const stepGate = isWorkflowActive(t.ticketId) ? checkStepGate(t.rule, currentStep, t.bn) : null;
     return (
-      checkStepGate(rule, currentStep, bn) ||
-      checkAgentGate(rule, hookData, isRunningInAgent, bn) ||
-      checkPerTaskPath({ bn, filePath, toolName, ticketId, currentStep }) ||
-      checkContentGuard(rule, toolName, toolInput, currentStep, bn) || { blocked: false }
+      stepGate ||
+      checkAgentGate(t.rule, t.hookData, isRunningInAgent, t.bn) ||
+      checkPerTaskPath({
+        bn: t.bn,
+        filePath: t.filePath,
+        toolName: t.toolName,
+        ticketId: t.ticketId,
+        currentStep,
+      }) ||
+      checkContentGuard(t.rule, t.toolName, t.toolInput, currentStep, t.bn) || { blocked: false }
     );
   }
 

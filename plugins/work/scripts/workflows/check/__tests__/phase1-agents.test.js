@@ -113,13 +113,18 @@ describe('5_phase1_agents — dispatch & readiness', () => {
     assert.equal(handler(state, ctx), null);
   });
 
-  it('never-written report: distinct "never created" wording on retry', () => {
+  it('never-written report: distinct wording from the EMPTY case on retry', () => {
     handler(state, ctx);
     writeReport('completion.check.md');
     const r = handler(state, ctx);
     assert.equal(r.delegates.length, 1);
     assert.equal(r.delegates[0].agentType, 'work-workflow:code-checker');
-    assert.match(r.note, /never created/);
+    // Not "never created" any more: the cycle purge deletes every *.check.md
+    // when the changes hash moves, so a report the agent DID write can be
+    // missing here — the wording must not blame the agent for that.
+    assert.match(r.note, /completed without writing it/);
+    assert.match(r.note, /removed by the cycle purge/);
+    assert.doesNotMatch(r.note, /EMPTY/);
   });
 
   it(`blocks with an actionable error naming the artifact after ${MAX_DISPATCH_ATTEMPTS} attempts`, () => {
@@ -132,8 +137,15 @@ describe('5_phase1_agents — dispatch & readiness', () => {
     assert.equal(blocked.action, 'blocked');
     assert.match(blocked.reason, /code-review\.check\.md/);
     assert.match(blocked.reason, /completion\.check\.md/);
-    assert.match(blocked.reason, /Do NOT re-dispatch/);
-    assert.match(blocked.reason, /Write tool/);
+    // The remedy must be one the orchestrator can actually carry out. It used
+    // to read "Do NOT re-dispatch. … write the report yourself with the Write
+    // tool" — but every *.check.md is agent-gated, so that Write is blocked
+    // ("not running in an authorized agent") and the step had no exit at all.
+    assert.doesNotMatch(blocked.reason, /Write tool/);
+    assert.match(blocked.reason, /Do NOT write these reports yourself/);
+    assert.match(blocked.reason, /work-workflow:code-checker/);
+    assert.match(blocked.reason, /work-workflow:completion-checker/);
+    assert.match(blocked.reason, /dispatch the agent yourself/);
     // stays blocked (no silent re-dispatch) on subsequent calls
     assert.equal(handler(state, ctx).action, 'blocked');
   });
