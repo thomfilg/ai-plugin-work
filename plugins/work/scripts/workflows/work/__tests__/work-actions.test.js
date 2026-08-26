@@ -329,7 +329,8 @@ describe('work-actions', () => {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(
         path.join(dir, '.work-actions.json'),
-        JSON.stringify(preIdea2Fixture, null, 2)
+        JSON.stringify(preIdea2Fixture, null, 2),
+        { mode: 0o600 }
       );
 
       const loaded = loadActions(TEST_TICKET);

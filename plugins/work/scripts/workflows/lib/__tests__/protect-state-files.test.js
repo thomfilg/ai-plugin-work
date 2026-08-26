@@ -190,7 +190,11 @@ describe('createFileProtector — script bypass', () => {
   it('blocks script that writes to protected file', () => {
     // Create a temporary script that writes to .state.json
     const tmpScript = path.join(os.tmpdir(), `test-script-${process.pid}.js`);
-    fs.writeFileSync(tmpScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    fs.writeFileSync(
+      tmpScript,
+      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");',
+      { mode: 0o600 }
+    );
     try {
       const result = protector.check('Bash', { command: `node ${tmpScript}` });
       assert.equal(result.blocked, true);
@@ -204,7 +208,8 @@ describe('createFileProtector — script bypass', () => {
     const tmpScript = path.join(os.tmpdir(), `test-script-read-${process.pid}.js`);
     fs.writeFileSync(
       tmpScript,
-      'const fs = require("fs"); const data = fs.readFileSync(".state.json"); console.log(data);'
+      'const fs = require("fs"); const data = fs.readFileSync(".state.json"); console.log(data);',
+      { mode: 0o600 }
     );
     try {
       const result = protector.check('Bash', { command: `node ${tmpScript}` });
@@ -216,7 +221,11 @@ describe('createFileProtector — script bypass', () => {
 
   it('allows script that writes to non-protected file', () => {
     const tmpScript = path.join(os.tmpdir(), `test-script-safe-${process.pid}.js`);
-    fs.writeFileSync(tmpScript, 'const fs = require("fs"); fs.writeFileSync("output.json", "{}");');
+    fs.writeFileSync(
+      tmpScript,
+      'const fs = require("fs"); fs.writeFileSync("output.json", "{}");',
+      { mode: 0o600 }
+    );
     try {
       const result = protector.check('Bash', { command: `node ${tmpScript}` });
       assert.equal(result.blocked, false);
@@ -288,7 +297,8 @@ describe('createFileProtector — script bypass', () => {
     const evilScript = path.join(os.tmpdir(), `evil.test.js`);
     fs.writeFileSync(
       evilScript,
-      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");'
+      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");',
+      { mode: 0o600 }
     );
     try {
       const result = protector.check('Bash', { command: `node ${evilScript}` });
@@ -309,7 +319,8 @@ describe('createFileProtector — script bypass', () => {
     const evilScript = path.join(testDir, 'sneaky.test.js');
     fs.writeFileSync(
       evilScript,
-      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");'
+      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");',
+      { mode: 0o600 }
     );
     try {
       const result = protector.check('Bash', { command: `node ${evilScript}` });
@@ -323,7 +334,8 @@ describe('createFileProtector — script bypass', () => {
     const evilScript = path.join(os.tmpdir(), `evil-script.js`);
     fs.writeFileSync(
       evilScript,
-      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");'
+      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");',
+      { mode: 0o600 }
     );
     try {
       const result = protector.check('Bash', { command: `node ${evilScript}` });
@@ -610,7 +622,8 @@ describe('checkScriptBypass — isTrustedTestScript integration (GH-141)', () =>
     const prodScript = path.join(tmpDir, 'evil-script.js');
     fs.writeFileSync(
       prodScript,
-      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");'
+      'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");',
+      { mode: 0o600 }
     );
     try {
       const result = protector.check('Bash', { command: `node ${prodScript}` });

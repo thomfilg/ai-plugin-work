@@ -199,7 +199,7 @@ describe('isRunningInAgent — frontmatter detection', () => {
 
   it('matches prefixed frontmatter name against bare alias', () => {
     const tmp = path.join(os.tmpdir(), `agent-detect-fm-${process.pid}.txt`);
-    fs.writeFileSync(tmp, 'name: work-workflow:quality-checker\n');
+    fs.writeFileSync(tmp, 'name: work-workflow:quality-checker\n', { mode: 0o600 });
     try {
       assert.ok(isRunningInAgent(tmp, ['quality-checker']));
     } finally {
@@ -209,7 +209,7 @@ describe('isRunningInAgent — frontmatter detection', () => {
 
   it('matches bare frontmatter name against bare alias', () => {
     const tmp = path.join(os.tmpdir(), `agent-detect-fm2-${process.pid}.txt`);
-    fs.writeFileSync(tmp, 'name: quality-checker\n');
+    fs.writeFileSync(tmp, 'name: quality-checker\n', { mode: 0o600 });
     try {
       assert.ok(isRunningInAgent(tmp, ['quality-checker']));
     } finally {

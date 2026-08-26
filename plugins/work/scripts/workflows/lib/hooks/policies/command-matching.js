@@ -57,10 +57,14 @@ const NODE_INVOKE_PATTERN_SRC =
   // Optional wrapper commands (timeout, nice, env). All consume their args.
   '(?:timeout\\s+\\d+(?:\\.\\d+)?[smhdSMHD]?\\s+|' +
   'nice(?:\\s+-n\\s+-?\\d+)?\\s+|' +
-  'env(?:\\s+[A-Za-z_][A-Za-z0-9_]*=' + ENV_VALUE_SRC + ')*\\s+' +
+  'env(?:\\s+[A-Za-z_][A-Za-z0-9_]*=' +
+  ENV_VALUE_SRC +
+  ')*\\s+' +
   ')*' +
   // Inline env-assignments (FOO=bar BAZ=qux node ...).
-  '(?:[A-Za-z_][A-Za-z0-9_]*=' + ENV_VALUE_SRC + '\\s+)*' +
+  '(?:[A-Za-z_][A-Za-z0-9_]*=' +
+  ENV_VALUE_SRC +
+  '\\s+)*' +
   '(?:node|nodejs)\\s+' +
   '(?:(?:--(?:require|loader|experimental-loader|import|input-type|conditions|inspect-brk|inspect|inspect-port)|-[rCi])\\s+\\S+\\s+|(?:-[^\\s]+\\s+))*' +
   // Unquoted path: stop at a quote as well as whitespace. Inside a wrapper

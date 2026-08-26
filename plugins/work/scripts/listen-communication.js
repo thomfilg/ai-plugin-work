@@ -28,9 +28,9 @@ if (!ticket) {
   process.exit(1);
 }
 
-fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o755 });
+fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o700 });
 const inbox = path.join(INBOX_DIR, `${ticket}.log`);
-if (!fs.existsSync(inbox)) fs.closeSync(fs.openSync(inbox, 'a'));
+fs.closeSync(fs.openSync(inbox, 'a', 0o600));
 
 process.stdout.write(`listening on ${inbox} (Ctrl-C to stop)\n`);
 

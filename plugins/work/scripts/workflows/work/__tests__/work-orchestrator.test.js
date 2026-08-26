@@ -139,12 +139,20 @@ after(() => {
 function writeCheckReports(tasksBase, ticket) {
   const dir = path.join(tasksBase, ticket);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'tests.check.md'), '# Tests\nStatus: APPROVED\n');
-  fs.writeFileSync(path.join(dir, 'code-review.check.md'), '# Code Review\nStatus: APPROVED\n');
-  fs.writeFileSync(path.join(dir, 'completion.check.md'), '# Completion\nStatus: APPROVED\n');
-  fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), '# QA\nStatus: APPROVED\n');
+  fs.writeFileSync(path.join(dir, 'tests.check.md'), '# Tests\nStatus: APPROVED\n', {
+    mode: 0o600,
+  });
+  fs.writeFileSync(path.join(dir, 'code-review.check.md'), '# Code Review\nStatus: APPROVED\n', {
+    mode: 0o600,
+  });
+  fs.writeFileSync(path.join(dir, 'completion.check.md'), '# Completion\nStatus: APPROVED\n', {
+    mode: 0o600,
+  });
+  fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), '# QA\nStatus: APPROVED\n', {
+    mode: 0o600,
+  });
   // README.md is required by check verify (evidenceRequirements)
-  fs.writeFileSync(path.join(dir, 'README.md'), '# README\n');
+  fs.writeFileSync(path.join(dir, 'README.md'), '# README\n', { mode: 0o600 });
 }
 
 /**
@@ -168,7 +176,8 @@ function writeTddException(tasksBase, ticket) {
           fs.mkdirSync(taskDir, { recursive: true });
           fs.writeFileSync(
             path.join(taskDir, 'tdd-phase.json'),
-            JSON.stringify({ exception: 'test artifact — orchestrator test', cycles: [] })
+            JSON.stringify({ exception: 'test artifact — orchestrator test', cycles: [] }),
+            { mode: 0o600 }
           );
         }
       }
@@ -182,7 +191,8 @@ function writeTddException(tasksBase, ticket) {
       currentPhase: 'exception',
       exception: 'test helper',
       cycles: [],
-    })
+    }),
+    { mode: 0o600 }
   );
 }
 
@@ -215,10 +225,16 @@ function setupFakeGitRepo(ticketId, tasksBase) {
 function writeTaskArtifacts(tasksBase, ticket) {
   const dir = path.join(tasksBase, ticket);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'brief.md'), '# Brief\n\n## Problem Statement\nTest brief.\n');
-  fs.writeFileSync(path.join(dir, 'spec.md'), '# Spec\n\n## Summary\nTest spec.\n');
+  fs.writeFileSync(path.join(dir, 'brief.md'), '# Brief\n\n## Problem Statement\nTest brief.\n', {
+    mode: 0o600,
+  });
+  fs.writeFileSync(path.join(dir, 'spec.md'), '# Spec\n\n## Summary\nTest spec.\n', {
+    mode: 0o600,
+  });
   // gherkin.feature with gherkin-skip → spec_gate verify passes (GH-350: standalone gherkin file)
-  fs.writeFileSync(path.join(dir, 'gherkin.feature'), '<!-- gherkin-skip: test artifact -->\n');
+  fs.writeFileSync(path.join(dir, 'gherkin.feature'), '<!-- gherkin-skip: test artifact -->\n', {
+    mode: 0o600,
+  });
   // Gate C requires `### Files in scope` on every task — include it.
   fs.writeFileSync(
     path.join(dir, 'tasks.md'),
@@ -238,7 +254,8 @@ function writeTaskArtifacts(tasksBase, ticket) {
       '### Deliverables',
       '- [ ] 1.1 Test deliverable',
       '',
-    ].join('\n')
+    ].join('\n'),
+    { mode: 0o600 }
   );
 }
 
@@ -1147,7 +1164,8 @@ describe('work-orchestrator.js', () => {
           stepStatus,
           startTime: '2026-01-01T00:00:00.000Z',
           lastUpdate: '2026-01-01T00:00:00.000Z',
-        })
+        }),
+        { mode: 0o600 }
       );
       // follow_up → ci is valid in graph; verify gate blocks without real PR.
       // Test the graph validity via transitions query.
@@ -1184,7 +1202,8 @@ describe('work-orchestrator.js', () => {
           stepStatus,
           startTime: '2026-01-01T00:00:00.000Z',
           lastUpdate: '2026-01-01T00:00:00.000Z',
-        })
+        }),
+        { mode: 0o600 }
       );
       try {
         const { result } = await runOrchestrator(['transition', T2, 'implement'], o);
@@ -1226,7 +1245,8 @@ describe('work-orchestrator.js', () => {
           stepStatus,
           startTime: '2026-01-01T00:00:00.000Z',
           lastUpdate: '2026-01-01T00:00:00.000Z',
-        })
+        }),
+        { mode: 0o600 }
       );
       try {
         const { result } = await runOrchestrator(['transition', T3, 'implement'], o);
@@ -1269,7 +1289,8 @@ describe('work-orchestrator.js', () => {
             stepStatus,
             startTime: '2026-01-01T00:00:00.000Z',
             lastUpdate: '2026-01-01T00:00:00.000Z',
-          })
+          }),
+          { mode: 0o600 }
         );
         writeCheckReports(TEMP_TASKS, T_ARCHIVE);
 
@@ -1331,7 +1352,8 @@ describe('work-orchestrator.js', () => {
             stepStatus,
             startTime: '2026-01-01T00:00:00.000Z',
             lastUpdate: '2026-01-01T00:00:00.000Z',
-          })
+          }),
+          { mode: 0o600 }
         );
         writeCheckReports(TEMP_TASKS, T_RUNS);
         // First backward: check → implement
@@ -1566,13 +1588,13 @@ describe('work-orchestrator.js', () => {
         'git init && git config user.name "Test User" && git config user.email "test@example.com"'
       );
       gitCmd('git checkout -b main');
-      fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial');
+      fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial', { mode: 0o600 });
       gitCmd(`git add . && ${commitCmd} "init"`);
       // Create a local "origin/main" ref so git diff origin/main works
       gitCmd('git checkout -b fake-branch');
       gitCmd('git update-ref refs/remotes/origin/main main');
       // Add a change so there's a diff vs origin/main
-      fs.writeFileSync(path.join(worktreeDir, 'new-file.txt'), 'new content');
+      fs.writeFileSync(path.join(worktreeDir, 'new-file.txt'), 'new content', { mode: 0o600 });
       gitCmd(`git add . && ${commitCmd} "add new file"`);
 
       try {
@@ -1605,11 +1627,11 @@ describe('work-orchestrator.js', () => {
         'git init && git config user.name "Test User" && git config user.email "test@example.com"'
       );
       gitCmd('git checkout -b main');
-      fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial');
+      fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial', { mode: 0o600 });
       gitCmd(`git add . && ${commitCmd} "init"`);
       gitCmd('git checkout -b fake-branch');
       gitCmd('git update-ref refs/remotes/origin/main main');
-      fs.writeFileSync(path.join(worktreeDir, 'new-file.txt'), 'new content');
+      fs.writeFileSync(path.join(worktreeDir, 'new-file.txt'), 'new content', { mode: 0o600 });
       gitCmd(`git add . && ${commitCmd} "add new file"`);
 
       // Set work state to show implement was previously completed
@@ -1622,7 +1644,7 @@ describe('work-orchestrator.js', () => {
         status: 'in_progress',
         stepStatus: { implement: 'completed' },
       };
-      fs.writeFileSync(stateFile, JSON.stringify(workState));
+      fs.writeFileSync(stateFile, JSON.stringify(workState), { mode: 0o600 });
 
       try {
         const { result, code } = await runOrchestrator([TICKET], {
@@ -1701,7 +1723,7 @@ describe('work-orchestrator.js', () => {
     function writeReport(name, content) {
       const dir = ticketDir();
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, name), content);
+      fs.writeFileSync(path.join(dir, name), content, { mode: 0o600 });
     }
 
     function writeAllApprovedReports() {
@@ -2066,7 +2088,7 @@ describe('GH-211: task_review in plan generation', () => {
       content += `### Type\ntdd-code\n\n`;
       content += `### Deliverables\n- ${i}.1 Deliverable\n\n`;
     }
-    fs.writeFileSync(path.join(dir, 'tasks.md'), content);
+    fs.writeFileSync(path.join(dir, 'tasks.md'), content, { mode: 0o600 });
   }
 
   /**
@@ -2128,7 +2150,9 @@ describe('GH-211: task_review in plan generation', () => {
       startTime: new Date().toISOString(),
       lastUpdate: new Date().toISOString(),
     };
-    fs.writeFileSync(path.join(dir, '.work-state.json'), JSON.stringify(state, null, 2));
+    fs.writeFileSync(path.join(dir, '.work-state.json'), JSON.stringify(state, null, 2), {
+      mode: 0o600,
+    });
   }
 
   after(() => {

@@ -98,7 +98,7 @@ function makeTranscript(content = '') {
     os.tmpdir(),
     'test-wie-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.jsonl'
   );
-  fs.writeFileSync(tp, content);
+  fs.writeFileSync(tp, content, { mode: 0o600 });
   _transcriptPaths.push(tp);
   return tp;
 }

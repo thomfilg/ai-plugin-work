@@ -160,9 +160,8 @@ function validateHttpFile(content) {
   // A header whose value is neither a `<placeholder>` nor a redacted stand-in.
   // `[^REDACTED\n]` was a character class, so it only ever excluded the letters
   // R/E/D/A/C/T (with E and D duplicated) rather than the word REDACTED.
-  const hasPotentialSecrets = /(Authorization|X-API-Key|Cookie):[ \t]*(?![ \t<])(?!.*REDACTED)[^\n]+/i.test(
-    content
-  );
+  const hasPotentialSecrets =
+    /(Authorization|X-API-Key|Cookie):[ \t]*(?![ \t<])(?!.*REDACTED)[^\n]+/i.test(content);
   if (hasPotentialSecrets) {
     // This is a warning, not a blocking issue - just check it's not obviously a real token
     const hasRealToken = /Authorization:\s*Bearer\s+ey[A-Za-z0-9]/i.test(content);

@@ -62,7 +62,10 @@ const marker = {
 fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
 
 const indexPath = path.join(target.dir, 'INDEX.md');
-if (!fs.existsSync(indexPath)) {
+// 'wx' leaves an existing INDEX.md alone by failing with EEXIST, so the
+// "only seed it once" decision is made by the write itself, not by an earlier
+// check the file can change behind.
+try {
   // The shared store is cross-project; its INDEX should not be labelled with
   // the project the init happened to run from.
   const scopeLabel = args.kind === 'shared' ? 'all projects' : projectName;
@@ -88,8 +91,11 @@ if (!fs.existsSync(indexPath)) {
       'Body of the memory…',
       '```',
       '',
-    ].join('\n')
+    ].join('\n'),
+    { flag: 'wx' }
   );
+} catch (err) {
+  if (err.code !== 'EEXIST') throw err;
 }
 
 const scopeNote = args.kind === 'shared' ? 'scope=all projects' : `project=${projectName}`;

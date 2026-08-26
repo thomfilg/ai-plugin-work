@@ -407,7 +407,11 @@ describe('brief-gate step', () => {
           err.code = 'EACCES';
           throw err;
         }
-        return originalWriteFileSync.call(fs, p, ...rest);
+        // The stub only stands in for the brief write. Forwarding anything else
+        // to the real writeFileSync would let this test write a file it never
+        // chose, with whatever mode the caller left implicit — nothing under
+        // test reaches here, so fail loudly instead.
+        throw new Error(`unstubbed writeFileSync in test double: ${p}`);
       };
 
       try {

@@ -177,12 +177,15 @@ async function main() {
     }
     if (isTransient) {
       try {
-        const state = fs.existsSync(RETRY_STATE_FILE)
-          ? JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'))
-          : {};
+        let state = {};
+        try {
+          state = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8')) || {};
+        } catch {
+          // No retry state yet, or it is unreadable/corrupt — start fresh.
+        }
         retryCount = (state[currentUrl] || 0) + 1;
         state[currentUrl] = retryCount;
-        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(state));
+        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(state), { mode: 0o600 });
       } catch {
         retryCount = 1;
       }
@@ -225,7 +228,7 @@ async function main() {
       try {
         const state = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'));
         delete state[currentUrl];
-        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(state));
+        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(state), { mode: 0o600 });
       } catch {
         /* ignore */
       }
@@ -248,23 +251,23 @@ async function main() {
 
   // No errors — clear retry state for the current URL only (preserve other URLs' retry history)
   try {
-    if (fs.existsSync(RETRY_STATE_FILE)) {
-      let currentUrl = 'unknown';
-      try {
-        currentUrl = fs.readFileSync(LAST_URL_FILE, 'utf8').trim();
-      } catch {
-        /* no URL tracked */
-      }
-      const retryState = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'));
-      delete retryState[currentUrl];
-      if (Object.keys(retryState).length === 0) {
-        fs.unlinkSync(RETRY_STATE_FILE);
-      } else {
-        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(retryState));
-      }
+    let currentUrl = 'unknown';
+    try {
+      currentUrl = fs.readFileSync(LAST_URL_FILE, 'utf8').trim();
+    } catch {
+      /* no URL tracked */
+    }
+    // Read straight through: a missing retry-state file throws here and lands
+    // in the catch below, which is what the existence check used to decide.
+    const retryState = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'));
+    delete retryState[currentUrl];
+    if (Object.keys(retryState).length === 0) {
+      fs.unlinkSync(RETRY_STATE_FILE);
+    } else {
+      fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(retryState), { mode: 0o600 });
     }
   } catch {
-    /* ignore */
+    /* nothing to clear */
   }
 
   console.log(JSON.stringify({}));

@@ -148,8 +148,6 @@ if (storeKind) {
 }
 
 const outPath = path.join(target.dir, `${name}.md`);
-if (fs.existsSync(outPath) && !force)
-  die(`memory '${name}' already exists at ${outPath}; pass --force to overwrite`, 1);
 
 let body = '';
 if (!process.stdin.isTTY) {
@@ -175,7 +173,15 @@ if (enforceClassifier) fmLines.push(`enforce_classifier: ${enforceClassifier}`);
 if (enforceSatisfiedBy) fmLines.push(`enforce_satisfied_by: ${enforceSatisfiedBy}`);
 const fm = [...fmLines, '---', '', body, ''].join('\n');
 
-fs.writeFileSync(outPath, fm);
+// Without --force the write refuses to clobber ('wx' fails with EEXIST)
+// rather than checking first and writing into whatever is there by then.
+try {
+  fs.writeFileSync(outPath, fm, force ? {} : { flag: 'wx' });
+} catch (err) {
+  if (err.code === 'EEXIST')
+    die(`memory '${name}' already exists at ${outPath}; pass --force to overwrite`, 1);
+  throw err;
+}
 
 // R11 / AC-G6: after writing, run `synapsys lint` scoped to pairs involving
 // the new memory and warn on high-severity collisions via stderr. Always a

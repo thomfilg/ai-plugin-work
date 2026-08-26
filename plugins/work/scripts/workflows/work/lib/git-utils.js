@@ -25,15 +25,21 @@ const SHA_REGEX = /^[0-9a-f]{40}$/i;
 function resolveGitHead(cwd) {
   const dotgitPath = path.join(cwd || process.cwd(), '.git');
 
-  // Check if .git is a file (worktree) or directory (normal repo)
-  const stat = fs.statSync(dotgitPath);
-  if (stat.isDirectory()) {
-    // Normal repo — read HEAD directly
-    return fs.readFileSync(path.join(dotgitPath, 'HEAD'), 'utf-8').trim();
+  // Check if .git is a file (worktree) or directory (normal repo). Open it
+  // once and both stat and read THAT descriptor: a stat of the path followed
+  // by a read of the path can land on two different files.
+  const dotgitFd = fs.openSync(dotgitPath, 'r');
+  let dotgit;
+  try {
+    if (fs.fstatSync(dotgitFd).isDirectory()) {
+      // Normal repo — read HEAD directly
+      return fs.readFileSync(path.join(dotgitPath, 'HEAD'), 'utf-8').trim();
+    }
+    // Worktree — .git is a file containing "gitdir: <path>"
+    dotgit = fs.readFileSync(dotgitFd, 'utf-8').trim();
+  } finally {
+    fs.closeSync(dotgitFd);
   }
-
-  // Worktree — .git is a file containing "gitdir: <path>"
-  const dotgit = fs.readFileSync(dotgitPath, 'utf-8').trim();
   if (dotgit.startsWith('gitdir: ')) {
     const rawGitdir = dotgit.slice('gitdir: '.length);
     const gitdir = path.resolve(path.dirname(dotgitPath), rawGitdir);

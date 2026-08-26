@@ -30,7 +30,7 @@ async function main() {
   const url = toolInput.url || '';
 
   if (url) {
-    fs.writeFileSync(URL_FILE, url);
+    fs.writeFileSync(URL_FILE, url, { mode: 0o600 });
   }
 
   console.log(JSON.stringify({}));

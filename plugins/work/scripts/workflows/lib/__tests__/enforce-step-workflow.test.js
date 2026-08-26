@@ -66,7 +66,7 @@ function runHook(hookData, hookType = 'PreToolUse', env = {}) {
 // write became visible. Atomic rename + dir fsync closes that window.
 function atomicWriteJson(targetPath, value) {
   const dir = path.dirname(targetPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true }); // recursive mkdir is already a no-op when it exists
   const tmpPath = `${targetPath}.tmp.${process.pid}.${Date.now()}`;
   fs.writeFileSync(tmpPath, JSON.stringify(value, null, 2));
   fs.renameSync(tmpPath, targetPath);
@@ -90,7 +90,7 @@ function atomicWriteJson(targetPath, value) {
 // JSON.stringify.
 function writeRawAtomic(targetPath, rawBytes) {
   const dir = path.dirname(targetPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true }); // recursive mkdir is already a no-op when it exists
   const tmpPath = `${targetPath}.tmp.${process.pid}.${Date.now()}`;
   fs.writeFileSync(tmpPath, rawBytes);
   fs.renameSync(tmpPath, targetPath);
@@ -2054,7 +2054,8 @@ describe('enforce-step-workflow', () => {
       const fakePath = path.join(os.tmpdir(), 'work-orchestrator.js');
       fs.writeFileSync(
         fakePath,
-        'const fs = require("fs"); fs.writeFileSync(".work-state.json", "{}");'
+        'const fs = require("fs"); fs.writeFileSync(".work-state.json", "{}");',
+        { mode: 0o600 }
       );
 
       try {
@@ -3070,7 +3071,7 @@ describe('enforce-step-workflow', () => {
         }
       }
       script += 'exit 1\n';
-      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o755 });
+      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o700 });
     }
 
     function cleanupFakeGh() {
@@ -3395,7 +3396,7 @@ describe('enforce-step-workflow', () => {
         }
       }
       script += 'exit 1\n';
-      fs.writeFileSync(FAKE_GIT_PATH, script, { mode: 0o755 });
+      fs.writeFileSync(FAKE_GIT_PATH, script, { mode: 0o700 });
     }
 
     function writeFakeGh(responseMap) {
@@ -3409,7 +3410,7 @@ describe('enforce-step-workflow', () => {
         }
       }
       script += 'exit 1\n';
-      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o755 });
+      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o700 });
     }
 
     function cleanup() {
@@ -3562,7 +3563,7 @@ describe('enforce-step-workflow', () => {
         'if echo "$ARGS" | grep -qF -- "rev-parse --verify"; then exit 1; fi',
         'exit 1',
       ].join('\n');
-      fs.writeFileSync(FAKE_GIT_PATH, script, { mode: 0o755 });
+      fs.writeFileSync(FAKE_GIT_PATH, script, { mode: 0o700 });
     }
 
     function writeFakeGh(responseMap) {
@@ -3576,7 +3577,7 @@ describe('enforce-step-workflow', () => {
         }
       }
       script += 'exit 1\n';
-      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o755 });
+      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o700 });
     }
 
     function cleanup() {
@@ -4410,7 +4411,7 @@ describe('enforce-step-workflow', () => {
       const fakeGhDir = path.join(os.tmpdir(), `fake-gh-pr-${process.pid}`);
       const fakeGhPath = path.join(fakeGhDir, 'gh');
       fs.mkdirSync(fakeGhDir, { recursive: true });
-      fs.writeFileSync(fakeGhPath, '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+      fs.writeFileSync(fakeGhPath, '#!/bin/bash\nexit 1\n', { mode: 0o700 });
 
       try {
         const { code, stderr } = await runHook(
@@ -4558,7 +4559,7 @@ describe('enforce-step-workflow', () => {
       // Use a fake `gh` that fails so verify() returns false.
       const fakeGhDir = path.join(os.tmpdir(), `fake-gh-ci-${process.pid}`);
       fs.mkdirSync(fakeGhDir, { recursive: true });
-      fs.writeFileSync(path.join(fakeGhDir, 'gh'), '#!/bin/bash\nexit 1\n', { mode: 0o755 });
+      fs.writeFileSync(path.join(fakeGhDir, 'gh'), '#!/bin/bash\nexit 1\n', { mode: 0o700 });
 
       try {
         const { code, stderr } = await runHook(
@@ -4860,7 +4861,8 @@ describe('enforce-step-workflow', () => {
       const tmpScript = path.join(os.tmpdir(), `evil-${process.pid}.js`);
       fs.writeFileSync(
         tmpScript,
-        'const fs = require("fs"); fs.writeFileSync(".work-state.json", "{}");'
+        'const fs = require("fs"); fs.writeFileSync(".work-state.json", "{}");',
+        { mode: 0o600 }
       );
 
       try {

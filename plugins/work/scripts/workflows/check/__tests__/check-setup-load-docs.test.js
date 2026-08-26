@@ -272,7 +272,7 @@ describe('loadDocsFromPaths', () => {
     it('rejects symlinks that escape WORKTREES_BASE', () => {
       // Create a symlink inside worktreesBase pointing outside
       const escapePath = path.join(os.tmpdir(), 'escape-target.md');
-      fs.writeFileSync(escapePath, 'escaped content');
+      fs.writeFileSync(escapePath, 'escaped content', { mode: 0o600 });
       const symlinkPath = path.join(sharedDocsDir, 'escape-link.md');
       try {
         fs.unlinkSync(symlinkPath);

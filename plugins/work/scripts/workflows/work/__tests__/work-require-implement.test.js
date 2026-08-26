@@ -266,7 +266,7 @@ describe('work-require-implement hook', () => {
 
   it('should APPROVE when inside developer agent', async () => {
     const tp = path.join(os.tmpdir(), `test-wri4-${Date.now()}.jsonl`);
-    fs.writeFileSync(tp, ['"subagent_type": "developer-nodejs-tdd"'].join('\n'));
+    fs.writeFileSync(tp, ['"subagent_type": "developer-nodejs-tdd"'].join('\n'), { mode: 0o600 });
     try {
       const { result } = await runHookWithState(
         {
@@ -289,7 +289,9 @@ describe('work-require-implement hook', () => {
 
   it('should APPROVE when inside developer agent with work-workflow: prefix', async () => {
     const tp = path.join(os.tmpdir(), `test-wri-prefix-${Date.now()}.jsonl`);
-    fs.writeFileSync(tp, ['"subagent_type": "work-workflow:developer-nodejs-tdd"'].join('\n'));
+    fs.writeFileSync(tp, ['"subagent_type": "work-workflow:developer-nodejs-tdd"'].join('\n'), {
+      mode: 0o600,
+    });
     try {
       const { result } = await runHookWithState(
         {
@@ -312,7 +314,9 @@ describe('work-require-implement hook', () => {
 
   it('should APPROVE when inside code-architect agent with WORK_ARCHITECT_ENABLED=1', async () => {
     const tp = path.join(os.tmpdir(), `test-wri-ca-prefix-${Date.now()}.jsonl`);
-    fs.writeFileSync(tp, ['"subagent_type": "work-workflow:code-architect"'].join('\n'));
+    fs.writeFileSync(tp, ['"subagent_type": "work-workflow:code-architect"'].join('\n'), {
+      mode: 0o600,
+    });
     try {
       const { result } = await runHookWithState(
         {
@@ -337,7 +341,7 @@ describe('work-require-implement hook', () => {
   describe('WORK_ARCHITECT_ENABLED gate', () => {
     it('should BLOCK code-architect when WORK_ARCHITECT_ENABLED is not set', async () => {
       const tp = path.join(os.tmpdir(), `test-wri-ca-gate-${Date.now()}.jsonl`);
-      fs.writeFileSync(tp, ['"subagent_type": "code-architect"'].join('\n'));
+      fs.writeFileSync(tp, ['"subagent_type": "code-architect"'].join('\n'), { mode: 0o600 });
       try {
         const { result } = await runHookWithState(
           {
@@ -361,7 +365,7 @@ describe('work-require-implement hook', () => {
 
     it('should APPROVE code-architect when WORK_ARCHITECT_ENABLED=1', async () => {
       const tp = path.join(os.tmpdir(), `test-wri-ca-gate2-${Date.now()}.jsonl`);
-      fs.writeFileSync(tp, ['"subagent_type": "code-architect"'].join('\n'));
+      fs.writeFileSync(tp, ['"subagent_type": "code-architect"'].join('\n'), { mode: 0o600 });
       try {
         const { result } = await runHookWithState(
           {

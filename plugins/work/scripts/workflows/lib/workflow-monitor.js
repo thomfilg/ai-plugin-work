@@ -126,7 +126,7 @@ function recordNudgeSent(ticket) {
   try {
     fs.mkdirSync(NUDGE_STATE_DIR, { recursive: true });
     const f = path.join(NUDGE_STATE_DIR, `${ticket}.last`);
-    fs.writeFileSync(f, String(Math.floor(Date.now() / 1000)));
+    fs.writeFileSync(f, String(Math.floor(Date.now() / 1000)), { mode: 0o600 });
   } catch {
     /* fail-open */
   }
@@ -185,15 +185,13 @@ function recordFingerprint(ticket, fp) {
     fs.mkdirSync(FINGERPRINT_DIR, { recursive: true });
     const f = path.join(FINGERPRINT_DIR, `${ticket}.json`);
     let prev = { fp: null, count: 0 };
-    if (fs.existsSync(f)) {
-      try {
-        prev = JSON.parse(fs.readFileSync(f, 'utf8'));
-      } catch {
-        /* ignore */
-      }
+    try {
+      prev = JSON.parse(fs.readFileSync(f, 'utf8'));
+    } catch {
+      /* missing or unparseable — start a fresh count */
     }
     const same = prev.fp === fp ? prev.count + 1 : 1;
-    fs.writeFileSync(f, JSON.stringify({ fp, count: same }));
+    fs.writeFileSync(f, JSON.stringify({ fp, count: same }), { mode: 0o600 });
     return { same };
   } catch {
     return { same: 0 };

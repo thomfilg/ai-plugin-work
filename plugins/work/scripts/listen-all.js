@@ -45,7 +45,7 @@ for (const a of args) {
   }
 }
 
-fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o755 });
+fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o700 });
 
 function matchesFilter(name) {
   if (!name.endsWith('.log')) return false;
@@ -64,16 +64,24 @@ function extractTicket(line) {
 
 function sendTo(ticket, text) {
   const inbox = path.join(INBOX_DIR, `${ticket}.log`);
-  if (!fs.existsSync(inbox)) fs.closeSync(fs.openSync(inbox, 'a'));
   const ts = new Date().toISOString();
-  fs.appendFileSync(inbox, `[${ts}] MONITOR: ${text}\n`, { mode: 0o644 });
+  // Append through the descriptor we just opened rather than re-resolving the
+  // path: openSync creates the mailbox if it is missing, and writing to that
+  // same open file means the touch and the append cannot land on two different
+  // files. 0o600 keeps a mailbox in the shared temp dir private to this user.
+  const fd = fs.openSync(inbox, 'a', 0o600);
+  try {
+    fs.writeSync(fd, `[${ts}] MONITOR: ${text}\n`);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function archiveChannel(ticket) {
   const src = path.join(INBOX_DIR, `${ticket}.log`);
   if (!fs.existsSync(src)) return false;
   const archDir = path.join(INBOX_DIR, 'archived');
-  fs.mkdirSync(archDir, { recursive: true, mode: 0o755 });
+  fs.mkdirSync(archDir, { recursive: true, mode: 0o700 });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dest = path.join(archDir, `${ticket}.${stamp}.log`);
   try {

@@ -91,7 +91,8 @@ describe('WorkflowState', () => {
       fs.mkdirSync(instanceDir, { recursive: true });
       fs.writeFileSync(
         path.join(instanceDir, '.test-workflow.workflow-state.json'),
-        '{not valid json!!!'
+        '{not valid json!!!',
+        { mode: 0o600 }
       );
 
       const result = ws.load(INSTANCE);
@@ -114,7 +115,8 @@ describe('WorkflowState', () => {
       };
       fs.writeFileSync(
         path.join(instanceDir, '.test-workflow.workflow-state.json'),
-        JSON.stringify(legacyState, null, 2)
+        JSON.stringify(legacyState, null, 2),
+        { mode: 0o600 }
       );
 
       const loaded = ws.load(INSTANCE);
@@ -363,7 +365,11 @@ describe('WorkflowState', () => {
         status: 'in_progress',
         stepStatus: { step1: 'completed' },
       };
-      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+      fs.writeFileSync(
+        path.join(instanceDir, '.workflow-state.json'),
+        JSON.stringify(legacyState),
+        { mode: 0o600 }
+      );
 
       const loaded = ws.load(INSTANCE);
       assert.ok(loaded, 'Should load from legacy file');
@@ -377,7 +383,11 @@ describe('WorkflowState', () => {
 
       // Write legacy file with different workflow name
       const legacyState = { workflow: 'other-workflow', status: 'in_progress', stepStatus: {} };
-      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+      fs.writeFileSync(
+        path.join(instanceDir, '.workflow-state.json'),
+        JSON.stringify(legacyState),
+        { mode: 0o600 }
+      );
 
       const loaded = ws.load(INSTANCE);
       assert.strictEqual(loaded, null, 'Should not load mismatched workflow');
@@ -480,7 +490,11 @@ describe('WorkflowState', () => {
         status: 'in_progress',
         stepStatus: { step1: 'completed' },
       };
-      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+      fs.writeFileSync(
+        path.join(instanceDir, '.workflow-state.json'),
+        JSON.stringify(legacyState),
+        { mode: 0o600 }
+      );
 
       const loaded = wsWorkPr.load(INSTANCE);
       assert.strictEqual(loaded, null, 'work-pr should not load legacy check state');
@@ -496,7 +510,11 @@ describe('WorkflowState', () => {
         status: 'in_progress',
         stepStatus: { step1: 'completed' },
       };
-      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+      fs.writeFileSync(
+        path.join(instanceDir, '.workflow-state.json'),
+        JSON.stringify(legacyState),
+        { mode: 0o600 }
+      );
 
       const loaded = wsCheck.load(INSTANCE);
       assert.ok(loaded, 'check should load from legacy file');
@@ -513,7 +531,11 @@ describe('WorkflowState', () => {
         status: 'in_progress',
         stepStatus: { step1: 'completed' },
       };
-      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+      fs.writeFileSync(
+        path.join(instanceDir, '.workflow-state.json'),
+        JSON.stringify(legacyState),
+        { mode: 0o600 }
+      );
 
       // Capture stderr
       const originalWrite = process.stderr.write;

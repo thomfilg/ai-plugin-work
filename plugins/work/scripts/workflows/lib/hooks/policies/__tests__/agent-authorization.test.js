@@ -33,7 +33,7 @@ describe('agent-authorization: isTrustedScriptPath', () => {
 
   it('returns false when script is outside trusted dirs', () => {
     const tmpFile = path.join(os.tmpdir(), `aa-untrusted-${process.pid}.js`);
-    fs.writeFileSync(tmpFile, '// hi\n');
+    fs.writeFileSync(tmpFile, '// hi\n', { mode: 0o600 });
     try {
       assert.equal(isTrustedScriptPath(tmpFile, trustedDirs), false);
     } finally {
@@ -182,7 +182,7 @@ describe('agent-authorization: isExemptScriptInvocation', () => {
   it('returns false when script is exempt by basename but lives outside trusted dirs', () => {
     // /tmp file with the exempt basename should NOT be trusted
     const tmpFile = path.join(os.tmpdir(), `workflow-engine.js`);
-    fs.writeFileSync(tmpFile, '// hi\n');
+    fs.writeFileSync(tmpFile, '// hi\n', { mode: 0o600 });
     try {
       const r = isExemptScriptInvocation(`node ${tmpFile}`, {
         exemptScripts,
