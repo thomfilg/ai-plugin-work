@@ -31,6 +31,13 @@ const { commitEvidenceGate } = require(path.join(__dirname, 'commit-evidence-gat
 const { markEvidenceStale, clearEvidenceStale } = require(
   path.join(__dirname, '..', 'lib', 'evidence-staleness')
 );
+// A moved HEAD is only drift when it carried CODE. The check's own reports
+// reach HEAD through the sanctioned `git add -A` commit path, so counting them
+// rewound a check that had just passed — every time — and /check re-ran
+// forever. See lib/workflow-artifact-diff.js.
+const { isRealHeadDrift } = require(
+  path.join(__dirname, '..', '..', 'lib', 'workflow-artifact-diff')
+);
 
 /**
  * Derive the set of steps that come after `check` in the workflow.
@@ -252,7 +259,18 @@ function hasCheckDrift(ctx) {
     SHA_REGEX.test(ws.checkPassedSha);
   if (!driftEligible) return false;
   const headSha = deps.getHeadSha(process.cwd());
-  return headSha != null && headSha !== ws.checkPassedSha;
+  if (headSha == null || headSha === ws.checkPassedSha) return false;
+  const { drift } = (deps.isRealHeadDrift || isRealHeadDrift)(
+    ws.checkPassedSha,
+    headSha,
+    process.cwd()
+  );
+  if (drift) return true;
+  // Artifact-only movement: the commit carried this check's own reports and
+  // tasks-dir docs, nothing the check verified. Re-anchor so the same commit
+  // is not re-examined on every later transition, and let the workflow move on.
+  ws.checkPassedSha = headSha;
+  return false;
 }
 
 function checkDriftGate(ctx) {

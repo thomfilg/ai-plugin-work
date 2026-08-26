@@ -6,8 +6,9 @@
  * trustworthy while the code it verified is unchanged. This module answers,
  * deterministically:
  *
- *   - stale:      the current changes hash (git diff <base>...HEAD -w) or
- *                 HEAD SHA differs from what was recorded at completion →
+ *   - stale:      the current changes hash (git diff <base>...HEAD -w, with the
+ *                 workflow's own artifacts excluded) or HEAD SHA differs from
+ *                 what was recorded at completion →
  *                 the state must be invalidated and a fresh cycle started.
  *                 This is SHA-gated enforcement, not a bypass: a reset can
  *                 only be triggered by producing a real diff.
@@ -18,7 +19,9 @@
  *                 "still valid, nothing to do".
  *
  * Hash semantics mirror check-setup.js generateChangesHash(): 12-char
- * SHA-256 of the whitespace-insensitive diff, or 'no-changes'.
+ * SHA-256 of the whitespace-insensitive diff, or 'no-changes'. Both sides
+ * build that diff with lib/workflow-artifact-diff.js `codeRelevantDiff()`, so
+ * they cannot drift apart and neither is moved by the check's own reports.
  */
 
 'use strict';
@@ -30,6 +33,12 @@ const { execFileSync } = require('child_process');
 
 const { parseReportStatus } = require(
   path.join(__dirname, '..', '..', 'lib', 'parse-report-status')
+);
+// One shared definition of "the CODE changed" — the workflow's own artifacts
+// (reports, tasks-dir docs, state files) must never invalidate the evidence
+// that produced them. See lib/workflow-artifact-diff.js for the livelock.
+const { codeRelevantDiff, isRealHeadDrift } = require(
+  path.join(__dirname, '..', '..', 'lib', 'workflow-artifact-diff')
 );
 
 // Required check reports and their parse-report-status types.
@@ -78,10 +87,13 @@ function computeChangesHash(cwd) {
     baseBranch = 'main';
   }
   if (!baseBranch || !SAFE_REF_RE.test(baseBranch)) baseBranch = 'main';
-  // Probe git availability first so "empty diff" is distinguishable from
-  // "git failed" (safeExec collapses both to '').
-  if (!safeExec(['rev-parse', '--git-dir'], cwd)) return null;
-  const diff = safeExec(['diff', `${baseBranch}...HEAD`, '-w'], cwd);
+  // Workflow artifacts are excluded from the diff: committing a *.check.md
+  // report used to move this hash, which purged that very report and
+  // re-dispatched every agent (the /check livelock). codeRelevantDiff also
+  // probes git availability, so "empty diff" stays distinguishable from
+  // "git failed" (null).
+  const diff = codeRelevantDiff(baseBranch, cwd);
+  if (diff === null) return null;
   if (!diff) return 'no-changes';
   return crypto.createHash('sha256').update(diff).digest('hex').substring(0, 12);
 }
@@ -156,12 +168,15 @@ function resolveProbe(probeValue, computeFn, cwd) {
 }
 
 // SHA drift — fail-safe: only declare drift when BOTH sides are known.
-function driftReasons(state, recordedHash, currentHash, currentHead) {
+// HEAD movement that carries nothing but workflow artifacts is NOT drift: the
+// check's own reports land in HEAD via `commit-and-push.js` (`git add -A`), so
+// counting them re-opened a check that had just passed, forever.
+function driftReasons(state, recordedHash, currentHash, currentHead, cwd) {
   const reasons = [];
   if (currentHash && recordedHash && recordedHash !== 'unknown' && currentHash !== recordedHash) {
     reasons.push(`sha-drift: changes hash ${recordedHash} → ${currentHash}`);
   }
-  if (currentHead && state.completedHeadSha && currentHead !== state.completedHeadSha) {
+  if (isRealHeadDrift(state.completedHeadSha, currentHead, cwd).drift) {
     reasons.push(`sha-drift: HEAD ${state.completedHeadSha} → ${currentHead}`);
   }
   return reasons;
@@ -181,7 +196,7 @@ function assessTerminalState(state, reportFolder, probes = {}) {
   const currentHead = resolveProbe(probes.currentHead, computeHeadSha, probes.cwd);
 
   const recordedHash = state.completedChangesHash || state.changesHash || null;
-  const reasons = driftReasons(state, recordedHash, currentHash, currentHead);
+  const reasons = driftReasons(state, recordedHash, currentHash, currentHead, probes.cwd);
 
   const reports = evaluateReports(reportFolder, currentHash || recordedHash);
 
