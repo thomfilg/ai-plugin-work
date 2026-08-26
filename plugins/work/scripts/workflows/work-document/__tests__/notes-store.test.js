@@ -58,7 +58,7 @@ describe('summaryIsSubstantial', () => {
     assert.equal(summaryIsSubstantial('x'.repeat(MIN_SUMMARY_CHARS - 1)), false);
   });
 
-  it('rejects placeholders that clear the length bar by repetition', () => {
+  it('rejects padding that clears the length bar without saying anything', () => {
     assert.equal(summaryIsSubstantial('-'.repeat(MIN_SUMMARY_CHARS + 10)), false);
     assert.equal(summaryIsSubstantial(`n/a ${'.'.repeat(MIN_SUMMARY_CHARS)}`), false);
     assert.equal(summaryIsSubstantial(' '.repeat(MIN_SUMMARY_CHARS + 5)), false);
@@ -66,6 +66,27 @@ describe('summaryIsSubstantial', () => {
 
   it('accepts a real note', () => {
     assert.equal(summaryIsSubstantial(GOOD_SUMMARY), true);
+  });
+
+  it('stays linear on adversarial padding (CodeQL: no catastrophic backtracking)', () => {
+    // The first cut alternated `\.+|-+|_+` inside a `*` group. A 29-char
+    // summary of dashes then hung the check for minutes — and this runs on
+    // agent-authored text, so an agent could wedge its own gate by accident.
+    // 5000 padding chars must be answered instantly, not eventually.
+    for (const pad of ['-', '.', '_', ' ']) {
+      const started = Date.now();
+      assert.equal(summaryIsSubstantial(pad.repeat(5000)), false);
+      // Padding + one real character: not ALL padding, but 1 substantive char.
+      assert.equal(summaryIsSubstantial(`${pad.repeat(5000)}x`), false);
+      assert.ok(
+        Date.now() - started < 1000,
+        `padding with "${pad}" took ${Date.now() - started}ms — backtracking is back`
+      );
+    }
+  });
+
+  it('still sees a real note buried in padding', () => {
+    assert.equal(summaryIsSubstantial(`--- ${GOOD_SUMMARY} ---`), true);
   });
 });
 

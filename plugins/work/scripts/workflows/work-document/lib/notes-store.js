@@ -26,13 +26,39 @@ const path = require('node:path');
 
 const NOTES_FILE = '.document-notes.json';
 
-/** A note has to say something. Shorter than this is a placeholder, not a note. */
+/**
+ * A note has to say something. This is the SUBSTANTIVE length — filler words
+ * and padding do not count toward it — so the CLI's "at least 80 substantive
+ * characters" is literal, not an approximation.
+ */
 const MIN_SUMMARY_CHARS = 80;
 /** A docs note's file has to hold the note, not just its heading. */
 const MIN_DOC_CHARS = 200;
 
-/** Summaries that clear the length bar by saying nothing. */
-const PLACEHOLDER_RE = /^(?:n\/?a|none|nothing|todo|tbd|wip|no notes?|\.+|-+|_+|\s)*$/i;
+/**
+ * Filler words that say nothing, and the punctuation used to pad around them.
+ *
+ * Written as two linear passes rather than one alternation under a `*`. The
+ * obvious form — `/^(?:none|todo|\.+|-+|\s)*$/` — nests a quantifier inside a
+ * quantified group, so a run of N dashes has exponentially many ways to be
+ * split between the outer `*` and the inner `+`. CodeQL flagged it and a
+ * 29-character summary hung the check for minutes. This regex is reachable
+ * from agent-authored text, so that is a gate an agent can wedge by accident.
+ */
+const PLACEHOLDER_WORDS = /\b(?:n\/?a|none|nothing|todo|tbd|wip|no notes?)\b/gi;
+const PADDING_CHARS = /[.\-_\s]/g;
+
+/**
+ * How much of `text` is actually saying something: length after filler words
+ * and padding are removed.
+ *
+ * Measuring AFTER the strip, rather than testing "is it ALL padding", closes
+ * the gap a first cut left open: 5000 dashes and a single `x` is not all
+ * padding, and would have cleared a whole-string placeholder test.
+ */
+function substanceOf(text) {
+  return text.replace(PLACEHOLDER_WORDS, '').replace(PADDING_CHARS, '').length;
+}
 
 const SINKS = Object.freeze({ memory: 'memory', docs: 'docs' });
 
@@ -65,8 +91,7 @@ function appendNote(tasksDir, ticket, note) {
 }
 
 function summaryIsSubstantial(summary) {
-  const text = String(summary || '').trim();
-  return text.length >= MIN_SUMMARY_CHARS && !PLACEHOLDER_RE.test(text);
+  return substanceOf(String(summary || '').trim()) >= MIN_SUMMARY_CHARS;
 }
 
 /** `p` resolves to something at or under `root` (no `..` escape). */
