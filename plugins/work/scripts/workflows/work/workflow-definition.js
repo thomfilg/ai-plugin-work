@@ -208,6 +208,7 @@ function buildCommandMap(v) {
       step: STEPS.document,
       tool: ['Task', 'Agent'],
       field: 'description',
+      advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.document}\\b`, 'i'),
     },
     // Deliberately NOT in softSteps: this verify is the whole point of the
