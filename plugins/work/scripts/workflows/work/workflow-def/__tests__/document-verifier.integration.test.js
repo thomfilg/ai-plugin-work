@@ -119,6 +119,26 @@ describe('verifyDocument', () => {
     assert.equal(makeVerifiers().verifyDocument(TICKET), false);
   });
 
+  it('refuses a receipt invalidated by drift until a fresh note rewrites it', () => {
+    // HEAD moved after the note was written: check drift resets `document` to
+    // pending and marks the receipt stale. The old note describes superseded
+    // code, so it must not stand as documentation for what actually merged.
+    const { markEvidenceStale } = require('../../lib/evidence-staleness');
+    const file = writeDocNote();
+    appendNote(tasksDir, TICKET, { sink: SINKS.docs, path: file, summary: GOOD_SUMMARY });
+    assert.equal(makeVerifiers().verifyDocument(TICKET), true);
+
+    const ws = { ticketId: TICKET, stepStatus: {} };
+    markEvidenceStale(ws, STEPS.document, tasksDir, ['.document-notes.json'], 'step reset');
+    fs.writeFileSync(path.join(tasksDir, '.work-state.json'), JSON.stringify(ws));
+    assert.equal(makeVerifiers().verifyDocument(TICKET), false, 'stale receipt is not evidence');
+
+    // Recording again is the only thing that rewrites the receipt — and that
+    // is exactly what clears the mark.
+    appendNote(tasksDir, TICKET, { sink: SINKS.docs, path: file, summary: GOOD_SUMMARY });
+    assert.equal(makeVerifiers().verifyDocument(TICKET), true, 'a fresh note clears it');
+  });
+
   it('fails closed on a corrupt receipt', () => {
     fs.writeFileSync(path.join(tasksDir, '.document-notes.json'), '{not json');
     assert.equal(makeVerifiers().verifyDocument(TICKET), false);

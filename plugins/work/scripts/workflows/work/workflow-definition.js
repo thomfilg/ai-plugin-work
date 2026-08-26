@@ -46,6 +46,16 @@ const evidenceRequirements = {
     // a fresh README.md would make the check gate permanently unsatisfiable.
     refreshedFiles: ['code-review.check.md', 'tests.check.md', 'completion.check.md'],
   },
+  [STEPS.document]: {
+    // The receipt is about the code the note describes. A backward transition
+    // — HEAD drift while the run sits past `check`, a retry loop — resets
+    // `document` to pending, and without this declaration the OLD receipt
+    // still satisfied the gate: a note about superseded code would stand as
+    // the documentation for whatever was ultimately merged. Declaring the
+    // file lets markResetEvidenceStale invalidate it, and recording a fresh
+    // note (the only thing that rewrites it) clears the mark.
+    refreshedFiles: ['.document-notes.json'],
+  },
   // No [STEPS.reports] block: verifyReports checks the reports step's OWN
   // artifacts (reports.md via the emit phase's validator, plus cost-report.md)
   // rather than re-asserting the pre-merge check approvals that used to be

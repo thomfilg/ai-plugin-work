@@ -283,6 +283,11 @@ function verifyDocument(deps, ticketId) {
       path.join(deps.workRoot, '..', 'lib', 'resolve-ticket-worktree')
     );
     const dir = ticketDir(deps, ticketId);
+    // A receipt invalidated by a loop-back or HEAD drift is not evidence until
+    // a fresh note rewrites it — same treatment verifyCheck gives its reports,
+    // and the reason `.document-notes.json` is declared in refreshedFiles.
+    const { isEvidenceStale } = require(path.join(deps.workRoot, 'lib', 'evidence-staleness'));
+    if (isEvidenceStale(dir, deps.STEPS.document)) return false;
     return evaluateNotes({
       notes: readNotes(dir),
       memoryConfigured: Boolean(detectMemoryPlugin()),
