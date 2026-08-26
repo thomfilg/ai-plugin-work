@@ -76,7 +76,6 @@ describe('agent-authorization: extractSubCommand / isSafeSubCommand', () => {
   it('extracts the first non-flag arg after script for non-workflow-state', () => {
     // command segment: "node work-state.js get arg1"
     const cmd = 'node work-state.js get arg1';
-    const matches = [...cmd.matchAll(new RegExp('(?:^|\\s)(node)\\s+(\\S+)', 'g'))];
     // Use a synthetic match index/length pointing past "node work-state.js"
     const match = { index: 0, 0: 'node work-state.js' };
     const sub = extractSubCommand(cmd, match, 'work-state.js');

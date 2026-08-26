@@ -430,6 +430,13 @@ describe('hash-recording path filter logic', () => {
   //   .filter((item) => !changedPaths || changedPaths.has(item.path))
   // We test this filter directly to ensure correct behavior.
 
+  // Mirrors the production filter, with changedPaths as a parameter so all
+  // three cases (modified / unmodified / null fallback) exercise one copy of it.
+  const recordable = (comments, changedPaths) =>
+    comments
+      .filter((item) => item.path)
+      .filter((item) => !changedPaths || changedPaths.has(item.path));
+
   const makeBotComment = (filePath, body) => ({
     id: Math.random(),
     author: 'copilot-pull-request-reviewer',
@@ -444,10 +451,7 @@ describe('hash-recording path filter logic', () => {
     const changedPaths = new Set(['src/index.js']);
     const comment = makeBotComment('src/utils.js', 'Fix this');
 
-    // Simulate the production filter
-    const filtered = [comment]
-      .filter((item) => item.path)
-      .filter((item) => !changedPaths || changedPaths.has(item.path));
+    const filtered = recordable([comment], changedPaths);
 
     assert.equal(filtered.length, 0, 'comment on unmodified file must be excluded');
   });
@@ -456,9 +460,7 @@ describe('hash-recording path filter logic', () => {
     const changedPaths = new Set(['src/index.js']);
     const comment = makeBotComment('src/index.js', 'Fix this');
 
-    const filtered = [comment]
-      .filter((item) => item.path)
-      .filter((item) => !changedPaths || changedPaths.has(item.path));
+    const filtered = recordable([comment], changedPaths);
 
     assert.equal(filtered.length, 1, 'comment on modified file must be included');
     const hash = computeCommentHash(filtered[0].path, filtered[0].body);
@@ -470,9 +472,7 @@ describe('hash-recording path filter logic', () => {
     const c1 = makeBotComment('src/a.js', 'Issue A');
     const c2 = makeBotComment('src/b.js', 'Issue B');
 
-    const filtered = [c1, c2]
-      .filter((item) => item.path)
-      .filter((item) => !changedPaths || changedPaths.has(item.path));
+    const filtered = recordable([c1, c2], changedPaths);
 
     assert.equal(filtered.length, 2, 'null changedPaths falls back to recording all');
   });

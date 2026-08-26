@@ -7,7 +7,7 @@
  * Run with: node --test workflows/work/__tests__/work-require-implement.test.js
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('child_process');
 const path = require('path');

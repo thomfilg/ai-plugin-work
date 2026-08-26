@@ -12,9 +12,8 @@
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { MARKER, FOLDER, getProjectName, candidateStores } = require(
+const { MARKER, getProjectName, candidateStores } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
 const { prepareStore } = require(path.join(__dirname, '..', 'lib', 'store-migrations'));

@@ -19,7 +19,6 @@
  * - git diff, git show, git blame (shows implementation)
  */
 
-const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 

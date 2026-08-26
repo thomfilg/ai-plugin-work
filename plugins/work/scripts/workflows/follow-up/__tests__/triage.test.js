@@ -107,13 +107,13 @@ describe('triage step', () => {
 
   it('conflict takes priority over CI failure', () => {
     const state = makeState(1, 'CI: FAILING\nmerge conflict');
-    const result = triage(state, {});
+    triage(state, {});
     assert.equal(state.failureCategory, 'conflict');
   });
 
   it('CI failure takes priority over blocking reviews', () => {
     const state = makeState(1, 'CI: FAILING\nReviews: 1 BLOCKING');
-    const result = triage(state, {});
+    triage(state, {});
     assert.equal(state.failureCategory, 'ci_failure');
     assert.equal(state.currentStep, 'infra-retry');
   });

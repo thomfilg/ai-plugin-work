@@ -880,7 +880,7 @@ describe('tdd-phase-state CLI', () => {
       fs.writeFileSync(rootPath, JSON.stringify(state, null, 2));
 
       const passScript = createExitScript(scriptDir, 0);
-      const { stdout, exitCode } = runCli(`record-green TEST-RG2 --cmd "${passScript}"`, homeDir);
+      const { exitCode } = runCli(`record-green TEST-RG2 --cmd "${passScript}"`, homeDir);
       assert.strictEqual(exitCode, 0);
       const updatedState = JSON.parse(fs.readFileSync(rootPath, 'utf8'));
       assert.strictEqual(updatedState.cycles[0].green.testExitCode, 0);

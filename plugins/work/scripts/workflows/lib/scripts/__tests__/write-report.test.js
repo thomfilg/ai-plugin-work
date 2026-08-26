@@ -257,7 +257,6 @@ describe('write-report', () => {
       // createReportWriter with reportType should validate formatReport output.
       // A formatReport that returns content without a Status: line should cause
       // the writer to exit with error.
-      const { createReportWriter } = require(WRITE_REPORT);
 
       // We test by creating a writer with a reportType and a formatReport that
       // omits the Status line, then running it via the script pattern.

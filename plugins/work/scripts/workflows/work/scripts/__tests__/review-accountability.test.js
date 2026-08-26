@@ -67,9 +67,6 @@ describe('buildAccountabilityEntries', () => {
 
 describe('review-accountability error handling', () => {
   it('writes warning to stderr when accountability file write fails', () => {
-    const fs = require('node:fs');
-    const path = require('node:path');
-
     // Capture stderr output
     const stderrChunks = [];
     const origWrite = process.stderr.write;

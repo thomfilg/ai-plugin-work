@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
 const { logHookError } = require(
   require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log')
 );

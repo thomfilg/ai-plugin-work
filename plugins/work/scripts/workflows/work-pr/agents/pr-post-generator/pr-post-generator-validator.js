@@ -97,18 +97,6 @@ function isFrontendApp(appName) {
 /**
  * Get all frontend apps (those with react-router.config.ts)
  */
-function getAllFrontendApps() {
-  try {
-    const apps = fs.readdirSync(APPS_DIR).filter((dir) => {
-      const appPath = path.join(APPS_DIR, dir);
-      return fs.statSync(appPath).isDirectory() && isFrontendApp(dir);
-    });
-    return apps;
-  } catch (e) {
-    return [];
-  }
-}
-
 /**
  * Get affected apps using the get-affected.js script
  */

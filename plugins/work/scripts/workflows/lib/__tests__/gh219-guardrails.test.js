@@ -49,13 +49,9 @@ try {
 const { describe, it, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  runPreflight,
-  isWriteAllowedPath,
-  createGraphCheck,
-  createClaimCheck,
-  createPathCheck,
-} = require(path.join(__dirname, '..', 'preflight'));
+const { runPreflight, isWriteAllowedPath, createGraphCheck, createClaimCheck } = require(
+  path.join(__dirname, '..', 'preflight')
+);
 
 const workState = require(path.join(__dirname, '..', '..', 'work', 'work-state'));
 const requestIndex = require(path.join(__dirname, '..', 'request-index'));

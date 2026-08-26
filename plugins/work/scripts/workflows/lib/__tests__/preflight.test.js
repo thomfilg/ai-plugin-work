@@ -1248,9 +1248,7 @@ describe('preflight — full composition: graph + claim + path (R3, R4, R6)', ()
   });
 
   it('audit callback is invoked with full decision on composed happy path', () => {
-    const { runPreflight, createGraphCheck, createClaimCheck, createPathCheck } = require(
-      MODULE_PATH
-    );
+    const { runPreflight, createGraphCheck, createClaimCheck } = require(MODULE_PATH);
 
     const audited = [];
     const ctx = {

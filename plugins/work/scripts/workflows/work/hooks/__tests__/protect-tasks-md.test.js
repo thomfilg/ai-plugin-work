@@ -6,7 +6,7 @@
  * Run with: node --test workflows/work/hooks/__tests__/protect-tasks-md.test.js
  */
 
-const { describe, it, afterEach } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('child_process');
 const path = require('path');

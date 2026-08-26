@@ -8,7 +8,7 @@
  * Run with: node --test workflows/work-implement/__tests__/work-implement-enforce.test.js
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('child_process');
 const path = require('path');

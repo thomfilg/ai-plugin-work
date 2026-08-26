@@ -23,7 +23,9 @@ const path = require('path');
 
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
 const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
-const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
+// Load-time assertion only: this workflow cannot resolve a ticket worktree
+// without it. The value itself is read where it is needed.
+getConfig.require('WORKTREES_BASE');
 // TASKS_BASE is configured, never derived — see lib/config.js. This file used to
 // carry its own `|| path.join(WORKTREES_BASE, 'tasks')` copy of the guess #788
 // removed, which survived even after config.js stopped making it.

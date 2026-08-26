@@ -81,7 +81,6 @@ describe('transition-step.js (GH-245 Task 4)', () => {
   describe('forward transition logs "step deferred" for intermediate steps', () => {
     it('should mark intermediate step status as "completed" and log "step deferred" in audit', () => {
       const { transitionStep } = require('../engine/transition-step');
-      const { ALL_STEPS } = require('../step-registry');
 
       // Set up state at 'ticket' (index 0), transition to 'brief' (index 2)
       // This should mark 'bootstrap' (index 1) as completed but log 'step deferred'

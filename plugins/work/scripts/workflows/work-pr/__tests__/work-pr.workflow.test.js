@@ -604,7 +604,6 @@ describe('work-pr.workflow.js', () => {
   describe('computeScreenshotHash()', () => {
     const os = require('os');
     const fs = require('fs');
-    const crypto = require('crypto');
     const tmpBase = path.join(os.tmpdir(), 'screenshot-hash-test-' + process.pid);
 
     after(() => {

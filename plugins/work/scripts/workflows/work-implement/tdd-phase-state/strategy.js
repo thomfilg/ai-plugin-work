@@ -15,14 +15,6 @@ const { requireTasksBase } = require('../../lib/ticket-validation');
 const { sanitizeId, writeState } = require('./state-path');
 const { errorExit, successOut, getCurrentCycleRecord } = require('./io');
 
-let config;
-try {
-  config = require('../../lib/config');
-} catch (e) {
-  if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
-  config = null;
-}
-
 // GH-610 Task 2 — Test Strategy synthesis + peer-citation APIs (GH-590-owned,
 // consumed as stable). `synthesizeCommand` returns null for citation kinds by
 // design; `validatePeerCitation` returns string[] errors (empty == valid).

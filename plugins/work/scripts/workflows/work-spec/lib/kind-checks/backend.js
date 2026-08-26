@@ -10,7 +10,6 @@
 
 'use strict';
 
-const path = require('node:path');
 const {
   readSpec,
   filesInFilesToModify,

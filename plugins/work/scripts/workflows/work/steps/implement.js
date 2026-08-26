@@ -173,8 +173,6 @@ module.exports = function implementStep(add, s, ctx) {
     getDocsPrompt,
     parseTasks,
     buildTaskPrompt,
-    fileExists,
-    path,
     execFileSync,
   } = ctx;
 

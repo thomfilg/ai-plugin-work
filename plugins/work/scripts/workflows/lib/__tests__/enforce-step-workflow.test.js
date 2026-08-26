@@ -5,7 +5,7 @@
  * Run: node --test hooks/__tests__/enforce-step-workflow.test.js
  */
 
-const { describe, it, before, beforeEach, afterEach, after } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('child_process');
 const os = require('os');
@@ -14,6 +14,13 @@ const path = require('path');
 const { spawnHook } = require('./_helpers/run-hook');
 
 const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'enforce-step-workflow.js');
+const COMMAND_MATCHING_PATH = path.join(
+  __dirname,
+  '..',
+  'hooks',
+  'policies',
+  'command-matching.js'
+);
 
 // A tasks root has to be CONFIGURED — lib/config.js no longer derives one from
 // WORKTREES_BASE, which is what used to satisfy this require (and, in CI where
@@ -1189,9 +1196,11 @@ describe('enforce-step-workflow', () => {
     });
 
     it('(Patch 13) isExempt uses String() coercion', () => {
-      const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
+      // isExempt lives in the policy module — assert the coercion where it is
+      // implemented, not against a copy the hook kept only for this test.
+      const policySource = fs.readFileSync(COMMAND_MATCHING_PATH, 'utf-8');
       // Find the isExempt function body
-      const exemptMatch = hookSource.match(/function isExempt[\s\S]*?return exemptPatterns/);
+      const exemptMatch = policySource.match(/function isExempt[\s\S]*?return exemptPatterns/);
       assert.ok(exemptMatch, 'Should have isExempt function');
       assert.ok(
         exemptMatch[0].includes("String(toolInput?.command || '')"),
@@ -1712,7 +1721,7 @@ describe('enforce-step-workflow', () => {
     it('blocks Edit to follow-up-pr state file when not in follow_up step', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const { code, stderr } = await runHook(
+      const { code } = await runHook(
         {
           tool_name: 'Edit',
           tool_input: {
@@ -1729,7 +1738,7 @@ describe('enforce-step-workflow', () => {
     it('blocks MultiEdit to follow-up-pr state file', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const { code, stderr } = await runHook(
+      const { code } = await runHook(
         {
           tool_name: 'MultiEdit',
           tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', edits: [] },
@@ -1742,7 +1751,7 @@ describe('enforce-step-workflow', () => {
     it('blocks Bash redirect to follow-up-pr state file', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const { code, stderr } = await runHook(
+      const { code } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: "echo '{}' > /tmp/.claude/follow-up-pr-my-repo-42.json" },
@@ -1805,7 +1814,7 @@ describe('enforce-step-workflow', () => {
     it('blocks when agent is follow-up-pr but step is NOT follow_up', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const { code, stderr } = await runHook(
+      const { code } = await runHook(
         {
           tool_name: 'Write',
           tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', content: '{}' },
@@ -1854,7 +1863,7 @@ describe('enforce-step-workflow', () => {
     it('blocks Bash redirect to review-accountability.json from non-follow-up-pr agent', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const { code, stderr } = await runHook(
+      const { code } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: {
@@ -1972,7 +1981,6 @@ describe('enforce-step-workflow', () => {
 
   describe('Vector 3 exempt scripts', () => {
     // Use the actual hooks directory (trusted path) for exempt script tests
-    const HOOKS_DIR = path.join(__dirname, '..', 'hooks');
     const LIB_DIR = path.join(__dirname, '..');
     const WORK_DIR = path.join(__dirname, '..', '..', 'work');
     const ORCHESTRATOR_PATH = path.join(WORK_DIR, 'engine', 'work.workflow.js');
@@ -3399,20 +3407,6 @@ describe('enforce-step-workflow', () => {
       fs.writeFileSync(FAKE_GIT_PATH, script, { mode: 0o700 });
     }
 
-    function writeFakeGh(responseMap) {
-      if (!fs.existsSync(FAKE_GH_DIR)) fs.mkdirSync(FAKE_GH_DIR, { recursive: true });
-      let script = '#!/bin/bash\nARGS="$*"\n';
-      for (const [pattern, response] of Object.entries(responseMap)) {
-        if (response === 'EXIT1') {
-          script += `if echo "$ARGS" | grep -qF -- "${pattern}"; then exit 1; fi\n`;
-        } else {
-          script += `if echo "$ARGS" | grep -qF -- "${pattern}"; then echo '${response.replace(/'/g, "'\\''")}'; exit 0; fi\n`;
-        }
-      }
-      script += 'exit 1\n';
-      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o700 });
-    }
-
     function cleanup() {
       try {
         fs.rmSync(FAKE_GIT_DIR, { recursive: true, force: true });
@@ -3493,7 +3487,7 @@ describe('enforce-step-workflow', () => {
         'diff --shortstat': '1 file changed, 10 insertions(+)',
       });
 
-      const { code, stderr } = await transitionFromCommit();
+      const { code } = await transitionFromCommit();
       assert.equal(code, 2, 'Should block when branch name does not contain ticket ID');
     });
 
@@ -3508,7 +3502,7 @@ describe('enforce-step-workflow', () => {
         'diff --shortstat': '', // No changes
       });
 
-      const { code, stderr } = await transitionFromCommit();
+      const { code } = await transitionFromCommit();
       assert.equal(code, 2, 'Should block when branch matches but diff is empty');
     });
 
@@ -3523,7 +3517,7 @@ describe('enforce-step-workflow', () => {
         'diff --shortstat': '1 file changed',
       });
 
-      const { code, stderr } = await transitionFromCommit();
+      const { code } = await transitionFromCommit();
       assert.equal(code, 2, 'Should block when in detached HEAD state');
     });
   });
@@ -4029,7 +4023,7 @@ describe('enforce-step-workflow', () => {
       writeWorkState(makeStepStatus('spec', WORK_STEPS));
       // No spec.md file created
 
-      const { code, stderr } = await runHook({
+      const { code } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} implement` },
       });
@@ -4754,7 +4748,7 @@ describe('enforce-step-workflow', () => {
         commit: { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
       });
 
-      const { code, stderr } = await runHook({
+      const { code } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} pr` },
       });

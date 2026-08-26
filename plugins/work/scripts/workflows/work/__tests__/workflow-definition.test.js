@@ -9,7 +9,7 @@
  * GH-206 Task 12: Extract declarative workflow policy config.
  */
 
-const { describe, it, before, after } = require('node:test');
+const { describe, it, after } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const fs = require('fs');

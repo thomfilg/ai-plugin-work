@@ -9,7 +9,7 @@
 
 module.exports = function registerTicket(register) {
   register('ticket', (entry, ctx) => {
-    const { tasksDir, ticket, path, fs } = ctx;
+    const { tasksDir, ticket, path } = ctx;
     const ticketFile = path.join(tasksDir, 'ticket.json');
     const issueNum = ticket.replace('#', '');
     const saveCmd = `gh issue view ${issueNum} --json title,body,state,labels > "${ticketFile}"`;

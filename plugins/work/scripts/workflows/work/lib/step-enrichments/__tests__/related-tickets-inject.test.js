@@ -13,7 +13,6 @@ const path = require('node:path');
 const os = require('node:os');
 
 const registerEnrichment = require('../related-tickets-inject');
-const relatedTickets = require('../../../../lib/related-tickets');
 
 // Minimal registry so we can capture which fns get registered per step.
 function makeRegistry() {

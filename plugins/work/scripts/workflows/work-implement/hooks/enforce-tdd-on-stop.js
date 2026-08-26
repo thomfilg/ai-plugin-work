@@ -129,7 +129,7 @@ function debugLog(message) {
     const _getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
     const _tasksBase = _getConfig('TASKS_BASE');
     if (!_tasksBase || !ticketId) return;
-    let _safeId = ticketId;
+    let _safeId;
     try {
       _safeId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId);
     } catch {
@@ -165,7 +165,7 @@ if (!TASKS_BASE) {
 }
 
 // Sanitize ticket ID for filesystem path
-let safeTicket = ticketId;
+let safeTicket;
 try {
   const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
   safeTicket = config.safeTicketId(ticketId);

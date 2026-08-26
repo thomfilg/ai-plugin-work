@@ -395,32 +395,32 @@ async function main() {
       break;
 
     case 'set-playwright':
-      result = setPlaywrightStatus(ticketId, appName, args[3] === 'true', args[4]);
+      setPlaywrightStatus(ticketId, appName, args[3] === 'true', args[4]);
       console.log(JSON.stringify({ success: true, playwrightOk: args[3] === 'true' }));
       break;
 
     case 'set-reachable':
-      result = setAppReachable(ticketId, appName, args[3] === 'true', args[4]);
+      setAppReachable(ticketId, appName, args[3] === 'true', args[4]);
       console.log(JSON.stringify({ success: true, appReachable: args[3] === 'true' }));
       break;
 
     case 'start-test':
-      result = startTest(ticketId, appName, args[3]);
+      startTest(ticketId, appName, args[3]);
       console.log(JSON.stringify({ success: true, test: args[3], status: 'started' }));
       break;
 
     case 'complete-test':
-      result = completeTest(ticketId, appName, args[3], args[4], args[5]);
+      completeTest(ticketId, appName, args[3], args[4], args[5]);
       console.log(JSON.stringify({ success: true, test: args[3], result: args[4] }));
       break;
 
     case 'fail-test':
-      result = failTest(ticketId, appName, args[3], args[4], args[5]);
+      failTest(ticketId, appName, args[3], args[4], args[5]);
       console.log(JSON.stringify({ success: true, test: args[3], status: 'failed' }));
       break;
 
     case 'infrastructure-failure':
-      result = infrastructureFailure(ticketId, appName, args[3]);
+      infrastructureFailure(ticketId, appName, args[3]);
       console.log(JSON.stringify({ success: true, status: 'infrastructure_failure' }));
       break;
 
