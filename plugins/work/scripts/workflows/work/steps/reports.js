@@ -1,11 +1,22 @@
 /**
  * Step: reports
  *
- * Emits a `cost-report.md` into the task's tasks directory (GH-311 R3): loads
- * `kind:'usage'` rows from `.work-actions.json`, derives per-step durations from
- * `analyzeActions()`, renders the markdown via `cost-report.js`, and queues an
- * authorized `reports`-step write of the rendered report. Degrades gracefully —
- * a ticket with no usage rows still produces a valid (zero-row) report.
+ * Two outputs, one step:
+ *
+ *  - `cost-report.md` (GH-311 R3) — loads `kind:'usage'` rows from
+ *    `.work-actions.json`, derives per-step durations from `analyzeActions()`,
+ *    and renders the markdown via `cost-report.js`. Degrades gracefully: a
+ *    ticket with no usage rows still produces a valid (zero-row) report.
+ *  - `reports.md` — the cross-step summary the `reports-writer` agent writes
+ *    through the self-paced `reports-next.js` runner
+ *    (inputs -> collect_artifacts -> summarize -> emit -> memorize -> done).
+ *
+ * The runner used to be unreachable: this step dispatched only the cost-report
+ * Bash write, so `reports-writer` was never invoked and the whole work-reports
+ * workflow — the summary, its shape gate, and the ticket-level memorize —
+ * never ran. The step "completed" the moment a heredoc finished, which is what
+ * made it look like it auto-advanced. Dispatching the agent (with the runner
+ * as its driver, mirroring steps/pr.js) is what makes the step do its job.
  *
  * @param {Function} add
  * @param {object} s
@@ -17,15 +28,35 @@ const { WORK_PRICING } = require('../../lib/config');
 
 module.exports = function reportsStep(add, s, ctx) {
   const { STEPS, tasksDir, ticket, t } = ctx;
+  const id = ticket || t;
 
   const markdown = buildCostReport(ticket, t);
   const reportPath = `${tasksDir}/cost-report.md`;
 
-  add(STEPS.reports, 'RUN', 'Task(Bash)', 'Emit cost-report.md', {
-    agentType: 'Bash',
-    agentPrompt: writeFileCommand(reportPath, markdown),
+  add(STEPS.reports, 'RUN', 'Task(reports-writer)', 'Emit reports.md + cost-report.md', {
+    agentType: 'reports-writer',
+    agentPrompt: reportsPrompt(id, reportPath, markdown),
   });
 };
+
+/**
+ * The reports-writer's brief: emit the cost report verbatim (it is rendered
+ * here, from data the agent cannot see), then drive the summary runner.
+ */
+function reportsPrompt(id, reportPath, markdown) {
+  return [
+    `Produce the delivery reports for ${id}.`,
+    '',
+    '1. Write the pre-rendered cost report exactly as given:',
+    '',
+    writeFileCommand(reportPath, markdown),
+    '',
+    '2. Then write `reports.md` (and `learnings.md`) through the self-paced runner —',
+    '   run it before and after each sub-action, and do NOT edit `reports-phase.json`:',
+    '',
+    `   node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-reports/reports-next.js ${id}`,
+  ].join('\n');
+}
 
 /**
  * Load usage rows + per-step durations for `ticket` and render the cost report

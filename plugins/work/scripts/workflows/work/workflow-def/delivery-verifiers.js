@@ -210,7 +210,7 @@ function verifyFollowUp(deps, ticketId) {
  * Defense-in-depth for the third-attempt bug class (ECHO-5217/5218):
  * ci is NOT complete just because CI checks went green — the PR must
  * actually be MERGED on the remote. Without this, transition-step.js
- * would walk ci → cleanup → reports → complete before the user merged.
+ * would walk ci → reports → cleanup → complete before the user merged.
  * @param {DeliveryDeps} deps
  */
 function verifyCi(deps) {
@@ -229,40 +229,65 @@ function verifyCi(deps) {
   }
 }
 
-/** All requiredApprovals files must exist and match their approval pattern. */
-function approvalsSatisfied(dir, required) {
-  for (const r of required) {
-    const fp = path.join(dir, r.file);
-    if (!fs.existsSync(fp)) return false;
-    if (!r.pattern.test(fs.readFileSync(fp, 'utf-8'))) return false;
-  }
-  return true;
-}
-
-/** At least one QA report must exist and every one must pass. */
-function qaReportsApproved(dir, qaPattern, approvalPattern) {
-  const files = fs.readdirSync(dir).filter((f) => qaPattern.test(f));
-  if (files.length === 0) return false;
-  return files.every((f) => approvalPattern.test(fs.readFileSync(path.join(dir, f), 'utf-8')));
-}
-
 /**
- * Reports is proven if all required check files exist and show APPROVED/COMPLETE.
- * Requirements are sourced from evidenceRequirements[reports] (declarative).
+ * Reports is proven by the artifacts the reports step itself produces:
+ * `reports.md` (shape-checked by the emit phase's OWN validator, so the gate
+ * and the runner can never disagree) and `cost-report.md`.
+ *
+ * It used to re-assert the pre-merge CHECK evidence instead — approvals, QA
+ * report statuses, per-task TDD — which was wrong twice. It never ran (reports
+ * was a soft step, so stepVerifyGate skipped it), and had it run it would have
+ * stranded merged tickets on evidence no post-merge action can produce. The
+ * step then "completed" the moment its Bash heredoc returned, with no
+ * reports.md, no learnings.md and no cost-report.md on disk and nothing
+ * noticing — the observed failure this replaces.
+ *
+ * Checking its own output keeps the gate recoverable: the fix is to write the
+ * file, which is always possible post-merge, unlike re-running a check.
  * @param {DeliveryDeps} deps
  */
 function verifyReports(deps, ticketId) {
   try {
     const dir = ticketDir(deps, ticketId);
-    const reqs = deps.evidenceRequirements[deps.STEPS.reports];
-    if (!approvalsSatisfied(dir, reqs?.requiredApprovals || [])) return false;
-    const qaPattern = reqs?.qaReportPattern;
-    const approvalPattern = reqs?.qaApprovalPattern;
-    if (qaPattern && approvalPattern && !qaReportsApproved(dir, qaPattern, approvalPattern)) {
-      return false;
-    }
-    // GH-259: When tasks.md exists, verify per-task TDD evidence
-    return deps.verifyPerTaskTDD(ticketId);
+    const emit = require(path.join(deps.workRoot, '..', 'work-reports', 'lib', 'phases', 'emit'));
+    if (!emit.validate({ tasksDir: dir }).ok) return false;
+    return fs.existsSync(path.join(dir, 'cost-report.md'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The `document` step is proven by its receipt, re-checked at gate time —
+ * never by a sentinel. `evaluateNotes` is the SAME evaluation `document-note.js
+ * verify` runs for the agent, so the step cannot pass its own self-check and
+ * then fail the transition (or the reverse).
+ *
+ * Fail-CLOSED on every unknown: an unreadable receipt, an unresolvable tasks
+ * dir, or a throw all read as "nothing was recorded". This step sits BEFORE
+ * the merge, so a false negative costs a re-run of work the agent should have
+ * done anyway — where a false positive silently loses the only record of what
+ * the run learned.
+ *
+ * @param {DeliveryDeps} deps
+ */
+function verifyDocument(deps, ticketId) {
+  try {
+    const { readNotes, evaluateNotes } = require(
+      path.join(deps.workRoot, '..', 'work-document', 'lib', 'notes-store')
+    );
+    const { detectMemoryPlugin } = require(
+      path.join(deps.workRoot, '..', 'lib', 'detect-memory-plugin')
+    );
+    const { resolveTicketWorktree } = require(
+      path.join(deps.workRoot, '..', 'lib', 'resolve-ticket-worktree')
+    );
+    const dir = ticketDir(deps, ticketId);
+    return evaluateNotes({
+      notes: readNotes(dir),
+      memoryConfigured: Boolean(detectMemoryPlugin()),
+      worktreeRoot: resolveTicketWorktree(ticketId) || null,
+    }).ok;
   } catch {
     return false;
   }
@@ -273,6 +298,7 @@ function createDeliveryVerifiers(deps) {
   return {
     verifyCommit: (ticketId) => verifyCommit(deps, ticketId),
     verifyCheck: (ticketId) => verifyCheck(deps, ticketId),
+    verifyDocument: (ticketId) => verifyDocument(deps, ticketId),
     verifyPr: () => verifyPr(deps),
     verifyFollowUp: (ticketId) => verifyFollowUp(deps, ticketId),
     verifyCi: () => verifyCi(deps),

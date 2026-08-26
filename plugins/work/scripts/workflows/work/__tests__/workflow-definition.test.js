@@ -116,15 +116,20 @@ describe('workflow-definition: evidenceRequirements', () => {
     assert.ok(!reqs.qaReportPattern.test('tests.check.md'));
   });
 
-  it('defines required approved files for reports step', () => {
-    const reqs = workflow.evidenceRequirements[STEPS.reports];
-    assert.ok(reqs, 'reports step should have evidence requirements');
-    assert.ok(Array.isArray(reqs.requiredApprovals));
-    const byFile = Object.fromEntries(reqs.requiredApprovals.map((r) => [r.file, r.pattern]));
-    assert.ok(byFile['tests.check.md'] instanceof RegExp);
-    assert.ok(byFile['code-review.check.md'] instanceof RegExp);
-    assert.ok(byFile['completion.check.md'] instanceof RegExp);
-    assert.ok(/APPROVED/i.test('Status: APPROVED'.match(byFile['tests.check.md'])?.[0] || ''));
+  it('declares no evidence requirements for the reports step', () => {
+    // reports verifies its OWN output (reports.md + cost-report.md) instead of
+    // re-asserting the pre-merge check approvals. Those are enforced leaving
+    // `check`, where they can still change the outcome — re-checking them
+    // post-merge stranded shipped tickets on evidence nothing could produce.
+    assert.equal(workflow.evidenceRequirements[STEPS.reports], undefined);
+    assert.ok(workflow.evidenceRequirements[STEPS.check], 'check still declares them');
+  });
+
+  it('makes reports a hard step so its verify actually runs', () => {
+    // Soft steps are skipped by stepVerifyGate. reports was soft, so it
+    // completed the moment its Bash heredoc returned — with none of its
+    // artifacts on disk.
+    assert.equal(workflow.softSteps.has(STEPS.reports), false);
   });
 });
 

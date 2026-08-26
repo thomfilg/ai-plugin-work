@@ -4,8 +4,10 @@ description: |
   Aggregates per-step artifacts (brief, spec, tasks, qa, code-review,
   completion, CI) into a single cross-step summary `reports.md` — plus a
   structured `learnings.md` (decisions, lessons, patterns, surprises,
-  metrics) — during the `reports` workflow step (between cleanup and
-  complete).
+  metrics) — during the `reports` workflow step (after ci, before cleanup,
+  so the merged outcome is readable and the worktree is still intact).
+  Also writes the pre-rendered `cost-report.md` the step hands it. The step
+  does not advance until reports.md and cost-report.md both exist.
   CRITICAL: This agent must NEVER invoke itself via Task tool — do the
   summary work directly.
 tools: Bash, Glob, Grep, Read, TodoWrite

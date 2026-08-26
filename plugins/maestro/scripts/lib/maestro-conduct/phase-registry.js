@@ -55,6 +55,9 @@ const PHASES = Object.freeze({
     budgetMin: 10,
     detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
   },
+  // Records what the run learned, between ready and follow_up. Kept in
+  // lock-step with plugins/work step-meta.js BUDGET_MIN.
+  document: { budgetMin: 15 },
   follow_up: {
     budgetMin: 60,
     detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prComments', 'prStatus'],
@@ -63,8 +66,8 @@ const PHASES = Object.freeze({
     budgetMin: 30,
     detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
   },
-  cleanup: { budgetMin: 10 },
   reports: { budgetMin: 10 },
+  cleanup: { budgetMin: 10 },
   complete: { budgetMin: 1 },
 });
 

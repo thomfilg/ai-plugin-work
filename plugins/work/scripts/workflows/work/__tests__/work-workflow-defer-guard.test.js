@@ -148,16 +148,16 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('1. forward transition past DEFER step succeeds when plan was re-run', async () => {
     const ticket = 'TEST-DEFER-001';
     const state = buildState(ticket, 'ready', {
-      deferredSteps: ['follow_up'],
+      deferredSteps: ['document'],
       lastPlanTimestamp: '2026-01-01T00:00:02.000Z',
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
     putWorkState(ticket, state);
 
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.success, `Expected success but got: ${JSON.stringify(result)}`);
     assert.equal(result.from, 'ready');
-    assert.equal(result.to, 'follow_up');
+    assert.equal(result.to, 'document');
 
     cleanupTicket(ticket);
   });
@@ -165,7 +165,7 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('2. forward transition to non-DEFER step succeeds even with stale plan', async () => {
     const ticket = 'TEST-DEFER-002';
     const state = buildState(ticket, 'check', {
-      deferredSteps: ['follow_up', 'cleanup'],
+      deferredSteps: ['document', 'cleanup'],
       lastPlanTimestamp: '2026-01-01T00:00:01.000Z',
       lastTransitionTimestamp: '2026-01-01T00:00:02.000Z',
     });
@@ -190,7 +190,7 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
     const state = buildState(ticket, 'ready');
     putWorkState(ticket, state);
 
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.success, `Expected success but got: ${JSON.stringify(result)}`);
 
     cleanupTicket(ticket);
@@ -199,13 +199,13 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('4. DEFER step resolved to different action after re-plan — passes because plan was re-run', async () => {
     const ticket = 'TEST-DEFER-004';
     const state = buildState(ticket, 'ready', {
-      deferredSteps: ['follow_up'],
+      deferredSteps: ['document'],
       lastPlanTimestamp: '2026-01-01T00:00:05.000Z',
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
     putWorkState(ticket, state);
 
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.success, `Expected success but got: ${JSON.stringify(result)}`);
 
     cleanupTicket(ticket);
@@ -214,17 +214,17 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('5. equal timestamps (lastPlanTimestamp === lastTransitionTimestamp) blocks transition', async () => {
     const ticket = 'TEST-DEFER-005';
     const state = buildState(ticket, 'ready', {
-      deferredSteps: ['follow_up'],
+      deferredSteps: ['document'],
       lastPlanTimestamp: '2026-01-01T00:00:01.000Z',
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
     putWorkState(ticket, state);
 
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.error, 'Expected error but got success');
     assert.ok(result.message.includes('BLOCKED'));
     assert.ok(result.message.includes('DEFER'));
-    assert.ok(result.message.includes('follow_up'));
+    assert.ok(result.message.includes('document'));
     assert.equal(result.gate, 'defer-reeval');
 
     cleanupTicket(ticket);
@@ -233,7 +233,7 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('6. backward transition ignores DEFER guard', async () => {
     const ticket = 'TEST-DEFER-006';
     const state = buildState(ticket, 'ci', {
-      deferredSteps: ['follow_up', 'cleanup'],
+      deferredSteps: ['document', 'cleanup'],
       lastPlanTimestamp: null,
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
@@ -249,17 +249,17 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('7. stale plan (lastPlanTimestamp < lastTransitionTimestamp) blocks with correct error', async () => {
     const ticket = 'TEST-DEFER-007';
     const state = buildState(ticket, 'ready', {
-      deferredSteps: ['follow_up'],
+      deferredSteps: ['document'],
       lastPlanTimestamp: '2026-01-01T00:00:01.000Z',
       lastTransitionTimestamp: '2026-01-01T00:00:05.000Z',
     });
     putWorkState(ticket, state);
 
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.error, 'Expected error but got success');
     assert.ok(result.message.includes('BLOCKED'));
     assert.equal(result.gate, 'defer-reeval');
-    assert.equal(result.deferStep, 'follow_up');
+    assert.equal(result.deferStep, 'document');
     assert.ok(result.hint.includes('plan'));
 
     cleanupTicket(ticket);
@@ -268,13 +268,13 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('8. null lastPlanTimestamp with deferredSteps blocks transition', async () => {
     const ticket = 'TEST-DEFER-008';
     const state = buildState(ticket, 'ready', {
-      deferredSteps: ['follow_up'],
+      deferredSteps: ['document'],
       lastPlanTimestamp: null,
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
     putWorkState(ticket, state);
 
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.error, 'Expected error but got success');
     assert.ok(result.message.includes('BLOCKED'));
     assert.equal(result.gate, 'defer-reeval');
@@ -359,12 +359,12 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('10. failed plan (no timestamp update) blocks transition', async () => {
     const ticket = 'TEST-DEFER-010';
     const state = buildState(ticket, 'ready', {
-      deferredSteps: ['follow_up'],
+      deferredSteps: ['document'],
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
     putWorkState(ticket, state);
 
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.error, 'Expected error but got success');
     assert.equal(result.gate, 'defer-reeval');
     assert.ok(result.message.includes('BLOCKED'));
@@ -375,7 +375,7 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   it('11. backward transition clears deferredSteps and lastPlanTimestamp', async () => {
     const ticket = 'TEST-DEFER-011';
     const state = buildState(ticket, 'ci', {
-      deferredSteps: ['follow_up', 'cleanup'],
+      deferredSteps: ['document', 'cleanup'],
       lastPlanTimestamp: '2026-01-01T00:00:05.000Z',
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
@@ -397,7 +397,7 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
     putWorkState(ticket, state);
 
     const before = new Date().toISOString();
-    const { result } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    const { result } = await runOrchestrator(['transition', ticket, 'document']);
     assert.ok(result.success, `Expected success but got: ${JSON.stringify(result)}`);
 
     const updatedState = getWorkState(ticket);

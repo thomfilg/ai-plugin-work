@@ -1,0 +1,174 @@
+#!/usr/bin/env node
+
+/**
+ * document-note.js — the `document` step's only writer.
+ *
+ * The step asks the agent for one thing: record what this ticket's work
+ * actually taught, where the next run will find it. This CLI is how that
+ * recording becomes evidence — agents cannot hand-write `.document-notes.json`
+ * (protect-artifact-files.js gates it), so every note goes through `record`,
+ * which validates before it stores.
+ *
+ * Usage:
+ *   document-note.js sink    <TICKET>
+ *       Print where this machine expects the note to go: the configured
+ *       memory plugin, or the worktree docs path when there is none.
+ *
+ *   document-note.js record  <TICKET> --summary "<what you learned>"
+ *                            [--tool <rememberTool> | --path <docs file>]
+ *       Append one note. The sink is inferred: a configured memory plugin
+ *       means --tool, no memory plugin means --path.
+ *
+ *   document-note.js verify  <TICKET>
+ *       Exit 0 when the step's evidence holds, 1 with the reason when not.
+ *       The same evaluation the transition gate runs.
+ */
+
+'use strict';
+
+const path = require('node:path');
+
+const { requireTasksBase } = require(path.join(__dirname, '..', 'lib', 'ticket-validation'));
+const { detectMemoryPlugin } = require(path.join(__dirname, '..', 'lib', 'detect-memory-plugin'));
+const { resolveTicketWorktree } = require(
+  path.join(__dirname, '..', 'lib', 'resolve-ticket-worktree')
+);
+const { appendNote, readNotes, evaluateNotes, SINKS, summaryIsSubstantial, MIN_SUMMARY_CHARS } =
+  require(path.join(__dirname, 'lib', 'notes-store'));
+
+const SCRIPT = 'document-note.js';
+
+/** `docs/work-notes/<TICKET>.md` inside the ticket's worktree. */
+function defaultDocsPath(ticket, worktreeRoot) {
+  return worktreeRoot ? path.join(worktreeRoot, 'docs', 'work-notes', `${ticket}.md`) : '';
+}
+
+function parseFlags(argv) {
+  const flags = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const m = /^--([\w-]+)$/.exec(argv[i]);
+    if (m) {
+      flags[m[1]] = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[(i += 1)] : true;
+    }
+  }
+  return flags;
+}
+
+function die(message) {
+  process.stderr.write(`${SCRIPT}: ${message}\n`);
+  process.exit(1);
+}
+
+/** Everything both subcommands need: paths, and which sink this machine wants. */
+function loadContext(ticket) {
+  const tasksDir = path.join(requireTasksBase(), ticket);
+  const memory = detectMemoryPlugin();
+  const worktreeRoot = resolveTicketWorktree(ticket) || null;
+  return { ticket, tasksDir, memory, worktreeRoot };
+}
+
+function cmdSink(ctx) {
+  if (ctx.memory) {
+    process.stdout.write(
+      `memory\t${ctx.memory.name}\t${ctx.memory.rememberTool}\n` +
+        `Save the note by calling ${ctx.memory.rememberTool}, then record it:\n` +
+        `  node ${SCRIPT} record ${ctx.ticket} --tool ${ctx.memory.rememberTool} --summary "..."\n`
+    );
+    return 0;
+  }
+  const docs = defaultDocsPath(ctx.ticket, ctx.worktreeRoot);
+  process.stdout.write(
+    `docs\t${docs || '(worktree unresolved)'}\n` +
+      `No memory plugin is configured. Write the note to the worktree, then record it:\n` +
+      `  node ${SCRIPT} record ${ctx.ticket} --path ${docs || '<file>'} --summary "..."\n`
+  );
+  return 0;
+}
+
+/**
+ * Build the note for this machine's sink. Refuses a --tool note when no memory
+ * plugin is configured and a --path note when one is: the step's contract is
+ * about WHERE the note lives, so letting the agent pick the other sink would
+ * make the requirement advisory.
+ */
+function buildNote(ctx, flags) {
+  const summary = typeof flags.summary === 'string' ? flags.summary : '';
+  if (!summaryIsSubstantial(summary)) {
+    die(
+      `--summary must be at least ${MIN_SUMMARY_CHARS} substantive characters — ` +
+        'say what the work changed, what surprised you, and what the next run should know'
+    );
+  }
+  if (ctx.memory) {
+    const tool = typeof flags.tool === 'string' ? flags.tool : ctx.memory.rememberTool;
+    if (flags.path) {
+      die(
+        `memory plugin "${ctx.memory.name}" is configured — save through ${ctx.memory.rememberTool} ` +
+          'and record with --tool, not --path'
+      );
+    }
+    return { sink: SINKS.memory, memory: ctx.memory.name, tool, summary };
+  }
+  if (flags.tool) {
+    die(
+      'no memory plugin is configured on this machine — write the note to the worktree docs and record it with --path'
+    );
+  }
+  const notePath =
+    typeof flags.path === 'string' ? flags.path : defaultDocsPath(ctx.ticket, ctx.worktreeRoot);
+  if (!notePath) die('--path is required (the ticket worktree could not be resolved)');
+  return { sink: SINKS.docs, path: path.resolve(notePath), summary };
+}
+
+function cmdRecord(ctx, flags) {
+  const note = buildNote(ctx, flags);
+  const notes = appendNote(ctx.tasksDir, ctx.ticket, note);
+  const verdict = evaluateNotes({
+    notes,
+    memoryConfigured: Boolean(ctx.memory),
+    worktreeRoot: ctx.worktreeRoot,
+  });
+  if (!verdict.ok) {
+    process.stderr.write(
+      `${SCRIPT}: note stored but the step is NOT satisfied — ${verdict.reason}\n`
+    );
+    return 1;
+  }
+  process.stdout.write(
+    `Recorded ${note.sink} note for ${ctx.ticket} (${verdict.valid.length} valid note(s)).\n`
+  );
+  return 0;
+}
+
+function cmdVerify(ctx) {
+  const verdict = evaluateNotes({
+    notes: readNotes(ctx.tasksDir),
+    memoryConfigured: Boolean(ctx.memory),
+    worktreeRoot: ctx.worktreeRoot,
+  });
+  if (!verdict.ok) {
+    process.stderr.write(`document step NOT satisfied: ${verdict.reason}\n`);
+    return 1;
+  }
+  process.stdout.write(`document step satisfied: ${verdict.valid.length} valid note(s).\n`);
+  return 0;
+}
+
+function main(argv) {
+  const [command, ticket, ...rest] = argv.slice(2);
+  if (!command || !ticket || ticket.startsWith('-')) {
+    process.stderr.write(`usage: ${SCRIPT} <sink|record|verify> <TICKET> [--summary "..."]\n`);
+    process.exit(2);
+  }
+  const ctx = loadContext(ticket);
+  const flags = parseFlags(rest);
+  if (command === 'sink') process.exit(cmdSink(ctx));
+  if (command === 'record') process.exit(cmdRecord(ctx, flags));
+  if (command === 'verify') process.exit(cmdVerify(ctx));
+  process.stderr.write(`${SCRIPT}: unknown command "${command}"\n`);
+  process.exit(2);
+}
+
+if (require.main === module) main(process.argv);
+
+module.exports = { defaultDocsPath, parseFlags, buildNote };

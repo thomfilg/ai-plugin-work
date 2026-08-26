@@ -46,18 +46,11 @@ const evidenceRequirements = {
     // a fresh README.md would make the check gate permanently unsatisfiable.
     refreshedFiles: ['code-review.check.md', 'tests.check.md', 'completion.check.md'],
   },
-  [STEPS.reports]: {
-    // \*{0,2} around the label: the canonical machine-readable status line
-    // is `**Status:** APPROVED` (bold), but plain `Status:` from older
-    // report writers must keep matching too.
-    requiredApprovals: [
-      { file: 'tests.check.md', pattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i },
-      { file: 'code-review.check.md', pattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i },
-      { file: 'completion.check.md', pattern: /\*{0,2}Status:\*{0,2}\s*(COMPLETE|APPROVED)/i },
-    ],
-    qaReportPattern: /^qa-.*\.check\.md$/,
-    qaApprovalPattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i,
-  },
+  // No [STEPS.reports] block: verifyReports checks the reports step's OWN
+  // artifacts (reports.md via the emit phase's validator, plus cost-report.md)
+  // rather than re-asserting the pre-merge check approvals that used to be
+  // declared here. Those approvals are enforced where they can still change
+  // the outcome — leaving `check`, before the PR exists.
 };
 
 // Artifact patterns per step — consumed by artifact-archival.js on backward
@@ -179,6 +172,16 @@ function buildCommandMap(v) {
     },
     { step: STEPS.cleanup, verify: v.verifyCleanup },
     { step: STEPS.pr, verify: v.verifyPr },
+    {
+      step: STEPS.document,
+      tool: ['Task', 'Agent'],
+      field: 'description',
+      pattern: new RegExp(`^${STEPS.document}\\b`, 'i'),
+    },
+    // Deliberately NOT in softSteps: this verify is the whole point of the
+    // step. It runs pre-merge, so a block costs a re-run of work that should
+    // have happened anyway.
+    { step: STEPS.document, verify: v.verifyDocument },
     { step: STEPS.follow_up, verify: v.verifyFollowUp },
     {
       step: STEPS.ready,
@@ -254,7 +257,13 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       STEPS.ticket, // optional/metadata step
       STEPS.ready,
       STEPS.task_review, // GH-211: advisory per-task review gate (soft — does not block)
-      STEPS.reports, // operational steps -- no code changes to enforce
+      // `reports` is deliberately NOT here any more. It was soft, so
+      // stepVerifyGate skipped it and the step flipped to completed the moment
+      // its Bash heredoc returned — with no reports.md, no learnings.md and no
+      // cost-report.md written, and nothing noticing. Its verify now checks
+      // the step's OWN artifacts (not other steps' evidence), so a block is
+      // always recoverable by writing the file: the post-merge stranding that
+      // justifies softness does not apply to a gate on your own output.
       STEPS.complete, // GH-106: terminal step -- all gates already passed at ci/check/reports
     ]),
     commandMap: buildCommandMap({ ...gateVerifiers, ...stepVerifiers, ...deliveryVerifiers }),
