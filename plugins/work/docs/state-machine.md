@@ -80,6 +80,27 @@ ci          → implement    (CI failed, fix code)
 complete → complete        (retry terminal step on partial failure, GH-106)
 ```
 
+### Check Freshness (what re-opens a passing check)
+
+A passing `check` is re-opened when the code it verified changes: the check-drift
+gate compares HEAD against `checkPassedSha` on forward transitions out of
+post-check steps, and `/check` keys its own cycle on a changes hash
+(`git diff <base>...HEAD -w`).
+
+Both signals EXCLUDE the workflow's own artifacts — the `*.check.md` reports,
+the tasks-dir docs, the state files — via
+`scripts/workflows/lib/workflow-artifact-diff.js`. `TASKS_BASE` may live inside
+the repository, and `commit-and-push.js` stages with `git add -A`, so the
+reports a passing cycle just wrote land in the next commit. Counting them made
+the check invalidate itself: new hash → the reports were purged and every agent
+re-dispatched → they approved again → the next commit swept those reports in
+→ … The check never converged. A re-run now requires a real code change.
+
+Classification is deliberately one-sided: a source file must never be mistaken
+for an artifact (that would mask a real change and let a stale approval stand),
+so ambiguous names count as artifacts only inside `TASKS_BASE`, and when git
+cannot answer, the movement is treated as drift.
+
 ### Visual Graph
 
 ```

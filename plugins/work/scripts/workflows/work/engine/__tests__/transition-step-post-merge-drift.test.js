@@ -77,7 +77,7 @@ function makeWs(ALL_STEPS, currentStep) {
   };
 }
 
-function makeDeps(registry, ws, savedRef) {
+function makeDeps(registry, ws, savedRef, overrides = {}) {
   const { STEPS, ALL_STEPS, STEP_TRANSITIONS } = registry;
   return {
     tp: {
@@ -106,6 +106,10 @@ function makeDeps(registry, ws, savedRef) {
     softSteps: new Set(ALL_STEPS), // skip generic verify gate — drift gate is the subject
     commandMap: [],
     getHeadSha: () => NEW_SHA, // HEAD drifted vs checkPassedSha in every test
+    // Injected rather than shelling out to git: these SHAs do not exist, and
+    // the gate must be exercised on an explicit verdict, not on git's failure.
+    isRealHeadDrift: () => ({ drift: true, artifactOnly: false }),
+    ...overrides,
   };
 }
 
@@ -143,5 +147,55 @@ describe('check-drift gate — post-merge scoping (echo-4465 issue 5)', () => {
     assert.equal(result.to, 'check', 'pre-merge drift must still re-trigger check');
     assert.equal(saved.ws.checkPassedSha, null);
     assert.equal(saved.ws.checkInterruptedStep, 'pr');
+  });
+});
+
+/**
+ * The commit that moves HEAD after a passing check is very often the workflow's
+ * own paperwork: `commit-and-push.js` stages with `git add -A`, so the
+ * `*.check.md` reports the check just wrote (and the tasks-dir docs beside
+ * them, when TASKS_BASE lives inside the repo) ride along. Treating that as
+ * drift rewound the check that had just passed — and the re-run wrote fresh
+ * reports, which the next commit swept in, which rewound it again: /check
+ * never converged. Artifact-only movement must advance, and re-anchor.
+ */
+describe('check-drift gate — artifact-only commits must not rewind check', () => {
+  const artifactOnly = { isRealHeadDrift: () => ({ drift: false, artifactOnly: true }) };
+
+  it('advances pr → ready when the commit carried only workflow artifacts', () => {
+    const registry = makeStepRegistry();
+    const ws = makeWs(registry.ALL_STEPS, 'pr');
+    const saved = {};
+    const result = transitionStep('GH-4465', 'ready', makeDeps(registry, ws, saved, artifactOnly));
+
+    assert.equal(result.error, undefined, JSON.stringify(result));
+    assert.equal(result.to, 'ready', 'a reports-only commit must not re-trigger check');
+    assert.equal(saved.ws.stepStatus.check, 'completed');
+    assert.equal(saved.ws.checkInterruptedStep, undefined);
+  });
+
+  it('re-anchors checkPassedSha to the new HEAD so the same commit is not re-judged', () => {
+    const registry = makeStepRegistry();
+    const ws = makeWs(registry.ALL_STEPS, 'pr');
+    const saved = {};
+    transitionStep('GH-4465', 'ready', makeDeps(registry, ws, saved, artifactOnly));
+
+    assert.equal(saved.ws.checkPassedSha, NEW_SHA);
+  });
+
+  it('a commit carrying real code still redirects to check', () => {
+    const registry = makeStepRegistry();
+    const ws = makeWs(registry.ALL_STEPS, 'pr');
+    const saved = {};
+    const result = transitionStep(
+      'GH-4465',
+      'ready',
+      makeDeps(registry, ws, saved, {
+        isRealHeadDrift: () => ({ drift: true, artifactOnly: false }),
+      })
+    );
+
+    assert.equal(result.to, 'check');
+    assert.equal(saved.ws.checkPassedSha, null);
   });
 });
