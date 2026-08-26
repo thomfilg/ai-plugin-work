@@ -14,11 +14,10 @@ const {
   isCleanupPhase,
 } = require('../cleanup-phase-registry');
 
-test('CLEANUP_PHASE_ORDER lists 8 phases in declared order', () => {
+test('CLEANUP_PHASE_ORDER lists 7 phases in declared order', () => {
   assert.deepEqual(CLEANUP_PHASE_ORDER, [
     'inputs',
     'pr_merged_check',
-    'completion_check',
     'branch_cleanup',
     'tmux_cleanup',
     'state_archive',
@@ -27,9 +26,11 @@ test('CLEANUP_PHASE_ORDER lists 8 phases in declared order', () => {
   ]);
 });
 
-test('completion_check sits between pr_merged_check and branch_cleanup', () => {
-  assert.deepEqual(cleanupNextPhases('pr_merged_check'), ['completion_check']);
-  assert.deepEqual(cleanupNextPhases('completion_check'), ['branch_cleanup']);
+test('pr_merged_check feeds branch_cleanup directly — it is the only gate before teardown', () => {
+  // The completion_check phase between them is gone: cleanup runs post-merge,
+  // where completion evidence cannot change the outcome and could only strand
+  // a shipped ticket. A merged PR is what makes the teardown safe.
+  assert.deepEqual(cleanupNextPhases('pr_merged_check'), ['branch_cleanup']);
 });
 
 test('initial is inputs, terminal is done', () => {

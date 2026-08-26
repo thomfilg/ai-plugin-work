@@ -286,11 +286,26 @@ function defaultTmuxHasSession(ticketId) {
  * @param {StepDeps} deps
  */
 function verifyCleanup(deps, ticketId) {
-  // tmux dev session must be PROVABLY gone. Only a proven-gone (false) result
-  // passes; `true` (still up) and `null` (indeterminate: ENOENT / timeout /
-  // permission / non-1 status) both fail closed.
+  // 1) tmux dev session must be PROVABLY gone. Only a proven-gone (false)
+  // result passes; `true` (still up) and `null` (indeterminate: ENOENT /
+  // timeout / permission / non-1 status) both fail closed.
   const tmuxProbe = deps.tmuxHasSession || defaultTmuxHasSession;
-  return tmuxProbe(ticketId) === false;
+  if (tmuxProbe(ticketId) !== false) return false;
+
+  // 2) the step's OWN record must exist and be well-formed. Without this the
+  // gate passed while the runner's other two jobs — deleting the merged branch
+  // and writing cleanup-summary.md — were simply not done, which is the exact
+  // shape of the reports defect: a runner with its own shape gate, and a
+  // step-level gate that never consults it. Judged by the state_archive
+  // phase's OWN validator, so the two cannot disagree.
+  try {
+    const { validate } = require(
+      path.join(deps.workRoot, '..', 'work-cleanup', 'lib', 'phases', 'state_archive')
+    );
+    return validate({ tasksDir: ticketDir(deps, ticketId) }).ok;
+  } catch {
+    return false;
+  }
 }
 
 /** @param {StepDeps} deps */

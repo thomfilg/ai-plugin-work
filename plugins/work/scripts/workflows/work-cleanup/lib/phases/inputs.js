@@ -87,7 +87,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# cleanup-next — Phase 1 of 8: INPUTS',
+    '# cleanup-next — Phase 1 of 7: INPUTS',
     `Ticket: ${ctx.ticket}`,
     '',
     'I record the current branch + PR number into `cleanup-context.json` for downstream phases.',

@@ -6,7 +6,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { isCompletionComplete } = require('../lib/completion-evidence');
 const pr_merged_check = require('../lib/phases/pr_merged_check');
 const branch_cleanup = require('../lib/phases/branch_cleanup');
 const tmux_cleanup = require('../lib/phases/tmux_cleanup');
@@ -63,10 +62,9 @@ test('pr_merged_check HARD-BLOCKS when state=OPEN (not WAITs)', () => {
   }
 });
 
-test('branch_cleanup blocks without sentinel (completion evidence present)', () => {
+test('branch_cleanup blocks without sentinel', () => {
   const { root, tasksDir } = makeTasksDir({
     'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
-    'completion.check.md': '**Status:** COMPLETE\n',
   });
   const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
   assert.equal(r.ok, false);
@@ -74,10 +72,9 @@ test('branch_cleanup blocks without sentinel (completion evidence present)', () 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('branch_cleanup passes with sentinel present AND completion evidence', () => {
+test('branch_cleanup passes with sentinel present', () => {
   const { root, tasksDir } = makeTasksDir({
     'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
-    'completion.check.md': '**Status:** COMPLETE\n',
     '.branch-cleaned': 'ok',
   });
   const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
@@ -85,37 +82,9 @@ test('branch_cleanup passes with sentinel present AND completion evidence', () =
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-// Resume-skip case: persisted state from the old (no completion_check) flow
-// resumes straight at branch_cleanup with the .branch-cleaned sentinel already
-// present. The completion gate must still fail closed BEFORE the sentinel check.
-test('branch_cleanup fails closed when completion.check.md is ABSENT even if sentinel exists', () => {
-  const { root, tasksDir } = makeTasksDir({
-    'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
-    '.branch-cleaned': 'ok',
-  });
-  const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
-  assert.ok(r.errors[0].includes('re-run the check step'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('branch_cleanup fails closed when completion.check.md is NEEDS_WORK (sentinel present)', () => {
-  const { root, tasksDir } = makeTasksDir({
-    'cleanup-context.json': JSON.stringify({ branch: 'feature/x' }),
-    'completion.check.md': '**Status:** NEEDS_WORK\n',
-    '.branch-cleaned': 'ok',
-  });
-  const r = branch_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
 test('tmux_cleanup auto-passes when no sessions match ticket', () => {
   const original = tmux_cleanup.listSessionsMatching;
-  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
+  const { root, tasksDir } = makeTasksDir();
   tmux_cleanup.listSessionsMatching = () => [];
   try {
     const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
@@ -129,7 +98,7 @@ test('tmux_cleanup auto-passes when no sessions match ticket', () => {
 
 test('tmux_cleanup blocks when matching sessions exist without sentinel', () => {
   const original = tmux_cleanup.listSessionsMatching;
-  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
+  const { root, tasksDir } = makeTasksDir();
   tmux_cleanup.listSessionsMatching = () => ['ECHO-7777-dev', 'ECHO-7777-listen'];
   try {
     const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
@@ -143,7 +112,6 @@ test('tmux_cleanup blocks when matching sessions exist without sentinel', () => 
 
 test('state_archive blocks on missing required sections', () => {
   const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': '**Status:** COMPLETE\n',
     'cleanup-summary.md': '## Branch\nx\nStatus: DONE\n',
   });
   const r = state_archive.validate({ tasksDir });
@@ -164,7 +132,6 @@ test('state_archive passes when all sections + Status present', () => {
     'Status: PARTIAL',
   ].join('\n');
   const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': '**Status:** COMPLETE\n',
     'cleanup-summary.md': md,
   });
   const r = state_archive.validate({ tasksDir });
@@ -172,212 +139,42 @@ test('state_archive passes when all sections + Status present', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-// Resume-past-gate (GH-283): persisted cleanup state saved at a phase LATER
-// than branch_cleanup under the old (no completion_check) order resumes
-// straight into that destructive phase, skipping completion_check entirely.
-// Every post-gate destructive phase must re-assert completion evidence and
-// fail closed when it is absent or non-COMPLETE — mirroring the branch_cleanup
-// resume-skip guard so the persisted-state bypass is closed everywhere.
-test('tmux_cleanup fails closed when completion.check.md is ABSENT (resume past gate)', () => {
-  const original = tmux_cleanup.listSessionsMatching;
+test('memorize passes when no memory plugin is detected', () => {
   const { root, tasksDir } = makeTasksDir();
-  // Even on the no-matching-sessions auto-pass path, the completion gate must
-  // block first so a stale-state resume cannot finalize tmux teardown.
-  tmux_cleanup.listSessionsMatching = () => [];
-  try {
-    const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
-    assert.equal(r.ok, false);
-    assert.ok(r.errors[0].includes('completion.check.md'));
-    assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
-    assert.ok(r.errors[0].includes('re-run the check step'));
-  } finally {
-    tmux_cleanup.listSessionsMatching = original;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('tmux_cleanup fails closed when completion.check.md is NEEDS_WORK (resume past gate)', () => {
-  const original = tmux_cleanup.listSessionsMatching;
-  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** NEEDS_WORK\n' });
-  tmux_cleanup.listSessionsMatching = () => ['ECHO-7777-dev'];
-  try {
-    const r = tmux_cleanup.validate({ tasksDir, ticket: 'ECHO-7777' });
-    assert.equal(r.ok, false);
-    assert.ok(r.errors[0].includes('completion.check.md'));
-  } finally {
-    tmux_cleanup.listSessionsMatching = original;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('state_archive fails closed when completion.check.md is ABSENT (resume past gate)', () => {
-  // A fully-populated cleanup-summary.md would otherwise pass; the completion
-  // gate must still block a stale-state resume that skipped completion_check.
-  const md = [
-    '## Branch',
-    'deleted feature/x',
-    '## Tmux sessions',
-    'killed ECHO-7777-dev',
-    '## Worktree',
-    'removed',
-    '',
-    'Status: DONE',
-  ].join('\n');
-  const { root, tasksDir } = makeTasksDir({ 'cleanup-summary.md': md });
-  const r = state_archive.validate({ tasksDir });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-// Resume-past-gate must extend to EVERY phase after completion_check —
-// memorize and done included. A rogue saved state pointing at memorize/done
-// under the old (no completion_check) order resumes straight into the tail of
-// the pipeline; each phase re-asserts completion evidence and fails closed.
-test('memorize fails closed when completion.check.md is ABSENT even if sentinel exists (resume past gate)', () => {
-  const { root, tasksDir } = makeTasksDir();
-  // Old-flow resume: the memorized sentinel is already present, so only the
-  // completion gate stands between a rogue state and a finalized cleanup.
-  fs.writeFileSync(path.join(tasksDir, '.cleanup-memorized'), 'ok');
-  const r = memorize.validate({
-    tasksDir,
-    ticket: 'ECHO-7777',
-    memory: { name: 'cortex', rememberTool: 'remember' },
-  });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('memorize fails closed with NO memory plugin when evidence is absent (resume past gate)', () => {
-  const { root, tasksDir } = makeTasksDir();
-  // No memory plugin would normally auto-pass; the completion gate must block
-  // first so a rogue resume cannot finalize memorize without evidence.
-  const r = memorize.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('memorize passes (no memory plugin) when completion evidence is present', () => {
-  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
   const r = memorize.validate({ tasksDir, ticket: 'ECHO-7777' });
   assert.equal(r.ok, true);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('done fails closed when completion.check.md is ABSENT (rogue resume-at-done)', () => {
+test('done passes', () => {
   const { root, tasksDir } = makeTasksDir();
-  const r = done.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
-  assert.ok(r.errors[0].includes('re-run the check step'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('done fails closed when completion.check.md is NEEDS_WORK (rogue resume-at-done)', () => {
-  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** NEEDS_WORK\n' });
-  const r = done.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('done passes when completion evidence is present', () => {
-  const { root, tasksDir } = makeTasksDir({ 'completion.check.md': '**Status:** COMPLETE\n' });
   const r = done.validate({ tasksDir, ticket: 'ECHO-7777' });
   assert.equal(r.ok, true);
   assert.ok(r.summary.includes('terminal'));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-// Resolve the not-yet-authored module through a try/catch so an absent module
-// surfaces as a per-test assertion failure (a behavior gap: "module not
-// authored yet") rather than a load-time crash whose raw "Cannot find module"
-// string the RED recorder treats as a structurally broken test.
-function loadCompletionCheck() {
-  let mod = null;
+// The completion-evidence gate (GH-283) is gone from every phase here. It ran
+// POST-MERGE, where the evidence it demanded could not change the outcome — it
+// cannot un-merge the PR — and could only strand a shipped ticket: one
+// interrupted completion-check dispatch left a merged ticket with an
+// undeletable branch. `pr_merged_check` is what bounds the destructive phases
+// now, and it is the right bound. Completion is still enforced leaving `check`.
+test('every destructive phase works with NO completion.check.md at all', () => {
+  const { root, tasksDir } = makeTasksDir({
+    '.branch-cleaned': '',
+    '.tmux-cleaned': '',
+    'cleanup-summary.md': '## Branch\nx\n## Tmux sessions\nx\n## Worktree\nx\nStatus: DONE\n',
+    '.cleanup-memorized': '',
+  });
   try {
-    mod = require('../lib/phases/completion_check');
-  } catch {
-    mod = null;
+    assert.ok(!fs.existsSync(path.join(tasksDir, 'completion.check.md')));
+    const ctx = { ticket: 'T-1', tasksDir };
+    assert.equal(branch_cleanup.validate(ctx).ok, true, 'branch_cleanup');
+    assert.equal(state_archive.validate(ctx).ok, true, 'state_archive');
+    assert.equal(memorize.validate(ctx).ok, true, 'memorize');
+    assert.equal(done.validate(ctx).ok, true, 'done');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
-  assert.ok(mod, 'completion_check module is authored and exports validate');
-  return mod;
-}
-
-test('completion_check hard-blocks when completion.check.md is absent', () => {
-  const completion_check = loadCompletionCheck();
-  const { root, tasksDir } = makeTasksDir();
-  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('completion.check.md'));
-  assert.ok(r.errors[0].includes('re-run the check step'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('completion_check hard-blocks when status line is NEEDS_WORK', () => {
-  const completion_check = loadCompletionCheck();
-  const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': '**Status:** NEEDS_WORK\n',
-  });
-  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('completion_check hard-blocks when status line is the APPROVED alias', () => {
-  const completion_check = loadCompletionCheck();
-  const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': '**Status:** APPROVED\n',
-  });
-  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, false);
-  assert.ok(r.errors[0].includes('**Status:** COMPLETE'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('completion_check passes when the canonical **Status:** COMPLETE line is present', () => {
-  const completion_check = loadCompletionCheck();
-  const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': '**Status:** COMPLETE\n',
-  });
-  const r = completion_check.validate({ tasksDir, ticket: 'ECHO-7777' });
-  assert.equal(r.ok, true);
-  assert.ok(r.summary.includes('**Status:** COMPLETE'));
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('isCompletionComplete returns true for **Status:** COMPLETE', () => {
-  const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': 'preamble\n**Status:** COMPLETE\ntrailing\n',
-  });
-  assert.equal(isCompletionComplete(tasksDir), true);
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('isCompletionComplete fails closed when completion.check.md is absent', () => {
-  const { root, tasksDir } = makeTasksDir();
-  assert.equal(isCompletionComplete(tasksDir), false);
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('isCompletionComplete returns false for NEEDS_WORK', () => {
-  const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': '**Status:** NEEDS_WORK\n',
-  });
-  assert.equal(isCompletionComplete(tasksDir), false);
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('isCompletionComplete rejects the APPROVED alias', () => {
-  const { root, tasksDir } = makeTasksDir({
-    'completion.check.md': '**Status:** APPROVED\n',
-  });
-  assert.equal(isCompletionComplete(tasksDir), false);
-  fs.rmSync(root, { recursive: true, force: true });
 });

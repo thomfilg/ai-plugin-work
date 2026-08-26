@@ -5,8 +5,10 @@
  * reach cleanup at all in those states — if it did, something bypassed the
  * ci gate and we refuse to proceed with destructive cleanup actions.
  *
- * On success this phase advances to the `completion_check` gate (see the
- * `next` edge in register()).
+ * On success this phase advances straight to `branch_cleanup`. It is the ONLY
+ * gate standing between the runner and its destructive phases, which is the
+ * right shape: a merged PR is what makes deleting its branch safe, and cleanup
+ * cannot un-merge anything.
  */
 
 'use strict';
@@ -72,7 +74,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# cleanup-next — Phase 2 of 8: PR MERGED CHECK',
+    '# cleanup-next — Phase 2 of 7: PR MERGED CHECK',
     `Ticket: ${ctx.ticket}`,
     '',
     'Defensive double-check: cleanup must only run on MERGED PRs. If this blocks, your ci step exited prematurely (likely missing wait_merge).',
@@ -82,7 +84,7 @@ function instructions(ctx) {
 
 module.exports = function register(r) {
   r(CLEANUP_PHASES.pr_merged_check, {
-    next: CLEANUP_PHASES.completion_check,
+    next: CLEANUP_PHASES.branch_cleanup,
     validate,
     instructions,
   });
