@@ -44,13 +44,17 @@ function loadEnvrcFromDirs(candidateDirs) {
     seen.add(envrcPath);
     if (!fs.existsSync(envrcPath)) continue;
 
-    // The path is a positional argument ($1), never spliced into the script
-    // text — envrcPath is derived from caller-supplied directories.
-    const result = spawnSync(
-      'bash',
-      ['-c', 'set -a; . "$1" >/dev/null 2>&1; env -0', 'bash', envrcPath],
-      { encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024 }
-    );
+    // envrcPath is derived from caller-supplied directories, so it reaches bash
+    // through the child's environment rather than the command line: the script
+    // text is a constant and bash reads the path from a quoted variable, so
+    // nothing in the path can be taken as shell syntax. The sentinel is skipped
+    // in the merge below so it never leaks into this process's env.
+    const result = spawnSync('bash', ['-c', 'set -a; . "$__ENVRC_PATH" >/dev/null 2>&1; env -0'], {
+      encoding: 'utf-8',
+      timeout: 10000,
+      maxBuffer: 5 * 1024 * 1024,
+      env: { ...process.env, __ENVRC_PATH: envrcPath },
+    });
 
     if (result.status !== 0 || !result.stdout) continue;
 
@@ -59,6 +63,7 @@ function loadEnvrcFromDirs(candidateDirs) {
       const eq = entry.indexOf('=');
       if (eq <= 0) continue;
       const key = entry.slice(0, eq);
+      if (key === '__ENVRC_PATH') continue; // the sentinel we passed in, not a .envrc var
       const value = entry.slice(eq + 1);
       if (process.env[key] === undefined) {
         process.env[key] = value;

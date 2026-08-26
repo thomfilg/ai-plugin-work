@@ -3383,7 +3383,6 @@ describe('enforce-step-workflow', () => {
     const FAKE_GIT_DIR = path.join(os.tmpdir(), `fake-git-commit-${process.pid}`);
     const FAKE_GIT_PATH = path.join(FAKE_GIT_DIR, 'git');
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-commit-${process.pid}`);
-    const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
     const ORCHESTRATOR_PATH = path.join(
       __dirname,
       '..',
