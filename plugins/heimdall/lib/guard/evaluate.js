@@ -65,10 +65,35 @@ function codexUnlockInstruction(phrase, opts) {
   return msg;
 }
 
+/**
+ * Everything the user can act on: the cross-project origin note, the
+ * coarse-fallback hand-off, and the runtime's unlock instruction.
+ *
+ * Only the USER typing the phrase unlocks (see transcript.js): tool output —
+ * including this very message echoed back as a tool_result — is never trusted,
+ * so an agent cannot self-unlock by emitting the phrase.
+ */
+function unlockSection(entry, origin, opts) {
+  let msg = '';
+  if (origin) {
+    msg += `This lock comes from your shared (cross-project) heimdall store, not this project.\n`;
+  }
+  // The coarse-fallback lane already explained why the match is imprecise, so
+  // the unlock reads as the second step it is. No trailing newline — the
+  // instruction below opens with one.
+  if (opts.advice) {
+    msg += `\nONLY IF the re-issued command is still blocked is the write real — then:`;
+  }
+  const phrase = entry.unlockPhrase || `edit ${path.basename(entry.dir)}`;
+  return (
+    msg +
+    (opts.runtime === 'codex'
+      ? codexUnlockInstruction(phrase, opts)
+      : claudeUnlockInstruction(phrase))
+  );
+}
+
 function blockMessage(reason, entry, matchContext, opts = {}) {
-  // Only the USER typing the phrase unlocks (see transcript.js): tool output —
-  // including this very message echoed back as a tool_result — is never trusted,
-  // so an agent cannot self-unlock by emitting the phrase.
   // Surface a cross-project origin: when the blocking lock came from the shared
   // store, the user may not expect it (it is not this project's own config). The
   // literal `(shared)` token is the contract asserted by the cross-project e2e.
@@ -76,24 +101,10 @@ function blockMessage(reason, entry, matchContext, opts = {}) {
   const origin = entry && entry.kind === 'shared' ? ' (shared)' : '';
   let msg = `BLOCKED (heimdall)${origin}: ${reason}\n`;
   // The coarse-fallback lane leads with WHY the match is imprecise and how to
-  // re-issue the command, so the unlock instruction below reads as the second
-  // step it is. Every other lane matched an operand exactly — no advice, and
-  // its message stays byte-identical.
+  // re-issue the command. Every other lane matched an operand exactly — no
+  // advice, and its message stays byte-identical.
   if (opts.advice) msg += opts.advice;
-  if (entry) {
-    if (origin) {
-      msg += `This lock comes from your shared (cross-project) heimdall store, not this project.\n`;
-    }
-    if (opts.advice) {
-      // No trailing newline: the unlock instruction below opens with one.
-      msg += `\nONLY IF the re-issued command is still blocked is the write real — then:`;
-    }
-    const phrase = entry.unlockPhrase || `edit ${path.basename(entry.dir)}`;
-    msg +=
-      opts.runtime === 'codex'
-        ? codexUnlockInstruction(phrase, opts)
-        : claudeUnlockInstruction(phrase);
-  }
+  if (entry) msg += unlockSection(entry, origin, opts);
   if (matchContext) msg += `MATCH: ${matchContext}\n`;
   return msg;
 }
