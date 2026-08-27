@@ -1373,29 +1373,34 @@ describe('enforce-step-workflow', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Patch 14: ready as soft step
+  // ready is NO LONGER a soft step (was Patch 14)
+  //
+  // Soft plus no verify meant nothing checked the one thing `ready` does:
+  // un-draft the PR. A still-draft PR walked on to `ci`, whose gate refuses
+  // anything not MERGED — and GitHub will not merge a draft. The run failed
+  // two steps later with a correct refusal that blamed the wrong step.
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('ready soft step (Patch 14)', () => {
-    it('allows transition from ready without evidence', async () => {
-      writeWorkState(makeStepStatus('ready', WORK_STEPS));
-      // No evidence written for ready
-
-      const { code } = await runHook({
-        tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work.workflow.js transition ${TEST_TICKET} ci` },
-      });
-      // Soft step → should allow transition without evidence
-      assert.equal(code, 0);
-    });
-
-    it('source confirms ready is in softSteps set', () => {
-      // After OCP refactor, work workflow definition lives in its own file
+  describe('ready is gated on its own output', () => {
+    it('source confirms ready is NOT in softSteps set', () => {
       const defPath = path.join(__dirname, '..', '..', 'work', 'workflow-definition.js');
       const defSource = fs.readFileSync(defPath, 'utf-8');
       const softStepsMatch = defSource.match(/softSteps:\s*new Set\(\[([^\]]+)\]\)/);
       assert.ok(softStepsMatch, 'Should have softSteps declaration');
-      assert.ok(softStepsMatch[1].includes('STEPS.ready'), 'softSteps should include STEPS.ready');
+      assert.ok(
+        !softStepsMatch[1].includes('STEPS.ready'),
+        'softSteps must NOT include STEPS.ready — its verify is what proves the PR is not a draft'
+      );
+    });
+
+    it('declares a verify for ready, so un-softening did not leave it unchecked', () => {
+      const defPath = path.join(__dirname, '..', '..', 'work', 'workflow-definition.js');
+      const defSource = fs.readFileSync(defPath, 'utf-8');
+      assert.match(
+        defSource,
+        /\{\s*step:\s*STEPS\.ready,\s*verify:\s*v\.verifyReady\s*\}/,
+        'ready needs a verify entry — soft-with-no-verify is the state this replaced'
+      );
     });
   });
 
@@ -4452,31 +4457,47 @@ describe('enforce-step-workflow', () => {
       'work.workflow.js'
     );
 
-    it('allows transition from ready to follow_up (soft step, no evidence needed)', async () => {
+    // `ready` used to be soft, so these passed with no evidence at all. It is
+    // gated now, which puts it under Rule 2 like every other non-soft step —
+    // so they supply evidence, the same way the follow_up cases below do. What
+    // they are actually about is unchanged: the HOOK checks evidence, and
+    // anti-skip remains the orchestrator's concern, not the hook's.
+    const readyEvidence = () =>
+      writeEvidence({
+        ready: { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+      });
+
+    it('blocks transition from ready with NO evidence (it is no longer soft)', async () => {
       writeWorkState(makeStepStatus('ready', WORK_STEPS));
 
       const { code } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} follow_up` },
       });
-      assert.equal(code, 0, 'ready is soft step — transition should be allowed without evidence');
+      assert.equal(code, 2, 'ready is not soft — Rule 2 applies and there is no evidence');
     });
 
-    it('allows transition from ready to ci (soft step bypasses evidence check)', async () => {
+    it('allows transition from ready to follow_up with evidence', async () => {
       writeWorkState(makeStepStatus('ready', WORK_STEPS));
+      readyEvidence();
+
+      const { code } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} follow_up` },
+      });
+      assert.equal(code, 0, 'evidence for ready satisfies Rule 2');
+    });
+
+    it('allows transition from ready to ci with evidence (anti-skip is orchestrator concern)', async () => {
+      writeWorkState(makeStepStatus('ready', WORK_STEPS));
+      readyEvidence();
 
       const { code } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} ci` },
       });
-      // ready IS a soft step, so Rule 2 is skipped entirely (no evidence check).
-      // Anti-skip enforcement happens at the orchestrator level, not the hook level.
       // The hook only enforces evidence gating, not transition graph validity.
-      assert.equal(
-        code,
-        0,
-        'Soft step bypasses evidence check — anti-skip is orchestrator concern'
-      );
+      assert.equal(code, 0, 'Rule 2 satisfied — anti-skip is the orchestrator concern');
     });
   });
 
@@ -4591,7 +4612,7 @@ describe('enforce-step-workflow', () => {
     });
   });
 
-  describe('cleanup -> reports transition (#105)', () => {
+  describe('cleanup -> complete transition (#105)', () => {
     const ORCHESTRATOR_PATH = path.join(
       __dirname,
       '..',
@@ -4609,35 +4630,32 @@ describe('enforce-step-workflow', () => {
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} reports` },
+        // `complete`, not `reports`: reports now runs BEFORE cleanup, so
+        // cleanup's forward edge is the terminal step.
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} complete` },
       });
       assert.equal(code, 0, 'Should allow forward transition with cleanup evidence');
     });
 
     it('allows transition when no tmux session exists in test environment', async () => {
       writeWorkState(makeStepStatus('cleanup', WORK_STEPS));
-      // No step evidence — cleanup relies on verifyCleanup instead.
-      // GH-283 R8 strengthened verifyCleanup: tmux-absence alone is no longer
-      // sufficient; the completion_check phase must have written
-      // `completion.check.md` carrying the canonical `**Status:** COMPLETE`
-      // line. Provide that marker so verify passes on tmux-absence.
+      // No step evidence — cleanup relies on verifyCleanup instead. That verify
+      // no longer reads completion.check.md (someone else's pre-merge artifact,
+      // which post-merge could only strand a shipped ticket). It reads
+      // cleanup's OWN record, so that is what the test provides.
       fs.writeFileSync(
-        path.join(TASKS_DIR, 'completion.check.md'),
-        '# Completion Check\n\n**Status:** COMPLETE\n'
+        path.join(TASKS_DIR, 'cleanup-summary.md'),
+        '## Branch\nx\n## Tmux sessions\nx\n## Worktree\nx\nStatus: DONE\n'
       );
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} reports` },
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} complete` },
       });
-      // verifyCleanup requires BOTH tmux-session absence AND completion
-      // evidence. In the test environment no tmux session exists for this
-      // ticket and the completion marker is present, so verify passes.
-      assert.equal(
-        code,
-        0,
-        'Should pass via verify — no tmux session + completion evidence present'
-      );
+      // verifyCleanup requires BOTH tmux-session absence AND cleanup's own
+      // record. No tmux session exists for this ticket in the test
+      // environment, and cleanup-summary.md is present, so verify passes.
+      assert.equal(code, 0, 'Should pass via verify — no tmux session + cleanup record present');
     });
   });
 

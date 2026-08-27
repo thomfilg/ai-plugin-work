@@ -1,9 +1,9 @@
 /**
  * advisory-step-mapping.test.js
  *
- * A Task/Agent `description` is a human-facing label, not a command. The five
- * label mappings in the /work commandMap (ready, ci, reports, cleanup,
- * complete) are therefore declared `advisory`: they attribute a call to a step
+ * A Task/Agent `description` is a human-facing label, not a command. The label
+ * mappings in the /work commandMap (ready, ci, reports, cleanup, complete,
+ * document) are therefore declared `advisory`: they attribute a call to a step
  * only while that step is in progress, and they never block.
  *
  * The regression they encode: dispatching the brief-writer with the
@@ -96,6 +96,11 @@ describe('advisory description mappings', () => {
       'Report on bundle size',
       'Cleanup dead imports',
       'CI logs — read only',
+      // `document` shipped without `advisory: true`, so this exact label
+      // blocked a spec-writer dispatch with "step document is not
+      // in_progress" — the regression this whole file exists to prevent,
+      // reintroduced by a new step rather than by editing an old one.
+      'Document the spec decisions',
     ]) {
       assert.equal(rules.checkWorkflowPre(workflow, dispatch(description)), null, description);
     }

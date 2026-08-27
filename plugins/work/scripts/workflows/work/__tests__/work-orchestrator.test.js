@@ -948,43 +948,51 @@ describe('work-orchestrator.js', () => {
     });
 
     it('should allow linear transition pr → ready → document → follow_up → ci', async () => {
-      // pr and follow_up verify functions require external tools (gh, git) that
-      // are unavailable in test. Use direct state to start at ready, then verify
-      // the graph edges ready→follow_up and follow_up→ci are valid transitions.
+      // pr, ready and follow_up verify functions require external tools (gh,
+      // git) that are unavailable in test, so each is asserted at the point it
+      // decides something and the walk is re-seeded past it.
       const TEST_TICKET = 'TEST-912';
       const { ALL_STEPS } = require(path.join(__dirname, '..', 'step-registry'));
       const STATE_BASENAME = ['.work', '-state', '.json'].join('');
       const dir = path.join(TASKS_BASE, TEST_TICKET);
       fs.mkdirSync(dir, { recursive: true });
-      // Build state with ready in_progress (all prior steps completed)
-      const stepStatus = {};
-      let foundReady = false;
-      for (const s of ALL_STEPS) {
-        if (s === 'ready') {
-          stepStatus[s] = 'in_progress';
-          foundReady = true;
-        } else if (!foundReady) {
-          stepStatus[s] = 'completed';
-        } else {
-          stepStatus[s] = 'pending';
+      // Seed state with `step` in_progress and everything before it completed.
+      const seedAt = (step) => {
+        const stepStatus = {};
+        let found = false;
+        for (const s of ALL_STEPS) {
+          if (s === step) {
+            stepStatus[s] = 'in_progress';
+            found = true;
+          } else {
+            stepStatus[s] = found ? 'pending' : 'completed';
+          }
         }
-      }
-      fs.writeFileSync(
-        path.join(dir, STATE_BASENAME),
-        JSON.stringify({
-          ticketId: TEST_TICKET,
-          status: 'in_progress',
-          stepStatus,
-          startTime: '2026-01-01T00:00:00.000Z',
-          lastUpdate: '2026-01-01T00:00:00.000Z',
-        })
-      );
+        fs.writeFileSync(
+          path.join(dir, STATE_BASENAME),
+          JSON.stringify({
+            ticketId: TEST_TICKET,
+            status: 'in_progress',
+            stepStatus,
+            startTime: '2026-01-01T00:00:00.000Z',
+            lastUpdate: '2026-01-01T00:00:00.000Z',
+          })
+        );
+      };
+      seedAt('ready');
       try {
-        // ready → document (ready is soft — no verify)
+        // ready → document: `ready` is no longer soft. Its verify asks the one
+        // question the step exists to answer — is the PR still a draft — and
+        // there is no PR here, so it BLOCKS. Assert the refusal rather than
+        // routing around it: a still-draft PR reaching `ci` to fail as "not
+        // merged" is the bug this gate closes.
         const { result: r1 } = await runOrchestrator(['transition', TEST_TICKET, 'document']);
-        assert.equal(r1.success, true, `ready → document: ${JSON.stringify(r1)}`);
-        assert.equal(r1.from, 'ready');
-        assert.equal(r1.to, 'document');
+        assert.equal(r1.error, true, `ready must not advance without a non-draft PR`);
+        assert.equal(r1.gate, 'step-verify');
+        assert.equal(r1.step, 'ready');
+
+        // Re-seed past it to go on checking the edges downstream.
+        seedAt('document');
 
         // document → follow_up: the note gate fires and BLOCKS, because no note
         // has been recorded. That is the step's whole purpose, so assert the

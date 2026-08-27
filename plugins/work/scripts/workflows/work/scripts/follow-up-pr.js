@@ -106,7 +106,8 @@ const { ghExec } = require('./gh-exec.js');
 
 function getPRInfo(prNumber) {
   const prArg = prNumber ? `${prNumber}` : '';
-  const fields = 'number,title,url,headRefName,baseRefName,mergeable,mergeStateStatus,state';
+  const fields =
+    'number,title,url,headRefName,baseRefName,mergeable,mergeStateStatus,state,isDraft';
   const data = ghExec(`pr view ${prArg} --json ${fields}`);
   return {
     number: data.number,
@@ -117,6 +118,7 @@ function getPRInfo(prNumber) {
     mergeable: data.mergeable,
     mergeStateStatus: data.mergeStateStatus,
     state: data.state,
+    isDraft: data.isDraft,
   };
 }
 

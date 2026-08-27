@@ -193,6 +193,7 @@ module.exports = {
   MIN_DOC_CHARS,
   SINKS,
   allowedRoots,
+  docFileHolds,
   notesPath,
   readNotes,
   appendNote,

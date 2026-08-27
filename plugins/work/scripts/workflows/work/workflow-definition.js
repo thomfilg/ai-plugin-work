@@ -208,6 +208,7 @@ function buildCommandMap(v) {
       step: STEPS.document,
       tool: ['Task', 'Agent'],
       field: 'description',
+      advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.document}\\b`, 'i'),
     },
     // Deliberately NOT in softSteps: this verify is the whole point of the
@@ -222,6 +223,10 @@ function buildCommandMap(v) {
       advisory: true, // label-only match — attributes, never blocks (see note above)
       pattern: new RegExp(`^${STEPS.ready}\\b`, 'i'),
     },
+    // Was soft with no verify at all — nothing confirmed the PR got un-drafted.
+    // Checks the step's OWN output, pre-merge, so a block is cleared by
+    // `gh pr ready` rather than by re-running another step's check.
+    { step: STEPS.ready, verify: v.verifyReady },
     {
       step: STEPS.ci,
       tool: ['Task', 'Agent'],
@@ -291,7 +296,11 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     // Soft steps allow transition without evidence -- these are optional or metadata-only steps.
     softSteps: new Set([
       STEPS.ticket, // optional/metadata step
-      STEPS.ready,
+      // `ready` is deliberately NOT here any more. Soft plus no verify meant
+      // the one thing it does — un-draft the PR — was never checked, and a
+      // still-draft PR walked to `ci` to fail there as "not merged": a correct
+      // refusal blaming the wrong step. GitHub will not merge a draft, so this
+      // was never really optional, only unenforced.
       STEPS.task_review, // GH-211: advisory per-task review gate (soft — does not block)
       // `reports` is deliberately NOT here any more. It was soft, so
       // stepVerifyGate skipped it and the step flipped to completed the moment

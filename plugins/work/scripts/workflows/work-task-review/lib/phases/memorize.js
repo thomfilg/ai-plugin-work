@@ -4,46 +4,27 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
+const { validateMemorizePhase, memorizeInstructions } = require('../../../lib/memory-record');
+
+/** This phase's slice of the ticket's memory record. */
+const SCOPE = 'task_review';
 
 const { TASK_REVIEW_PHASES } = require('../../task-review-phase-registry');
 
-const SENTINEL = '.task-review-memorized';
-
 function validate(ctx) {
-  if (!ctx.memory) return { ok: true, summary: 'no memory plugin detected — skipping' };
-  const p = path.join(ctx.tasksDir, SENTINEL);
-  if (!fs.existsSync(p)) {
-    return {
-      ok: false,
-      errors: [
-        `Memory plugin "${ctx.memory.name}" available but \`${SENTINEL}\` missing. Call \`${ctx.memory.rememberTool}\` with the task-review verdict, then \`touch ${p}\`.`,
-      ],
-    };
-  }
-  return { ok: true, summary: `memorized via ${ctx.memory.name}` };
+  return validateMemorizePhase({ scope: SCOPE, ctx });
 }
 
 function instructions(ctx) {
-  if (!ctx.memory) {
-    return [
-      '# task-review-next — Phase 7 of 8: MEMORIZE',
-      '',
-      'No memory plugin — auto-advance.',
-      '',
-    ].join('\n');
-  }
-  return [
-    '# task-review-next — Phase 7 of 8: MEMORIZE',
-    `Ticket: ${ctx.ticket}`,
-    '',
-    `Memory: **${ctx.memory.name}**`,
-    '',
-    `1. Call \`${ctx.memory.rememberTool}\` with: ticket id, task index, APPROVED/BLOCKED, key kind findings.`,
-    `2. \`touch ${path.join(ctx.tasksDir, SENTINEL)}\`.`,
-    '',
-  ].join('\n');
+  return memorizeInstructions({
+    title: '# task-review-next — Phase 7 of 8: MEMORIZE',
+    scope: SCOPE,
+    ctx,
+    what: [
+      'Per-task review outcomes and any task that needed rework.',
+      'Splitting mistakes worth avoiding when planning the next ticket.',
+    ],
+  });
 }
 
 module.exports = function register(registerPhase) {
@@ -56,4 +37,3 @@ module.exports = function register(registerPhase) {
 
 module.exports.validate = validate;
 module.exports.instructions = instructions;
-module.exports.SENTINEL = SENTINEL;

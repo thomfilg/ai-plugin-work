@@ -35,8 +35,12 @@ const { resolveTicketWorktree } = require(
 );
 const { appendNote, readNotes, evaluateNotes, SINKS, summaryIsSubstantial, MIN_SUMMARY_CHARS } =
   require(path.join(__dirname, 'lib', 'notes-store'));
+const { makeDie, reportVerdict, runNoteCli } = require(
+  path.join(__dirname, '..', 'lib', 'note-cli')
+);
 
 const SCRIPT = 'document-note.js';
+const die = makeDie(SCRIPT);
 
 /**
  * `docs/work-notes/<TICKET>.md` inside the ticket's worktree — or, when that
@@ -47,22 +51,6 @@ const SCRIPT = 'document-note.js';
 function defaultDocsPath(ticket, worktreeRoot, tasksDir) {
   if (worktreeRoot) return path.join(worktreeRoot, 'docs', 'work-notes', `${ticket}.md`);
   return tasksDir ? path.join(tasksDir, 'work-notes.md') : '';
-}
-
-function parseFlags(argv) {
-  const flags = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const m = /^--([\w-]+)$/.exec(argv[i]);
-    if (m) {
-      flags[m[1]] = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[(i += 1)] : true;
-    }
-  }
-  return flags;
-}
-
-function die(message) {
-  process.stderr.write(`${SCRIPT}: ${message}\n`);
-  process.exit(1);
 }
 
 /** Everything both subcommands need: paths, and which sink this machine wants. */
@@ -156,29 +144,21 @@ function cmdVerify(ctx) {
     worktreeRoot: ctx.worktreeRoot,
     tasksDir: ctx.tasksDir,
   });
-  if (!verdict.ok) {
-    process.stderr.write(`document step NOT satisfied: ${verdict.reason}\n`);
-    return 1;
-  }
-  process.stdout.write(`document step satisfied: ${verdict.valid.length} valid note(s).\n`);
-  return 0;
+  return reportVerdict(verdict, { label: 'document step', noun: 'note(s)' });
 }
 
-function main(argv) {
-  const [command, ticket, ...rest] = argv.slice(2);
-  if (!command || !ticket || ticket.startsWith('-')) {
-    process.stderr.write(`usage: ${SCRIPT} <sink|record|verify> <TICKET> [--summary "..."]\n`);
-    process.exit(2);
-  }
-  const ctx = loadContext(ticket);
-  const flags = parseFlags(rest);
-  if (command === 'sink') process.exit(cmdSink(ctx));
-  if (command === 'record') process.exit(cmdRecord(ctx, flags));
-  if (command === 'verify') process.exit(cmdVerify(ctx));
-  process.stderr.write(`${SCRIPT}: unknown command "${command}"\n`);
-  process.exit(2);
+if (require.main === module) {
+  runNoteCli({
+    script: SCRIPT,
+    usage: '<sink|record|verify> <TICKET> [--summary "..."]',
+    argv: process.argv,
+    loadContext,
+    handlers: {
+      sink: (ctx) => cmdSink(ctx),
+      record: (ctx, flags) => cmdRecord(ctx, flags),
+      verify: (ctx) => cmdVerify(ctx),
+    },
+  });
 }
 
-if (require.main === module) main(process.argv);
-
-module.exports = { defaultDocsPath, parseFlags, buildNote };
+module.exports = { defaultDocsPath, buildNote };

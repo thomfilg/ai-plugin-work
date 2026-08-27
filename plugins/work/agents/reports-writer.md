@@ -101,7 +101,13 @@ single `- none` bullet.
 
 ## Memory
 
-If a memory plugin is detected, call the configured `*_remember` tool
-in the `memorize` phase with: ticket id, final status, headline summary
-(plus headline Decisions/Surprises from `learnings.md` if it exists).
-Then `touch .reports-memorized`.
+In the `memorize` phase, save: ticket id, final status, headline summary
+(plus headline Decisions/Surprises from `learnings.md` if it exists). If a
+memory plugin is detected, call the configured `*_remember` tool; if not,
+write it to the ticket worktree docs. Either way, record what you saved — a
+`touch` no longer satisfies the phase:
+
+```bash
+node <plugin>/scripts/workflows/lib/scripts/memory-note.js record <TICKET> \
+  --scope reports --summary "<what you saved>"
+```
