@@ -174,6 +174,18 @@ function countScreenshots(screenshotDir) {
   return collectScreenshotFiles(screenshotDir, '').length;
 }
 
+// Stand-in digest line for a file hashFile could not read: size + mtime, so a
+// change to the file still changes the content SHA. 'unreadable' when even the
+// stat fails — the file's presence in the selection is itself signal.
+function statSignature(fullPath) {
+  try {
+    const st = fs.statSync(fullPath);
+    return `unhashed:${st.size}:${st.mtimeMs}`;
+  } catch {
+    return 'unhashed:unreadable';
+  }
+}
+
 // Content SHA for post-pr gating: all top-level *.check.md + every file under
 // screenshots/, hashed in path order in the same `<sha>  <path>` form GNU
 // sha256sum prints — so an empty set still digests to EMPTY_SHA256, which is
@@ -199,8 +211,13 @@ function computeContentSha(tasksDir) {
   const hash = crypto.createHash('sha256');
   for (const full of checkFiles.concat(screenshotFiles)) {
     const hex = hashFile(full);
-    if (hex === null) continue;
-    hash.update(`${hex}  ${full}\n`);
+    // A file hashFile refuses (unreadable, or past its 50MB cap) must still
+    // move the digest when it changes. Skipping it outright would let its
+    // contents change without invalidating postPrUpToDate, and a selection of
+    // nothing but unhashable files would digest to EMPTY_SHA256 — which
+    // hasContent reads as "nothing to post". Fall back to size+mtime, which
+    // is weaker than a content hash but still changes when the file does.
+    hash.update(hex !== null ? `${hex}  ${full}\n` : `${statSignature(full)}  ${full}\n`);
   }
   return hash.digest('hex');
 }
