@@ -251,14 +251,9 @@ function prShaMatchesHead(ticketId) {
   }
 }
 
-// (Patch 13) isExempt uses String() coercion — kept inline so the source-pattern test
-// can verify the coercion remains in place (logic lives in policies/command-matching.js).
-// eslint-disable-next-line no-unused-vars
-function isExemptLocal(toolName, toolInput, exemptPatterns) {
-  if (toolName !== 'Bash') return false;
-  const cmd = String(toolInput?.command || '');
-  return exemptPatterns.some((p) => p.test(cmd));
-}
+// (Patch 13) isExempt lives in policies/command-matching.js, and its
+// source-pattern test asserts the String() coercion there. This file used to
+// keep a never-called copy purely so that test had something local to match.
 // parseTransition wraps the policy version with the project-specific ticket sanitizer.
 function parseTransitionLocal(toolName, toolInput, transitionPattern) {
   // (Patch 4) Coerce command to string — String(toolInput?.command || '') is enforced inside the policy

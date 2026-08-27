@@ -112,14 +112,17 @@ for (const m of manifest.memories) {
     continue;
   }
   const out = path.join(target.dir, `${m.name}.md`);
-  if (fs.existsSync(out) && !force) {
-    skipped.push({ name: m.name, reason: 'exists', path: out });
-    continue;
-  }
   try {
-    fs.writeFileSync(out, frontmatter(m));
+    // Without --force the write itself refuses to clobber ('wx' fails with
+    // EEXIST), so the existence decision and the write are one operation
+    // instead of a check the file can change behind.
+    fs.writeFileSync(out, frontmatter(m), force ? {} : { flag: 'wx' });
     written.push({ name: m.name, path: out });
   } catch (err) {
+    if (err.code === 'EEXIST') {
+      skipped.push({ name: m.name, reason: 'exists', path: out });
+      continue;
+    }
     errors.push({ name: m.name, reason: err.message });
   }
 }

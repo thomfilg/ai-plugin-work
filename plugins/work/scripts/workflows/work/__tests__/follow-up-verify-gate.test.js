@@ -10,7 +10,7 @@
  * This test ensures that requirement is removed.
  */
 
-const { describe, it, before, after, beforeEach, afterEach } = require('node:test');
+const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');

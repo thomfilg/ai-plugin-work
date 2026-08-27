@@ -1820,7 +1820,8 @@ async function main() {
  */
 function isPRGateReady() {
   const prInfo = getPRInfo();
-  if (!prInfo || !prInfo.number) return { ready: false };
+  // getPRInfo always returns an object — a missing number is what "no PR" looks like.
+  if (!prInfo.number) return { ready: false };
   if (prInfo.state === 'CLOSED') return { ready: false };
   // Merged PRs have passed all gates — allow transition (GH-276)
   if (prInfo.state === 'MERGED')

@@ -78,13 +78,14 @@ function syncSessionGuardFile(env, safeBase) {
     const sessionDir = process.env.SESSION_GUARD_DIR || require('os').tmpdir();
     const sanitizedId = String(safeBase).replace(/[/\\:\0]/g, '_');
     const sessionPath = path.join(sessionDir, `claude-session-guard-${sanitizedId}.json`);
-    if (fs.existsSync(sessionPath)) {
-      const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-      session.workflow = '/work';
-      // Fix cwd to point to the worktree (not the calling cwd)
-      session.cwd = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, safeBase);
-      fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2));
-    }
+    // Read straight through: no session-guard file means readFileSync throws
+    // and the fail-open catch below takes over, which is what the existence
+    // check used to decide.
+    const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+    session.workflow = '/work';
+    // Fix cwd to point to the worktree (not the calling cwd)
+    session.cwd = worktreeDirFrom(env.WORKTREES_BASE, env.MAIN_WORKTREE_FOLDER, safeBase);
+    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), { mode: 0o600 });
   } catch {
     /* fail-open */
   }

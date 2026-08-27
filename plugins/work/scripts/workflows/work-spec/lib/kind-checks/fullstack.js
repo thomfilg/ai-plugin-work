@@ -8,9 +8,6 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
-
 const frontend = require('./frontend');
 const backend = require('./backend');
 const { readSpec, sliceSection, detectKinds } = require('./shared');

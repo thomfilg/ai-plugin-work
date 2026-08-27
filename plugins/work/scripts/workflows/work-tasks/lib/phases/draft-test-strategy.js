@@ -2,8 +2,6 @@
 
 // GH-590 Task 11 — strategy + ownership validators, feature-flagged.
 
-const config = require('../../../lib/config');
-
 let strategyModule = null;
 let dispatcherModule = null;
 let ownershipModule = null;

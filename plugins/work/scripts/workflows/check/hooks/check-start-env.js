@@ -12,10 +12,8 @@
  * Output: JSON object with running apps and their URLs
  */
 
-const { spawn, execSync } = require('child_process');
-const fs = require('fs');
+const { execSync } = require('child_process');
 const path = require('path');
-const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 process.on('uncaughtException', (err) => {

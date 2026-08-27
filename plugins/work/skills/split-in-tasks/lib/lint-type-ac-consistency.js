@@ -5,7 +5,6 @@ const {
   allTaskTypes,
   scopeRulesFor,
   matchesTypeScope,
-  isTestFilePath,
   scopeEntryAdmitsOnlyTestFiles,
 } = require('./task-types');
 const { stripScopeMarkersInText } = require('../../../scripts/workflows/lib/scope-markers');

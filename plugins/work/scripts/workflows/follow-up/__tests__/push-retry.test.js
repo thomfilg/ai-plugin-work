@@ -1,8 +1,7 @@
 'use strict';
 
-const { describe, it, beforeEach, mock } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('child_process');
 
 // Import push-retry step handler
 const handlers = Object.create(null);

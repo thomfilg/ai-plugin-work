@@ -25,15 +25,21 @@ const SHA_REGEX = /^[0-9a-f]{40}$/i;
 function resolveGitHead(cwd) {
   const dotgitPath = path.join(cwd || process.cwd(), '.git');
 
-  // Check if .git is a file (worktree) or directory (normal repo)
-  const stat = fs.statSync(dotgitPath);
-  if (stat.isDirectory()) {
+  // Read .git straight through and let the read itself tell us which shape it
+  // is: a normal repo's .git is a directory, and reading a directory fails
+  // with EISDIR on every platform. That keeps the check and the read as one
+  // operation — a stat of the path followed by a read of the path could land
+  // on two different files — without ever opening a directory as a file
+  // descriptor, which POSIX allows but Windows rejects with EISDIR.
+  let dotgit;
+  try {
+    // Worktree — .git is a file containing "gitdir: <path>"
+    dotgit = fs.readFileSync(dotgitPath, 'utf-8').trim();
+  } catch (err) {
+    if (err.code !== 'EISDIR') throw err;
     // Normal repo — read HEAD directly
     return fs.readFileSync(path.join(dotgitPath, 'HEAD'), 'utf-8').trim();
   }
-
-  // Worktree — .git is a file containing "gitdir: <path>"
-  const dotgit = fs.readFileSync(dotgitPath, 'utf-8').trim();
   if (dotgit.startsWith('gitdir: ')) {
     const rawGitdir = dotgit.slice('gitdir: '.length);
     const gitdir = path.resolve(path.dirname(dotgitPath), rawGitdir);

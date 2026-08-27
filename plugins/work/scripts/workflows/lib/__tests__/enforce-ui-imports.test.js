@@ -55,7 +55,9 @@ describe('enforce-ui-imports hook', {
     fs.mkdirSync(path.join(GIT_ROOT, 'apps', 'as-dashboard-worker', 'src'), { recursive: true });
     fs.mkdirSync(path.join(GIT_ROOT, 'apps', 'status-site'), { recursive: true });
     // UI docs required for the hook to activate
-    fs.writeFileSync(path.join(GIT_ROOT, 'packages', 'ui', 'components-catalog.md'), '# UI');
+    fs.writeFileSync(path.join(GIT_ROOT, 'packages', 'ui', 'components-catalog.md'), '# UI', {
+      mode: 0o600,
+    });
   });
 
   after(() => {

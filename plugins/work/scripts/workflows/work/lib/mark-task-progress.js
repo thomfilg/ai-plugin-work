@@ -107,9 +107,12 @@ function updateTaskCheckboxes(content, taskNum, checkbox) {
  */
 function markProgress(tasksDir) {
   const tasksFile = path.join(tasksDir, 'tasks.md');
-  if (!fs.existsSync(tasksFile)) return;
-
-  let content = fs.readFileSync(tasksFile, 'utf8');
+  let content;
+  try {
+    content = fs.readFileSync(tasksFile, 'utf8');
+  } catch {
+    return; // no tasks.md yet
+  }
 
   // Find all task numbers
   const taskNums = [];
@@ -137,9 +140,12 @@ function markProgress(tasksDir) {
  */
 function markVerified(tasksDir, taskNums) {
   const tasksFile = path.join(tasksDir, 'tasks.md');
-  if (!fs.existsSync(tasksFile)) return;
-
-  let content = fs.readFileSync(tasksFile, 'utf8');
+  let content;
+  try {
+    content = fs.readFileSync(tasksFile, 'utf8');
+  } catch {
+    return; // no tasks.md yet
+  }
 
   // If no specific tasks given, find all completed tasks
   if (!taskNums) {

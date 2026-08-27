@@ -85,7 +85,7 @@ describe('enforce-work-command hook', () => {
 
   it('should APPROVE when /work is active in transcript', async () => {
     const tmpFile = path.join(os.tmpdir(), `test-work-cmd-${Date.now()}.jsonl`);
-    fs.writeFileSync(tmpFile, '"skill" : "work"');
+    fs.writeFileSync(tmpFile, '"skill" : "work"', { mode: 0o600 });
     const { result } = await runHook({
       tool_name: 'Edit',
       tool_input: { file_path: '/home/node/project/src/app.ts' },
@@ -96,7 +96,7 @@ describe('enforce-work-command hook', () => {
 
   it('should APPROVE when inside code-architect subagent with WORK_ARCHITECT_ENABLED=1', async () => {
     const tmpFile = path.join(os.tmpdir(), `test-work-cmd-architect-${Date.now()}.jsonl`);
-    fs.writeFileSync(tmpFile, '"subagent_type" : "work-workflow:code-architect"');
+    fs.writeFileSync(tmpFile, '"subagent_type" : "work-workflow:code-architect"', { mode: 0o600 });
     const { result } = await runHook(
       {
         tool_name: 'Edit',
@@ -110,7 +110,7 @@ describe('enforce-work-command hook', () => {
 
   it('should NOT recognize code-architect subagent when WORK_ARCHITECT_ENABLED is not set', async () => {
     const tmpFile = path.join(os.tmpdir(), `test-work-cmd-architect-off-${Date.now()}.jsonl`);
-    fs.writeFileSync(tmpFile, '"subagent_type" : "work-workflow:code-architect"');
+    fs.writeFileSync(tmpFile, '"subagent_type" : "work-workflow:code-architect"', { mode: 0o600 });
     // Note: This test verifies isInsideSubagent won't match code-architect when gate is off.
     // The hook may still approve for other reasons (no work-state, allowed file, etc.)
     // so we test the function indirectly — the transcript has ONLY code-architect, no /work.

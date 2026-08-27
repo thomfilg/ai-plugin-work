@@ -1,6 +1,5 @@
 const { describe, it, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('path');
 
 // Save original env
 const originalEnv = { ...process.env };

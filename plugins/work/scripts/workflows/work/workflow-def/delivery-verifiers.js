@@ -49,7 +49,7 @@ function commitProvenBySavedSha(execFileSync, shaFile, headSha) {
     // Verify it's not an empty commit (must have file changes)
     const diff = execFileSync('git', ['diff', '--shortstat', savedSha, headSha], EXEC_OPTS).trim();
     if (!diff) return false; // Empty commit -- reject
-    fs.writeFileSync(shaFile, headSha);
+    fs.writeFileSync(shaFile, headSha, { mode: 0o600 });
     return true;
   } catch {
     return null; /* no saved SHA -- first run */
@@ -68,7 +68,7 @@ function commitProvenByBranchLog(execFileSync, baseBranch, shaFile, headSha) {
     EXEC_OPTS
   ).trim();
   if (!diff) return false; // No actual changes -- reject
-  fs.writeFileSync(shaFile, headSha);
+  fs.writeFileSync(shaFile, headSha, { mode: 0o600 });
   return true;
 }
 

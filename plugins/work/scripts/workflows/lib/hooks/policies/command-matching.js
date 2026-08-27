@@ -38,6 +38,14 @@
 // follow-up-next.js blocked while the identical direct call was allowed.
 // Reading INTO the payload also closes the mirror-image hole in Rules 3b/5,
 // where wrapping a gated invocation in tmux hid it from the gate.
+// Value of a shell env-assignment: a double-quoted run, a single-quoted run, or
+// a bare token. The bare-token branch excludes a leading quote so it can never
+// match the same text as the quoted branches — that overlap made the enclosing
+// `(...)*` loops ambiguous and exponentially backtrack on inputs like
+// `;env A="" A="" ...` (CodeQL js/redos). Same reasoning as the script-path
+// alternation at the end of the pattern, which already excludes quotes.
+const ENV_VALUE_SRC = '(?:"[^"]*"|\'[^\']*\'|[^\\s"\']\\S*)';
+
 const NODE_INVOKE_PATTERN_SRC =
   '(?:^|&&|;|\\||\\n|\\r)\\s*' +
   // Optional payload wrapper: a command that carries the real invocation
@@ -49,10 +57,14 @@ const NODE_INVOKE_PATTERN_SRC =
   // Optional wrapper commands (timeout, nice, env). All consume their args.
   '(?:timeout\\s+\\d+(?:\\.\\d+)?[smhdSMHD]?\\s+|' +
   'nice(?:\\s+-n\\s+-?\\d+)?\\s+|' +
-  'env(?:\\s+[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|\'[^\']*\'|\\S+))*\\s+' +
+  'env(?:\\s+[A-Za-z_][A-Za-z0-9_]*=' +
+  ENV_VALUE_SRC +
+  ')*\\s+' +
   ')*' +
   // Inline env-assignments (FOO=bar BAZ=qux node ...).
-  '(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|\'[^\']*\'|\\S+)\\s+)*' +
+  '(?:[A-Za-z_][A-Za-z0-9_]*=' +
+  ENV_VALUE_SRC +
+  '\\s+)*' +
   '(?:node|nodejs)\\s+' +
   '(?:(?:--(?:require|loader|experimental-loader|import|input-type|conditions|inspect-brk|inspect|inspect-port)|-[rCi])\\s+\\S+\\s+|(?:-[^\\s]+\\s+))*' +
   // Unquoted path: stop at a quote as well as whitespace. Inside a wrapper

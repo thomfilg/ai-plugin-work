@@ -182,7 +182,7 @@ function mergeCollisions(memories) {
 function writeManifest(manifest, outPath) {
   const body = JSON.stringify(manifest, null, 2) + '\n';
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, body);
+  fs.writeFileSync(outPath, body, { mode: 0o600 });
   return body;
 }
 

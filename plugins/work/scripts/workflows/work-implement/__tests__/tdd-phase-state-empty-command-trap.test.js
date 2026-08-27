@@ -15,12 +15,13 @@
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
 const CLI_PATH = path.join(__dirname, '..', 'tdd-phase-state.js');
+const { splitArgs } = require('../../lib/__tests__/_helpers/split-args');
 
 function mkTempHome() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-empty-cmd-'));
@@ -30,7 +31,7 @@ function mkTempHome() {
 
 function runCli(args, homeDir, envOverrides) {
   try {
-    const stdout = execSync(`node ${CLI_PATH} ${args}`, {
+    const stdout = execFileSync(process.execPath, [CLI_PATH, ...splitArgs(args)], {
       encoding: 'utf8',
       env: {
         ...process.env,

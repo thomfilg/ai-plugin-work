@@ -300,7 +300,7 @@ describe('enforce-screenshot-requirement', () => {
 
     it('writes skip marker for "SKIP SCREENSHOTS"', async () => {
       if (!ticketId) return;
-      const r = await runHook(
+      await runHook(
         { tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'SKIP SCREENSHOTS' },
         'PostToolUse'
       );
@@ -309,7 +309,7 @@ describe('enforce-screenshot-requirement', () => {
 
     it('writes skip marker from JSON-structured output', async () => {
       if (!ticketId) return;
-      const r = await runHook(
+      await runHook(
         {
           tool_name: 'AskUserQuestion',
           tool_input: {},
@@ -322,7 +322,7 @@ describe('enforce-screenshot-requirement', () => {
 
     it('writes skip marker from tool_result fallback', async () => {
       if (!ticketId) return;
-      const r = await runHook(
+      await runHook(
         { tool_name: 'AskUserQuestion', tool_input: {}, tool_result: 'Skip screenshots' },
         'PostToolUse'
       );
@@ -331,7 +331,7 @@ describe('enforce-screenshot-requirement', () => {
 
     it('writes skip marker from tool_response fallback', async () => {
       if (!ticketId) return;
-      const r = await runHook(
+      await runHook(
         { tool_name: 'AskUserQuestion', tool_input: {}, tool_response: 'skip the screenshot step' },
         'PostToolUse'
       );

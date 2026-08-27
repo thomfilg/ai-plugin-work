@@ -12,7 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 
 const SCREENSHOT_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 // sha256 of empty input — `find … | sha256sum` yields this when nothing matches.
@@ -21,6 +21,17 @@ const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b78
 function safeExec(cmd, options = {}) {
   try {
     return execSync(cmd, { encoding: 'utf8', ...options }).trim();
+  } catch {
+    return '';
+  }
+}
+
+// Same contract as safeExec but argv-based, so refs and paths that come from
+// the environment (base branch, worktree, tasks dir) are passed as arguments
+// instead of being interpolated into a shell string.
+function safeExecFile(file, args, options = {}) {
+  try {
+    return execFileSync(file, args, { encoding: 'utf8', ...options }).trim();
   } catch {
     return '';
   }
@@ -36,31 +47,34 @@ function readShaFile(filePath) {
   }
 }
 
-// Recursively collect screenshot file paths (relative to root), unsorted.
+// Recursively collect file paths (relative to root) that `accept` keeps, unsorted.
 // Manual traversal — avoids reliance on { recursive: true } (Node 18.17+).
-function collectScreenshotFiles(dir, base) {
+function collectFiles(dir, base, accept) {
   let results = [];
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch (err) {
     if (err.code !== 'ENOENT') {
-      process.stderr.write(`[work-pr] computeScreenshotHash: cannot read ${dir}: ${err.message}\n`);
+      process.stderr.write(`[work-pr] cannot read ${dir}: ${err.message}\n`);
     }
     return results;
   }
   for (const entry of entries) {
     const rel = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      results = results.concat(collectScreenshotFiles(path.join(dir, entry.name), rel));
-    } else if (
-      entry.isFile() &&
-      SCREENSHOT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())
-    ) {
+      results = results.concat(collectFiles(path.join(dir, entry.name), rel, accept));
+    } else if (entry.isFile() && accept(entry.name)) {
       results.push(rel);
     }
   }
   return results;
+}
+
+const isScreenshot = (name) => SCREENSHOT_EXTENSIONS.has(path.extname(name).toLowerCase());
+
+function collectScreenshotFiles(dir, base) {
+  return collectFiles(dir, base, isScreenshot);
 }
 
 // Stream a file in 64KB chunks → sha256 hex; null if not a regular file,
@@ -140,39 +154,72 @@ function computeRebaseGuard(worktreeDir, baseBranch, worktreeExists) {
   }
   const guardThreshold = parseInt(process.env.REBASE_GUARD_THRESHOLD || '0', 10);
   const fetchDepth = Math.max((Number.isFinite(guardThreshold) ? guardThreshold : 0) + 2, 2);
-  safeExec(`git fetch ${remote} ${branch} --quiet --depth=${fetchDepth} --no-tags`, {
+  safeExecFile('git', ['fetch', remote, branch, '--quiet', `--depth=${fetchDepth}`, '--no-tags'], {
     cwd: worktreeDir,
     timeout: 5000,
   });
   const fetchedRef = `${remote}/${branch}`;
-  const behind = safeExec(`git rev-list --count --max-count=${fetchDepth} HEAD..${fetchedRef}`, {
-    cwd: worktreeDir,
-  });
+  const behind = safeExecFile(
+    'git',
+    ['rev-list', '--count', `--max-count=${fetchDepth}`, `HEAD..${fetchedRef}`],
+    { cwd: worktreeDir }
+  );
   const commitsBehindMain = parseInt(behind || '0', 10); // capped by fetchDepth
   return { commitsBehindMain, commitsBehindMainCapped: commitsBehindMain >= fetchDepth };
 }
 
-// Count screenshot files via find (best-effort; 0 on any failure).
+// Count screenshot files (best-effort; 0 on any failure). Walks the tree
+// directly rather than shelling out to `find` with an interpolated path.
 function countScreenshots(screenshotDir) {
-  if (!fs.existsSync(screenshotDir)) return 0;
+  return collectScreenshotFiles(screenshotDir, '').length;
+}
+
+// Stand-in digest line for a file hashFile could not read: size + mtime, so a
+// change to the file still changes the content SHA. 'unreadable' when even the
+// stat fails — the file's presence in the selection is itself signal.
+function statSignature(fullPath) {
   try {
-    const files = safeExec(
-      `find "${screenshotDir}" -type f \\( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webp' \\) 2>/dev/null`
-    );
-    return files ? files.split('\n').filter(Boolean).length : 0;
+    const st = fs.statSync(fullPath);
+    return `unhashed:${st.size}:${st.mtimeMs}`;
   } catch {
-    return 0;
+    return 'unhashed:unreadable';
   }
 }
 
-// Content SHA for post-pr gating: all top-level *.check.md + every screenshot.
+// Content SHA for post-pr gating: all top-level *.check.md + every file under
+// screenshots/, hashed in path order in the same `<sha>  <path>` form GNU
+// sha256sum prints — so an empty set still digests to EMPTY_SHA256, which is
+// what `hasContent` tests. Pure Node: the previous `find … | xargs sha256sum`
+// pipeline interpolated an environment-derived tasksDir into a shell string.
 function computeContentSha(tasksDir) {
-  return safeExec(
-    `(
-        find "${tasksDir}" -maxdepth 1 -name '*.check.md' -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
-        find "${tasksDir}/screenshots" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
-      ) | sha256sum | cut -d' ' -f1`
-  );
+  let checkFiles = [];
+  try {
+    checkFiles = fs
+      .readdirSync(tasksDir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.check.md'))
+      .map((e) => e.name)
+      .sort()
+      .map((name) => path.join(tasksDir, name));
+  } catch {
+    /* no tasks dir — no content */
+  }
+  const screenshotsDir = path.join(tasksDir, 'screenshots');
+  const screenshotFiles = collectFiles(screenshotsDir, '', () => true)
+    .sort()
+    .map((rel) => path.join(screenshotsDir, rel));
+
+  const hash = crypto.createHash('sha256');
+  for (const full of checkFiles.concat(screenshotFiles)) {
+    const hex = hashFile(full);
+    // A file hashFile refuses (unreadable, or past its 50MB cap) must still
+    // move the digest when it changes. Skipping it outright would let its
+    // contents change without invalidating postPrUpToDate, and a selection of
+    // nothing but unhashable files would digest to EMPTY_SHA256 — which
+    // hasContent reads as "nothing to post". Fall back to size+mtime, which
+    // is weaker than a content hash but still changes when the file does.
+    hash.update(hex !== null ? `${hex}  ${full}\n` : `${statSignature(full)}  ${full}\n`);
+  }
+  return hash.digest('hex');
 }
 
 /**
@@ -219,9 +266,11 @@ function buildInspectData(tasksDir, worktreeDir) {
 
   // TSX/JSX changes vs base (from ticket worktree)
   const baseBranch = resolveBaseBranch(worktreeDir);
-  data.tsxChanged = safeExec(`git diff --name-only ${baseBranch}...HEAD -- '*.tsx' '*.jsx'`, {
-    cwd: worktreeDir,
-  });
+  data.tsxChanged = safeExecFile(
+    'git',
+    ['diff', '--name-only', `${baseBranch}...HEAD`, '--', '*.tsx', '*.jsx'],
+    { cwd: worktreeDir }
+  );
   data.hasTsxChanges = data.tsxChanged.length > 0;
 
   // Rebase guard

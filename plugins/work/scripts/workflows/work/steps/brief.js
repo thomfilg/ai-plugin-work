@@ -24,7 +24,7 @@ const { UNPARSEABLE_PHASE } = require('../lib/phase-ledger');
 const { addUnparseableLedgerEscalation } = require('./lib/unparseable-ledger-escalation');
 
 module.exports = function briefStep(add, s, ctx) {
-  const { STEPS, t, tasksDir, getDocsPrompt, fileExists, path } = ctx;
+  const { STEPS, t, tasksDir, getDocsPrompt, path } = ctx;
 
   if (s?.briefPhaseMidFlight && s.briefPhase === UNPARSEABLE_PHASE) {
     addUnparseableLedgerEscalation(add, ctx, {

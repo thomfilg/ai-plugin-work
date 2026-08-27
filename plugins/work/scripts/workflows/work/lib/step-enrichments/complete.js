@@ -56,7 +56,7 @@ module.exports = function registerComplete(register) {
       fs.mkdirSync(archiveDir, { recursive: true });
       const patterns = ['*.check.md', 'tdd-phase.json', '.step-evidence.json'];
       for (const pattern of patterns) {
-        const prefix = pattern.replace('*', '');
+        const prefix = pattern.replaceAll('*', '');
         const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith(prefix) || f === pattern);
         for (const file of files) {
           const src = path.join(tasksDir, file);

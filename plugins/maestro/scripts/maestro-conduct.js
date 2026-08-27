@@ -18,10 +18,8 @@
  *
  * One-shot by default; pass --daemon to loop with TICK_SEC between cycles.
  */
-const path = require('path');
 const tmux = require('./lib/maestro-conduct/tmux');
 const state = require('./lib/maestro-conduct/state');
-const workstate = require('./lib/maestro-conduct/workstate');
 const baseDirs = require('./lib/maestro-conduct/shared/base-dirs');
 const { phaseFor, escalationFor } = require('./lib/maestro-conduct/phase-registry');
 const actions = require('./lib/maestro-conduct/actions');

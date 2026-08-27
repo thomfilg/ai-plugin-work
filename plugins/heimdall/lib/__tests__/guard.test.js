@@ -206,7 +206,8 @@ describe('evaluate: bash', () => {
     const evil = path.join(os.tmpdir(), `heimdall-evil-${process.pid}.js`);
     fs.writeFileSync(
       evil,
-      `require('fs').writeFileSync('${path.join(baseDir, '.claude', 'x')}', 'y')\n`
+      `require('fs').writeFileSync('${path.join(baseDir, '.claude', 'x')}', 'y')\n`,
+      { mode: 0o600 }
     );
     process.env.HEIMDALL_DISABLE_SHIM = '1';
     try {

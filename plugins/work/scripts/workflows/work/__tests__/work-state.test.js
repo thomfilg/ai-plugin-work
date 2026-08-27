@@ -302,7 +302,7 @@ describe('work-state.js', () => {
     });
 
     it('should return error for nonexistent ticket', async () => {
-      const { result, stderr, code } = await runWorkState(['complete', TICKET_MISSING]);
+      const { stderr, code } = await runWorkState(['complete', TICKET_MISSING]);
       assert.equal(code, 1);
       const errResult = JSON.parse(stderr.trim());
       assert.ok(errResult.error);

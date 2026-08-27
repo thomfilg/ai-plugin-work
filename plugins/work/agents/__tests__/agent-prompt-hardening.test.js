@@ -156,7 +156,6 @@ describe('Verification Iron Law in quality agents', () => {
       // Find the full heading line (e.g., "## Verification Iron Law")
       const headingMatch = content.match(/^(#{1,3})\s+Verification Iron Law/m);
       if (!headingMatch) continue;
-      const headingLevel = headingMatch[1].length;
       const startIdx = content.indexOf(headingMatch[0]);
 
       // Extract the core Iron Law text (heading through "Violations:" paragraph)

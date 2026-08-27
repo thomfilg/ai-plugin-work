@@ -9,7 +9,7 @@
  * GH-206 Task 12: Extract declarative workflow policy config.
  */
 
-const { describe, it, before, after } = require('node:test');
+const { describe, it, after } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const fs = require('fs');
@@ -450,7 +450,12 @@ describe('workflow-definition: verify[STEPS.commit] (GH-693)', () => {
     const cp = require('child_process');
     const orig = cp.execFileSync;
     cp.execFileSync = (cmd, args, opts) => {
-      if (cmd !== 'git') return orig(cmd, args, opts);
+      // Nothing under test reaches the unstubbed branches below. Forwarding to
+      // the real execFileSync would let an unstubbed call shell out for real,
+      // with a command and argv the test never chose — fail loudly instead.
+      if (cmd !== 'git') {
+        throw new Error(`unstubbed child process in test double: ${cmd} ${JSON.stringify(args)}`);
+      }
       if (args[0] === 'rev-parse') return `${HEAD_SHA}\n`;
       if (args[0] === 'log') return responses.log ?? '';
       if (args[0] === 'branch') return responses.branch ?? '';
@@ -458,7 +463,7 @@ describe('workflow-definition: verify[STEPS.commit] (GH-693)', () => {
         const threeDot = args.some((a) => typeof a === 'string' && a.includes('...'));
         return threeDot ? (responses.threeDotDiff ?? '') : (responses.twoDotDiff ?? '');
       }
-      return orig(cmd, args, opts);
+      throw new Error(`unstubbed git call in test double: ${JSON.stringify(args)}`);
     };
     try {
       return fn();

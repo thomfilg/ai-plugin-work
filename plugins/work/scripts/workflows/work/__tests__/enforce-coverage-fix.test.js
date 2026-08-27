@@ -39,7 +39,7 @@ function createTranscript(entries) {
     os.tmpdir(),
     `test-covfix-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
   );
-  fs.writeFileSync(tmpFile, entries.map((e) => JSON.stringify(e)).join('\n'));
+  fs.writeFileSync(tmpFile, entries.map((e) => JSON.stringify(e)).join('\n'), { mode: 0o600 });
   return tmpFile;
 }
 

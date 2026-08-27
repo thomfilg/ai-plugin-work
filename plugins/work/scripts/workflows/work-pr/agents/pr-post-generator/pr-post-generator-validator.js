@@ -11,7 +11,7 @@
  * 5. PR body contains a wiki link for visual documentation
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -97,25 +97,13 @@ function isFrontendApp(appName) {
 /**
  * Get all frontend apps (those with react-router.config.ts)
  */
-function getAllFrontendApps() {
-  try {
-    const apps = fs.readdirSync(APPS_DIR).filter((dir) => {
-      const appPath = path.join(APPS_DIR, dir);
-      return fs.statSync(appPath).isDirectory() && isFrontendApp(dir);
-    });
-    return apps;
-  } catch (e) {
-    return [];
-  }
-}
-
 /**
  * Get affected apps using the get-affected.js script
  */
 function getAffectedApps() {
   try {
     const scriptPath = path.join(REPO_DIR, 'scripts', 'get-affected.js');
-    const result = execSync(`node "${scriptPath}" main json`, {
+    const result = execFileSync(process.execPath, [scriptPath, 'main', 'json'], {
       encoding: 'utf8',
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe'],

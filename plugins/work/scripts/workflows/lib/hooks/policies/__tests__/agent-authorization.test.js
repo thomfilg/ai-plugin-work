@@ -33,7 +33,7 @@ describe('agent-authorization: isTrustedScriptPath', () => {
 
   it('returns false when script is outside trusted dirs', () => {
     const tmpFile = path.join(os.tmpdir(), `aa-untrusted-${process.pid}.js`);
-    fs.writeFileSync(tmpFile, '// hi\n');
+    fs.writeFileSync(tmpFile, '// hi\n', { mode: 0o600 });
     try {
       assert.equal(isTrustedScriptPath(tmpFile, trustedDirs), false);
     } finally {
@@ -76,7 +76,6 @@ describe('agent-authorization: extractSubCommand / isSafeSubCommand', () => {
   it('extracts the first non-flag arg after script for non-workflow-state', () => {
     // command segment: "node work-state.js get arg1"
     const cmd = 'node work-state.js get arg1';
-    const matches = [...cmd.matchAll(new RegExp('(?:^|\\s)(node)\\s+(\\S+)', 'g'))];
     // Use a synthetic match index/length pointing past "node work-state.js"
     const match = { index: 0, 0: 'node work-state.js' };
     const sub = extractSubCommand(cmd, match, 'work-state.js');
@@ -182,7 +181,7 @@ describe('agent-authorization: isExemptScriptInvocation', () => {
   it('returns false when script is exempt by basename but lives outside trusted dirs', () => {
     // /tmp file with the exempt basename should NOT be trusted
     const tmpFile = path.join(os.tmpdir(), `workflow-engine.js`);
-    fs.writeFileSync(tmpFile, '// hi\n');
+    fs.writeFileSync(tmpFile, '// hi\n', { mode: 0o600 });
     try {
       const r = isExemptScriptInvocation(`node ${tmpFile}`, {
         exemptScripts,

@@ -21,7 +21,7 @@
 
 const { fs, os, path, discoverStores, safeExec, setupCli } = require('../lib/script-bootstrap');
 
-const { flag, cwd } = setupCli();
+const { cwd } = setupCli();
 
 function memoryCount(dir) {
   try {

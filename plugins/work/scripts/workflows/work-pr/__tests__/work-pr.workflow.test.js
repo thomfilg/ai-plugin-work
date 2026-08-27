@@ -604,7 +604,6 @@ describe('work-pr.workflow.js', () => {
   describe('computeScreenshotHash()', () => {
     const os = require('os');
     const fs = require('fs');
-    const crypto = require('crypto');
     const tmpBase = path.join(os.tmpdir(), 'screenshot-hash-test-' + process.pid);
 
     after(() => {
@@ -629,8 +628,8 @@ describe('work-pr.workflow.js', () => {
     it('returns consistent hash for same files', () => {
       const dir = path.join(tmpBase, 'consistent');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'a.png'), 'image-data-a');
-      fs.writeFileSync(path.join(dir, 'b.jpg'), 'image-data-b');
+      fs.writeFileSync(path.join(dir, 'a.png'), 'image-data-a', { mode: 0o600 });
+      fs.writeFileSync(path.join(dir, 'b.jpg'), 'image-data-b', { mode: 0o600 });
       const hash1 = hashFn(dir);
       const hash2 = hashFn(dir);
       assert.equal(hash1, hash2, 'same files should produce same hash');
@@ -640,9 +639,9 @@ describe('work-pr.workflow.js', () => {
     it('hash changes when file content changes', () => {
       const dir = path.join(tmpBase, 'change');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'test.png'), 'original');
+      fs.writeFileSync(path.join(dir, 'test.png'), 'original', { mode: 0o600 });
       const hash1 = hashFn(dir);
-      fs.writeFileSync(path.join(dir, 'test.png'), 'modified');
+      fs.writeFileSync(path.join(dir, 'test.png'), 'modified', { mode: 0o600 });
       const hash2 = hashFn(dir);
       assert.notEqual(hash1, hash2, 'hash should change when content changes');
     });
@@ -650,8 +649,8 @@ describe('work-pr.workflow.js', () => {
     it('handles nested subdirectories', () => {
       const dir = path.join(tmpBase, 'nested');
       fs.mkdirSync(path.join(dir, 'sub'), { recursive: true });
-      fs.writeFileSync(path.join(dir, 'top.png'), 'top-level');
-      fs.writeFileSync(path.join(dir, 'sub', 'nested.png'), 'nested');
+      fs.writeFileSync(path.join(dir, 'top.png'), 'top-level', { mode: 0o600 });
+      fs.writeFileSync(path.join(dir, 'sub', 'nested.png'), 'nested', { mode: 0o600 });
       const hash = hashFn(dir);
       assert.notEqual(hash, 'none', 'should hash files in nested dirs');
     });
@@ -659,9 +658,9 @@ describe('work-pr.workflow.js', () => {
     it('ignores non-image files', () => {
       const dir = path.join(tmpBase, 'filter');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'image.png'), 'image');
+      fs.writeFileSync(path.join(dir, 'image.png'), 'image', { mode: 0o600 });
       const hashWithImage = hashFn(dir);
-      fs.writeFileSync(path.join(dir, 'readme.txt'), 'not an image');
+      fs.writeFileSync(path.join(dir, 'readme.txt'), 'not an image', { mode: 0o600 });
       const hashWithText = hashFn(dir);
       assert.equal(hashWithImage, hashWithText, 'non-image files should not affect hash');
     });

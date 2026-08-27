@@ -8,7 +8,7 @@
  * Run with: node --test workflows/work-implement/__tests__/work-implement-enforce.test.js
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('child_process');
 const path = require('path');
@@ -98,7 +98,7 @@ function makeTranscript(content = '') {
     os.tmpdir(),
     'test-wie-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.jsonl'
   );
-  fs.writeFileSync(tp, content);
+  fs.writeFileSync(tp, content, { mode: 0o600 });
   _transcriptPaths.push(tp);
   return tp;
 }

@@ -109,11 +109,18 @@ function consumeToken(scriptBasename, ticketId) {
   candidates.push(tokenPath(scriptBasename)); // legacy / unkeyed fallback
   for (const tp of candidates) {
     try {
-      // Verify the token is a regular file (not a symlink to an unsafe target)
-      const stat = fs.lstatSync(tp);
-      if (!stat.isFile()) continue;
-
-      const raw = fs.readFileSync(tp, 'utf8');
+      // Verify the token is a regular file (not a symlink to an unsafe target).
+      // O_NOFOLLOW makes the kernel refuse a symlink at open time, and the
+      // fstat + read then address that one descriptor — an lstat of the path
+      // followed by a read of the path could straddle a swap.
+      const fd = fs.openSync(tp, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW, 0o600);
+      let raw;
+      try {
+        if (!fs.fstatSync(fd).isFile()) continue;
+        raw = fs.readFileSync(fd, 'utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
       // Delete immediately to prevent reuse
       try {
         fs.unlinkSync(tp);

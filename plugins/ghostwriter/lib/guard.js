@@ -61,10 +61,9 @@ const {
   unverifiableAccount,
 } = require('./forge-guard');
 const { checkCopiedCommits, checkStdinPatch, checkPatchFiles } = require('./imported-authorship');
-const { surfaceCwd, surfaceGitDir } = require('./surface-target');
 const { readExpectedIdentity } = require('./expected-identity');
 const { MAX_UNWRAP_DEPTH } = require('./command-scan');
-const { finding, normalizeRead, readFailure, MAX_MESSAGE_FILE_BYTES } = require('./finding');
+const { finding, MAX_MESSAGE_FILE_BYTES } = require('./finding');
 const { inspectFileWrites } = require('./file-content');
 const { OVERRIDE_ENV, isOverridden } = require('./policy');
 const { renderBlock } = require('./report');

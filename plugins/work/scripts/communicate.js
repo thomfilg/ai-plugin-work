@@ -28,6 +28,19 @@ function usage(code) {
   process.exit(code);
 }
 
+// Append one line to a mailbox. openSync creates it when missing and the write
+// goes to that same descriptor, so the create and the append cannot land on
+// two different files; 0o600 keeps a mailbox in the shared temp dir private to
+// this user.
+function appendLine(inboxPath, line) {
+  const fd = fs.openSync(inboxPath, 'a', 0o600);
+  try {
+    fs.writeSync(fd, line);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function findListeners(inboxPath) {
   let target;
   try {
@@ -80,7 +93,7 @@ if (!ticket) {
   process.exit(1);
 }
 
-fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o755 });
+fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o700 });
 const inbox = path.join(INBOX_DIR, `${ticket}.log`);
 
 if (checkOnly) {
@@ -100,22 +113,20 @@ if (doneMode) {
   // the MONITOR channel (with the ticket prefix so the manager knows which
   // session just completed). Listeners on the ticket channel exit cleanly
   // when they see DONE_SENTINEL.
-  if (!fs.existsSync(inbox)) fs.closeSync(fs.openSync(inbox, 'a'));
   const reason = rest.join(' ').trim();
   const ts = new Date().toISOString();
   const tail = reason ? ` ${reason}` : '';
-  fs.appendFileSync(inbox, `[${ts}] ${DONE_SENTINEL}${tail}\n`, { mode: 0o644 });
+  appendLine(inbox, `[${ts}] ${DONE_SENTINEL}${tail}\n`);
 
   const monitor = path.join(INBOX_DIR, 'MONITOR.log');
-  if (!fs.existsSync(monitor)) fs.closeSync(fs.openSync(monitor, 'a'));
-  fs.appendFileSync(monitor, `[${ts}] ${ticket}: ${DONE_SENTINEL}${tail}\n`, { mode: 0o644 });
+  appendLine(monitor, `[${ts}] ${ticket}: ${DONE_SENTINEL}${tail}\n`);
 
   process.stdout.write(`done → ${ticket} channel + MONITOR notified${tail}\n`);
   process.exit(0);
 }
 
 if (watchMode) {
-  if (!fs.existsSync(inbox)) fs.closeSync(fs.openSync(inbox, 'a'));
+  fs.closeSync(fs.openSync(inbox, 'a', 0o600));
   let prev = new Set(findListeners(inbox));
   process.stdout.write(
     `watching ${inbox} for listener changes (Ctrl-C to stop)\n` +
@@ -143,13 +154,20 @@ if (watchMode) {
   // Send mode — wrapped in else so watch mode does NOT fall through into
   // this block (which would write an empty timestamped line and exit(3),
   // killing the watch interval set up above).
-  if (!fs.existsSync(inbox)) fs.closeSync(fs.openSync(inbox, 'a'));
-  const listenersBefore = findListeners(inbox);
-
   const message = rest.join(' ');
   const ts = new Date().toISOString();
   const line = `[${ts}] ${message}\n`;
-  fs.appendFileSync(inbox, line, { mode: 0o644 });
+  // The mailbox must exist before findListeners() scans /proc for readers of
+  // it, so open first and hold the descriptor across both. findListeners
+  // already drops this process's own pid, so our handle is not miscounted.
+  const inboxFd = fs.openSync(inbox, 'a', 0o600);
+  let listenersBefore;
+  try {
+    listenersBefore = findListeners(inbox);
+    fs.writeSync(inboxFd, line);
+  } finally {
+    fs.closeSync(inboxFd);
+  }
 
   process.stdout.write(
     `sent → ${inbox} (${listenersBefore.length} listener(s)${listenersBefore.length ? `, pids: ${listenersBefore.join(', ')}` : ''})\n${line}`

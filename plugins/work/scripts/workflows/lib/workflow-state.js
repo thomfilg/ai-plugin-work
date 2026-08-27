@@ -81,7 +81,7 @@ class WorkflowState {
     const dir = path.join(this.stateDir, instanceId);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     state.lastUpdate = new Date().toISOString();
-    fs.writeFileSync(this._statePath(instanceId), JSON.stringify(state, null, 2));
+    fs.writeFileSync(this._statePath(instanceId), JSON.stringify(state, null, 2), { mode: 0o600 });
     return state;
   }
 

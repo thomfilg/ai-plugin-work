@@ -19,19 +19,32 @@ async function main() {
   const hookData = JSON.parse(input);
   const cwd = hookData.cwd || process.cwd();
 
-  // Check if marker is fresh (already ran recently)
-  if (fs.existsSync(MARKER_FILE)) {
-    const stat = fs.statSync(MARKER_FILE);
+  // Freshness check and re-stamp go through ONE descriptor: 'a+' creates the
+  // marker if it is missing, and fstat/truncate/write all address that same
+  // open file, so nothing can swap /tmp/qa-agent-active in between. 0o600
+  // keeps a marker in the shared temp dir out of other users' reach.
+  const markerFd = fs.openSync(MARKER_FILE, 'a+', 0o600);
+  try {
+    const stat = fs.fstatSync(markerFd);
     const age = Date.now() - stat.mtimeMs;
-    if (age < MARKER_FRESHNESS_MS) {
+    if (stat.size > 0 && age < MARKER_FRESHNESS_MS) {
       // Already ran recently, skip
+      fs.closeSync(markerFd);
       process.exit(0);
     }
-  }
 
-  // First tool call in this session - do cleanup
-  // Update marker file
-  fs.writeFileSync(MARKER_FILE, new Date().toISOString());
+    // First tool call in this session - do cleanup
+    // Update marker file
+    const stamp = Buffer.from(new Date().toISOString());
+    fs.ftruncateSync(markerFd, 0);
+    fs.writeSync(markerFd, stamp, 0, stamp.length, 0);
+  } finally {
+    try {
+      fs.closeSync(markerFd);
+    } catch {
+      /* already closed on the skip path */
+    }
+  }
 
   // Extract ticket ID from cwd (e.g., /home/node/worktrees/my-project-PROJ-854)
   const ticketMatch = cwd.match(/([A-Z]+-\d+)(?:$|\/)/);
