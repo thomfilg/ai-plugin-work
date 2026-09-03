@@ -22,6 +22,7 @@ const { resolveTaskType } = require(path.join(__dirname, '..', 'lib', 'resolve-t
 const { validateTddEvidenceForType } = require(
   path.join(__dirname, '..', 'lib', 'tdd-enforcement')
 );
+const { isOutcomeMode } = require(path.join(__dirname, '..', '..', 'lib', 'tdd-mode'));
 // GH-693 commit-evidence gate (extracted module, PR #716): >=1 commit ahead
 // of the resolved base to leave commit/task_review; fails closed on git
 // errors AND on an explicitly configured but unresolvable BASE_BRANCH.
@@ -133,7 +134,10 @@ function missingTddEvidenceMessage(ctx) {
 }
 
 /**
- * TDD gate: require evidence before leaving gated steps (always enforced).
+ * TDD gate: require evidence before leaving gated steps (WORK_TDD_MODE=
+ * process|shadow only — outcome mode, the default, records no phase evidence,
+ * so the proof that survives is `multiTaskGate` below plus the verifier's
+ * unresolved flags, which hard-fail at check).
  * NOTE: This validates TDD evidence for the CURRENT task only (per
  * tasksMeta.currentTaskIndex). The multi-task gate separately blocks leaving
  * implement when tasks remain.
@@ -141,6 +145,7 @@ function missingTddEvidenceMessage(ctx) {
 function tddGate(ctx) {
   const { currentStep, targetStep, taskNum, safeTicket, deps } = ctx;
   if (!deps.TDD_GATED_STEPS.includes(currentStep) || currentStep === targetStep) return null;
+  if (isOutcomeMode()) return null;
   if (isCheckpointTask(ctx)) return null;
   const { exists, parseError, evidence } = deps.readTddEvidence(safeTicket, currentStep, taskNum);
   if (!exists || parseError) {

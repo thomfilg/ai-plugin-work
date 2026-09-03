@@ -81,10 +81,13 @@ describe('test-cleanup: cleanupSessionGuardLocks removes only test locks', () =>
         fs.writeFileSync(path.join(tmpDir, name), body);
       }
       cleanupSessionGuardLocks();
+      // readdirSync order is filesystem-dependent, so the actual list is
+      // sorted — the expected list must be in the SAME (sorted) order or the
+      // order-sensitive deepEqual fails on every filesystem ('E' < 'T').
       const remaining = fs.readdirSync(tmpDir).sort();
       assert.deepEqual(remaining, [
-        'claude-session-guard-TASK-1.json',
         'claude-session-guard-ECHO-4446.json',
+        'claude-session-guard-TASK-1.json',
         'unrelated.txt',
       ]);
     } finally {

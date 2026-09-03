@@ -54,9 +54,15 @@
 const fs = require('fs');
 const path = require('path');
 
-// GH-756 OUTCOME MODE: there is no phase evidence to enforce on stop — the
-// outcome verifier judges the task's commits at the boundary instead.
-if (process.env.WORK_TDD_MODE === 'outcome') {
+// GH-756 OUTCOME MODE (the WORK_TDD_MODE default): there is no phase evidence
+// to enforce on stop — the outcome verifier judges the task's commits at the
+// boundary instead. Resolved through the config-aware helper because this
+// check runs BEFORE the sibling requires that load `.env`, so an `.env`-only
+// `WORK_TDD_MODE=process` opt-in must still reach it.
+const { resolveConfiguredTddMode, MODES } = require(
+  path.join(__dirname, '..', '..', 'lib', 'tdd-mode')
+);
+if (resolveConfiguredTddMode() === MODES.outcome) {
   process.exit(0);
 }
 

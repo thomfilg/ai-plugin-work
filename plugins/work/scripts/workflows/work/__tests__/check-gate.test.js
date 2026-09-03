@@ -1,3 +1,9 @@
+// This suite exercises the legacy RED/GREEN choreography, which is no longer
+// the default: WORK_TDD_MODE resolves to `outcome` when unset, and there the
+// per-task proof is the verifier's verdict, not a recorded tdd-phase.json
+// (lib/tdd-mode.js). Pin the mode the suite is actually about.
+process.env.WORK_TDD_MODE = 'process';
+
 const { describe, it, beforeEach, afterEach, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');

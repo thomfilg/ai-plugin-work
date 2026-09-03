@@ -18,6 +18,8 @@
 const path = require('path');
 const fs = require('fs');
 
+const { isOutcomeMode } = require(path.join(__dirname, '..', '..', 'lib', 'tdd-mode'));
+
 /** @param {GateDeps} deps */
 function verifyBootstrap(deps, ticketId) {
   // Bootstrap is proven if the current branch contains the ticket ID
@@ -127,6 +129,16 @@ function verifyPerTaskTDD(deps, ticketId) {
     const dir = path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId));
     const tasksPath = path.join(dir, 'tasks.md');
     if (!fs.existsSync(tasksPath)) return true; // single-task mode — no per-task check
+    // OUTCOME MODE (the WORK_TDD_MODE default): no tdd-phase.json exists. The
+    // boundary verifier's verdicts are the per-task proof and its unresolved
+    // flags are the blocker — the SAME answer check-gate's
+    // per-task-tdd-evidence rule gives, so the two cannot disagree.
+    if (isOutcomeMode()) {
+      const { unresolvedOutcomeFlags } = require(
+        path.join(deps.workRoot, '..', 'check', 'lib', 'outcome-flags')
+      );
+      return unresolvedOutcomeFlags(dir).length === 0;
+    }
     const tasks = taskParser.parseTasks(dir);
     if (!tasks || tasks.length === 0) return false; // fail-closed: unparseable tasks.md blocks gate
     const expectedTasks = tasks.filter((t) => !t.isCheckpoint);

@@ -59,9 +59,10 @@ const SCHEMA = Object.freeze({
   WORK_TEST_STRATEGY_VALIDATOR: flag01("Gate the tasks-draft Test Strategy validator ('0'/'1')."),
   WORK_TDD_MODE: enumOf(
     ['process', 'shadow', 'outcome', ''],
-    'Implement-phase verification mode (GH-750): process = legacy RED/GREEN choreography ' +
-      '(default), shadow = legacy gates + outcome verifier logging with no authority, ' +
-      'outcome = task advance decided by the outcome verifier verdict.'
+    'Implement-phase verification mode (GH-750): outcome = task advance decided by the ' +
+      'outcome verifier verdict (DEFAULT — also what an unset or empty value resolves to), ' +
+      'process = legacy RED/GREEN choreography, shadow = legacy gates + outcome verifier ' +
+      'logging with no authority.'
   ),
 
   // ── Follow-up behavior ───────────────────────────────────────────────────

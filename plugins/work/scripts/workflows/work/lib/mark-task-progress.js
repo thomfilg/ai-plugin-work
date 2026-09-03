@@ -18,6 +18,37 @@
 const fs = require('fs');
 const path = require('path');
 
+/** Directory-existence fallback — the same heuristic the evidence path uses. */
+function taskDirStatus(taskDir) {
+  return fs.existsSync(taskDir) ? 'in_progress' : 'not_started';
+}
+
+/** `tasksMeta` (with a tasks array) from the ticket's work state, or null. */
+function readTasksMeta(tasksDir) {
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(tasksDir, '.work-state.json'), 'utf8'));
+    const meta = state && state.tasksMeta;
+    return meta && Array.isArray(meta.tasks) ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Outcome-mode task status: read `tasksMeta` from the ticket's work state.
+ * Falls back to the directory-existence heuristic when the state file is
+ * missing or unreadable.
+ * @returns {'completed'|'in_progress'|'not_started'}
+ */
+function outcomeTaskStatus(tasksDir, taskDir, taskNum) {
+  const meta = readTasksMeta(tasksDir);
+  if (!meta) return taskDirStatus(taskDir);
+  const entry = meta.tasks[taskNum - 1];
+  if (entry && entry.status === 'completed') return 'completed';
+  const currentIdx = meta.currentTaskIndex ?? 0;
+  return taskNum - 1 === currentIdx ? 'in_progress' : taskDirStatus(taskDir);
+}
+
 /**
  * Read TDD phase state for a task.
  * @param {string} tasksDir - Path to ticket tasks directory
@@ -27,6 +58,11 @@ const path = require('path');
 function getTaskStatus(tasksDir, taskNum) {
   const taskDir = path.join(tasksDir, `task${taskNum}`);
   const tddPath = path.join(taskDir, 'tdd-phase.json');
+
+  // OUTCOME MODE (the WORK_TDD_MODE default) records no phase evidence, so the
+  // checkboxes come from the authoritative pointer state instead: the boundary
+  // gate's `work-state.js task-advance` marks each verified task completed.
+  if (isOutcomeMode()) return outcomeTaskStatus(tasksDir, taskDir, taskNum);
 
   // Contract-aware completion via the ONE shared validator (tdd-enforcement
   // validateTddEvidenceForType): TDD-exempt Types (task-types.js — docs,
@@ -52,6 +88,7 @@ function getTaskStatus(tasksDir, taskNum) {
 
 const { resolveTaskType } = require(path.join(__dirname, 'resolve-task-type'));
 const { validateTddEvidenceForType } = require(path.join(__dirname, 'tdd-enforcement'));
+const { isOutcomeMode } = require(path.join(__dirname, '..', '..', 'lib', 'tdd-mode'));
 
 /**
  * Map task status to checkbox marker.

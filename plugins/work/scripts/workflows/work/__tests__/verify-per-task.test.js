@@ -8,6 +8,12 @@
  * Uses node:test + node:assert/strict with temp filesystem fixtures.
  */
 
+// This suite exercises the legacy RED/GREEN choreography, which is no longer
+// the default: WORK_TDD_MODE resolves to `outcome` when unset, and there the
+// per-task proof is the verifier's verdict, not a recorded tdd-phase.json
+// (lib/tdd-mode.js). Pin the mode the suite is actually about.
+process.env.WORK_TDD_MODE = 'process';
+
 const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');

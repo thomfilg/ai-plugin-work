@@ -1,6 +1,6 @@
 # Implement Phase — Outcome Verification Plan
 
-**Status:** Phases 0–3 DELIVERED (signed off 2026-07-16) — measurement + flip + decommission pending
+**Status:** Phases 0–3 DELIVERED (signed off 2026-07-16); `outcome` is now the DEFAULT mode — decommission (Phase 4) pending
 **Date:** 2026-07-16 (drafted and delivered same day)
 **Scope:** `plugins/work` implement phase (per-task TDD loop, gates, evidence)
 **Goal:** Reduce implement-phase incidents to near zero while keeping (and strengthening) quality enforcement.
@@ -18,12 +18,13 @@ Ticketed as epic **GH-750** with per-phase issues GH-751…GH-756. Delivered in 
 | 1.2 — recovery | GH-753 | **#759 (merged)** | `work-state.js recover` — abandon-cycle / resync-meta / reopen-task; consistency-only, operator-approved, audited, tripwire |
 | 1.3 — liveness | GH-754 | #760 | BLOCK-verdict table as data + liveness test (every block names an existing exit edge; source-drift check; red on edge-less verdict) |
 | 2 — verifier | GH-755 | #761 | `task-verify/`: pure three-verdict engine + kind profiles as data; live collectors (derive-tests-from-diff, base-worktree retroactive fail-on-base, structured-reporter adapters); corpus gate 100%; shadow mode |
-| 3 — flip wiring | GH-756 | #762 | `WORK_TDD_MODE=outcome`: advance on verdicts, typed exits ride existing edges, free-dev dispatch prompt with advisory feedback, phase edit-locks stand aside, check hard-fails unresolved flags, flags in task_review prompt. **Default remains `process`.** |
+| 3 — flip wiring | GH-756 | #762 | `WORK_TDD_MODE=outcome`: advance on verdicts, typed exits ride existing edges, free-dev dispatch prompt with advisory feedback, phase edit-locks stand aside, check hard-fails unresolved flags, flags in task_review prompt. Landed behind the flag, default still `process`. |
+| 3 — default flip | GH-750 | — | `outcome` is the DEFAULT: unset/empty `WORK_TDD_MODE` resolves to it. One resolver (`lib/tdd-mode.js`) owns the default and every mode read; `process` (legacy RED/GREEN choreography) and `shadow` are explicit opt-ins, honoured from the environment or `.env`. |
 
 **Still open (the plan's own gating, in order):**
 
 1. Shadow-run ≥ 3 real tickets (`WORK_TDD_MODE=shadow`) and review divergence rows (`task-verify-shadow` in `.work-actions.json`) — Phase 2 acceptance tail.
-2. Run 3–5 real tickets in outcome mode; compare SLIs vs the Phase 0 baseline; on pass, flip the default to `outcome` — Phase 3 exit criteria (tracked on GH-750).
+2. ~~Flip the default to `outcome`~~ — DONE (`lib/tdd-mode.js`; opt out with `WORK_TDD_MODE=process`). The SLI comparison over 3–5 real tickets against the Phase 0 baseline now runs on the default path and still gates Phase 4.
 3. Phase 4 decommission (~3–4k LOC: tdd-phase-state + CLI, task-next shrink, phase-edit hooks, Test Strategy synthesis, docs/memories sweep incl. retiring no-fake-tdd-evidence) — after one stable release on outcome default. Not yet ticketed.
 4. Phase 5 hardening (identity module, cache-skew check, wave attribution) — parallelizable, not started.
 5. Known v1 gaps: coverage collector reports `unsupported` (I5 inert live until a coverage command exists); vitest/jest adapters parser-tested, node --test exercised live; §10 open questions still open.
@@ -309,7 +310,7 @@ a deliberately edge-less verdict.
 
 ### Phase 3 — The flip (2 PRs)
 
-- `WORK_TDD_MODE=outcome` (default stays `process` until Phase 3 exit criteria met):
+- `WORK_TDD_MODE=outcome` (now the DEFAULT — see "default flip" in §0; `process` and `shadow` are explicit opt-ins resolved by `lib/tdd-mode.js`):
   - task advance = verifier verdict (VERIFIED/UNVERIFIED) + existing commit invariants;
   - RED/GREEN mid-loop gating and phase enforcement disabled in outcome mode;
   - advisory per-task test feedback wired (failures → next dispatch prompt);
@@ -317,8 +318,9 @@ a deliberately edge-less verdict.
   - check step hard-fails on unresolved flags (+ its unit test).
 - Run 3–5 real tickets in outcome mode; compare SLIs vs Phase 0 baseline.
 
-**Exit criteria (to make `outcome` the default):** wedge rate ≈ 0 on outcome tickets;
-escape rate ≤ baseline; no fixture regressions; token/duration per ticket reduced.
+**Exit criteria (now the gate for Phase 4 rather than for the flip):** wedge rate ≈ 0 on
+outcome tickets; escape rate ≤ baseline; no fixture regressions; token/duration per ticket
+reduced.
 
 ### Phase 4 — Decommission (3–4 PRs, one per subsystem)
 
@@ -407,7 +409,8 @@ Residual risks:
    creates a new fixup task vs. mutating completed state. Lean: new fixup task (append-only
    history).
 4. Whether `WORK_TDD_MODE=process` is deleted in Phase 4 or kept one extra release as an
-   emergency fallback.
+   emergency fallback. (Still open — it is now the opt-out from the `outcome` default rather
+   than the default itself.)
 
 ---
 

@@ -34,82 +34,97 @@ function writeTasks(tasksDir, content) {
 }
 
 let tmp;
+const ORIGINAL_MODE = process.env.WORK_TDD_MODE;
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'implement-enrich-'));
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
+  if (ORIGINAL_MODE === undefined) delete process.env.WORK_TDD_MODE;
+  else process.env.WORK_TDD_MODE = ORIGINAL_MODE;
 });
 
-describe('implement enrichment — task number extraction', () => {
-  it('single-task plan: dispatched prompt contains real task num (no null/tasknull)', () => {
-    writeTasks(
-      tmp,
-      [
-        '## Task 1 — Only task',
-        '### Type',
-        'backend',
-        '### Files in scope',
-        '- src/foo.js',
-        '',
-      ].join('\n')
-    );
+// The task number is interpolated into BOTH dispatch prompts, so the
+// null-interpolation regression is checked in each mode: `outcome` (the
+// WORK_TDD_MODE default) and the legacy `process` choreography. Only the
+// task-next.js invocation is process-mode specific.
+for (const mode of ['outcome', 'process']) {
+  const isProcessMode = mode === 'process';
 
-    const registry = makeRegistry();
-    registerImplement(registry.register);
+  describe(`implement enrichment — task number extraction (${mode} mode)`, () => {
+    it('single-task plan: dispatched prompt contains real task num (no null/tasknull)', () => {
+      process.env.WORK_TDD_MODE = mode;
+      writeTasks(
+        tmp,
+        [
+          '## Task 1 — Only task',
+          '### Type',
+          'backend',
+          '### Files in scope',
+          '- src/foo.js',
+          '',
+        ].join('\n')
+      );
 
-    // Mirrors the single-task agentPrompt shape produced by buildTaskPrompt:
-    // header is present, but no "Task N of M" context block.
-    const entry = {
-      agentPrompt: [
-        '## Current Task: Task 1 — Only task',
-        '',
-        'You are implementing ONE task from the task plan.',
-      ].join('\n'),
-    };
+      const registry = makeRegistry();
+      registerImplement(registry.register);
 
-    registry.run('implement', entry, { ticket: 'GH-123', tasksDir: tmp });
+      // Mirrors the single-task agentPrompt shape produced by buildTaskPrompt:
+      // header is present, but no "Task N of M" context block.
+      const entry = {
+        agentPrompt: [
+          '## Current Task: Task 1 — Only task',
+          '',
+          'You are implementing ONE task from the task plan.',
+        ].join('\n'),
+      };
 
-    assert.doesNotMatch(entry.agentPrompt, /Task null/, 'no literal "Task null"');
-    assert.doesNotMatch(entry.agentPrompt, /tasknull/, 'no literal "tasknull"');
-    assert.match(entry.agentPrompt, /## Task 1\b/);
-    assert.match(entry.agentPrompt, /\btask1\b/);
-    assert.match(entry.agentPrompt, /GH-123 task1/);
+      registry.run('implement', entry, { ticket: 'GH-123', tasksDir: tmp });
+
+      assert.doesNotMatch(entry.agentPrompt, /Task null/, 'no literal "Task null"');
+      assert.doesNotMatch(entry.agentPrompt, /tasknull/, 'no literal "tasknull"');
+      assert.match(entry.agentPrompt, /## Task 1\b/);
+      if (isProcessMode) {
+        assert.match(entry.agentPrompt, /\btask1\b/);
+        assert.match(entry.agentPrompt, /GH-123 task1/);
+      }
+    });
+
+    it('multi-task plan: still extracts num + total from "Task N of M" block', () => {
+      process.env.WORK_TDD_MODE = mode;
+      writeTasks(
+        tmp,
+        [
+          '## Task 2 — Second task',
+          '### Type',
+          'backend',
+          '### Files in scope',
+          '- src/bar.js',
+          '',
+        ].join('\n')
+      );
+
+      const registry = makeRegistry();
+      registerImplement(registry.register);
+
+      const entry = {
+        agentPrompt: [
+          '## Current Task: Task 2 — Second task',
+          '',
+          '### Task Context',
+          'This is Task 2 of 3. Scope boundaries are listed below to prevent drift:',
+        ].join('\n'),
+      };
+
+      // tasksDir omitted so the parallel-dispatch branch is skipped and we
+      // exercise the single-task prompt assembly path (which is the one that
+      // previously interpolated null).
+      registry.run('implement', entry, { ticket: 'GH-456', tasksDir: '' });
+
+      assert.doesNotMatch(entry.agentPrompt, /Task null/);
+      assert.doesNotMatch(entry.agentPrompt, /tasknull/);
+      assert.match(entry.agentPrompt, /## Task 2\/3\b/);
+      if (isProcessMode) assert.match(entry.agentPrompt, /GH-456 task2/);
+    });
   });
-
-  it('multi-task plan: still extracts num + total from "Task N of M" block', () => {
-    writeTasks(
-      tmp,
-      [
-        '## Task 2 — Second task',
-        '### Type',
-        'backend',
-        '### Files in scope',
-        '- src/bar.js',
-        '',
-      ].join('\n')
-    );
-
-    const registry = makeRegistry();
-    registerImplement(registry.register);
-
-    const entry = {
-      agentPrompt: [
-        '## Current Task: Task 2 — Second task',
-        '',
-        '### Task Context',
-        'This is Task 2 of 3. Scope boundaries are listed below to prevent drift:',
-      ].join('\n'),
-    };
-
-    // tasksDir omitted so the parallel-dispatch branch is skipped and we
-    // exercise the single-task prompt assembly path (which is the one that
-    // previously interpolated null).
-    registry.run('implement', entry, { ticket: 'GH-456', tasksDir: '' });
-
-    assert.doesNotMatch(entry.agentPrompt, /Task null/);
-    assert.doesNotMatch(entry.agentPrompt, /tasknull/);
-    assert.match(entry.agentPrompt, /## Task 2\/3\b/);
-    assert.match(entry.agentPrompt, /GH-456 task2/);
-  });
-});
+}

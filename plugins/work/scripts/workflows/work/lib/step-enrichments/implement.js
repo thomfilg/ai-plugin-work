@@ -1,10 +1,14 @@
 /**
  * Implement step enrichment.
  *
- * Self-paced TDD model: the developer agent receives a minimal prompt that
- * tells it to invoke `task-next.js`, which then dictates RED → GREEN →
- * REFACTOR instructions, runs tests, validates phase transitions, and
- * records evidence via `tdd-phase-state.js`.
+ * Outcome model (the WORK_TDD_MODE default): the developer agent develops
+ * freely with advisory test feedback, and the task-boundary verifier judges
+ * its commits (`buildOutcomePrompt`).
+ *
+ * Self-paced TDD model (WORK_TDD_MODE=process|shadow): the developer agent
+ * receives a minimal prompt that tells it to invoke `task-next.js`, which
+ * then dictates RED → GREEN → REFACTOR instructions, runs tests, validates
+ * phase transitions, and records evidence via `tdd-phase-state.js`.
  *
  * This file selects the right developer agent type per task and builds the
  * dispatch payload (single or parallel). It no longer embeds TDD rules,
@@ -25,6 +29,7 @@ const { T, renderDelegateForRuntime, getRuntime } = require(
 const { WORK_TASK_TRAILER } = require(
   path.join(__dirname, '..', '..', '..', 'task-verify', 'collect', 'attribution')
 );
+const { isOutcomeMode } = require(path.join(__dirname, '..', '..', '..', 'lib', 'tdd-mode'));
 
 const TASK_NEXT_SCRIPT = path.resolve(
   __dirname,
@@ -216,7 +221,7 @@ function buildParallelOverride(ticket, tasksDir, currentTaskNum, totalTasks) {
   const allTasks = parseFullTasks(tasksDir) || [];
 
   const rt = getRuntime();
-  const outcomeMode = process.env.WORK_TDD_MODE === 'outcome';
+  const outcomeMode = isOutcomeMode();
   const delegates = parallelTasks.map((num) => {
     const task = allTasks.find((t) => t.num === num);
     const title = task?.title || 'Implementation';
@@ -300,10 +305,9 @@ function enrichImplement(entry, ctx) {
     return;
   }
 
-  entry.agentPrompt =
-    process.env.WORK_TDD_MODE === 'outcome'
-      ? buildOutcomePrompt(ticket, taskNum, totalTasks, taskTitle, tasksDir)
-      : buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle);
+  entry.agentPrompt = isOutcomeMode()
+    ? buildOutcomePrompt(ticket, taskNum, totalTasks, taskTitle, tasksDir)
+    : buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle);
   entry.agentType = resolveAgentType(tasksDir, taskNum);
 }
 

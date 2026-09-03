@@ -17,6 +17,7 @@ const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
 const { parseReportStatus, isCodeReviewResolved } = require('../../lib/parse-report-status');
 const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 const { staleEvidenceFiles } = require(path.join(__dirname, '..', 'lib', 'evidence-staleness'));
+const { isOutcomeMode } = require(path.join(__dirname, '..', '..', 'lib', 'tdd-mode'));
 
 // ─── Helpers (local, no external deps) ──────────────────────────────────────
 
@@ -138,6 +139,22 @@ function requiredReportReason(dir, req) {
   return `Report ${req.file} status is ${status} (expected APPROVED)`;
 }
 
+/**
+ * OUTCOME MODE (the WORK_TDD_MODE default) equivalent of per-task TDD
+ * evidence: there is no tdd-phase.json to read — the boundary verifier's
+ * verdict IS the per-task proof, and what it could not verify it recorded as
+ * a flag on the work state. Unresolved flags block here exactly as missing
+ * evidence does in process mode (plan §5.5).
+ */
+function outcomeFlagReasons(dir) {
+  const { unresolvedOutcomeFlags, describeUnresolvedFlags } = require(
+    path.join(__dirname, '..', '..', 'check', 'lib', 'outcome-flags')
+  );
+  const unresolved = unresolvedOutcomeFlags(dir);
+  if (unresolved.length === 0) return [];
+  return [`Unresolved outcome-verifier flags — ${describeUnresolvedFlags(unresolved)}`];
+}
+
 /** One task's TDD evidence verdict: a failure reason, or null when it passes. */
 function taskTddReason(dir, task, validateTddEvidenceForType) {
   const taskName = `task${task.num}`;
@@ -243,10 +260,13 @@ const CHECK_GATE_RULES = [
   },
   {
     name: 'per-task-tdd-evidence',
-    description: 'All tasks must have TDD evidence when tasks.md exists (GH-259)',
+    description:
+      'All tasks must carry per-task proof when tasks.md exists (GH-259) — recorded TDD ' +
+      'evidence in process/shadow mode, no unresolved verifier flags in outcome mode',
     check(dir) {
       const tasksPath = path.join(dir, 'tasks.md');
       if (!fileExists(tasksPath)) return []; // single-task mode, skip
+      if (isOutcomeMode()) return outcomeFlagReasons(dir);
       // ONE shared contract-aware validator (tdd-enforcement.js) — the same
       // acceptance rule the implement gate applied when it advanced each
       // task, so gate-accepted evidence can never dead-end here. ('test' is

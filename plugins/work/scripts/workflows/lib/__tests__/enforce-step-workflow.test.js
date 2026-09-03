@@ -53,6 +53,14 @@ let TASKS_DIR = path.join(TASKS_BASE, TEST_TICKET);
 // real `TASKS_BASE` (resolved at module load above), so we preserve TASKS_BASE
 // from the parent env via `preserveExtra`. Other workflow-config vars are
 // scrubbed by the shared helper to prevent silent leaks from `.envrc`.
+// The implement-step scenarios drive the legacy RED/GREEN choreography (a
+// recorded tdd-phase.json is what makes the transition legal), which is no
+// longer the default: an unset WORK_TDD_MODE resolves to `outcome`, where
+// implement is proven by the completed-task pointer state instead
+// (lib/tdd-mode.js). buildHookEnv allow-lists env vars, so the mode this suite
+// is about has to be declared here; a test can still override it via `env`.
+const LEGACY_TDD_MODE = { WORK_TDD_MODE: 'process' };
+
 function runHook(hookData, hookType = 'PreToolUse', env = {}) {
   return spawnHook(
     HOOK_PATH,
@@ -60,6 +68,7 @@ function runHook(hookData, hookType = 'PreToolUse', env = {}) {
     {
       CLAUDE_HOOK_TYPE: hookType,
       ENFORCE_HOOK_TICKET_ID: TEST_TICKET,
+      ...LEGACY_TDD_MODE,
       ...env,
     },
     { preserveExtra: ['TASKS_BASE', 'WORKTREES_BASE', 'REPO_NAME', 'TICKET_PROVIDER'] }
@@ -3895,6 +3904,7 @@ describe('enforce-step-workflow', () => {
         {
           CLAUDE_HOOK_TYPE: hookType,
           ENFORCE_HOOK_TICKET_ID: COMMIT_TICKET,
+          ...LEGACY_TDD_MODE,
           TASKS_BASE: tmpTasksBase,
           ...env,
         },
