@@ -73,9 +73,18 @@ describe('implement dispatch prompt in outcome mode (GH-756)', () => {
     fs.rmSync(path.join(TASKS_DIR, '.work-state.json'));
   });
 
-  it('process mode (default) keeps the self-paced TDD prompt', () => {
+  it('explicit process mode keeps the self-paced TDD prompt', () => {
+    process.env.WORK_TDD_MODE = 'process';
     const entry = enrich();
     assert.match(entry.agentPrompt, /task-next\.js/);
     assert.doesNotMatch(entry.agentPrompt, /outcome mode/);
+  });
+
+  // GH-750 flip: `outcome` is the default, so an unset variable must dispatch
+  // the outcome prompt — beforeEach() deletes WORK_TDD_MODE.
+  it('outcome is the default: an unset WORK_TDD_MODE dispatches the outcome prompt', () => {
+    const entry = enrich();
+    assert.match(entry.agentPrompt, /outcome mode/);
+    assert.doesNotMatch(entry.agentPrompt, /task-next\.js/);
   });
 });

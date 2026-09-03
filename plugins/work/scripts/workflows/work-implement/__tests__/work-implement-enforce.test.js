@@ -8,6 +8,13 @@
  * Run with: node --test workflows/work-implement/__tests__/work-implement-enforce.test.js
  */
 
+// This suite exercises the legacy RED/GREEN choreography, which is no longer
+// the default: WORK_TDD_MODE resolves to `outcome` when unset, and there the
+// phase gates/hooks under test stand aside entirely (lib/tdd-mode.js). Pin the
+// mode the suite is actually about — set before any require so spawned hooks
+// inherit it too.
+process.env.WORK_TDD_MODE = 'process';
+
 const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('child_process');

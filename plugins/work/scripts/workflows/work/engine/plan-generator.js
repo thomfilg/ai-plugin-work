@@ -10,6 +10,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { STEP_PIPELINE } = require('../steps');
 const { worktreeDirFrom } = require(path.join(__dirname, '..', '..', 'lib', 'resolve-base-dirs'));
+const { isOutcomeMode } = require(path.join(__dirname, '..', '..', 'lib', 'tdd-mode'));
 
 /**
  * @param {string|null} ticket
@@ -82,7 +83,13 @@ function buildPlanningContext(tasksDir, deps) {
 function makeAdd(plan, safeName, deps) {
   const { TDD_GATED_STEPS, TDD_PROTOCOL } = deps;
   return function add(stepName, action, command, reason, extra = {}) {
+    // OUTCOME MODE (the WORK_TDD_MODE default) has no phases to choreograph:
+    // appending the RED/GREEN protocol would tell the agent to drive
+    // tdd-phase-state.js and promise hook-enforced file restrictions that the
+    // enforce hooks no longer apply — directly contradicting the outcome
+    // dispatch prompt it is appended to.
     if (
+      !isOutcomeMode() &&
       TDD_GATED_STEPS.includes(stepName) &&
       extra.agentPrompt &&
       (action === 'RUN' || action === 'DEFER')

@@ -28,6 +28,9 @@ const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-e
 // and apply_patch target parsing.
 const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
 const { parseApplyPatch } = require(path.join(__dirname, '..', '..', 'lib', 'runtime', 'tools'));
+const { resolveConfiguredTddMode, MODES } = require(
+  path.join(__dirname, '..', '..', 'lib', 'tdd-mode')
+);
 
 // --- Task 12 import: task-readiness path gate (R6, R12) ---
 const { isWriteAllowedPath } = require(path.join(__dirname, '..', '..', 'lib', 'preflight'));
@@ -296,10 +299,12 @@ function enforceFileGate(filePath, gate) {
 }
 
 async function main() {
-  // GH-756 OUTCOME MODE: phase-scoped edit rules do not exist — agents
-  // develop freely and the outcome verifier judges the commits at the task
-  // boundary (this hook class was the root cause of the GH-722/GH-720 wedges).
-  if (process.env.WORK_TDD_MODE === 'outcome') {
+  // GH-756 OUTCOME MODE (the WORK_TDD_MODE default): phase-scoped edit rules
+  // do not exist — agents develop freely and the outcome verifier judges the
+  // commits at the task boundary (this hook class was the root cause of the
+  // GH-722/GH-720 wedges). Only an explicit `process`/`shadow` opt-in runs the
+  // body below.
+  if (resolveConfiguredTddMode() === MODES.outcome) {
     process.exit(0);
   }
 

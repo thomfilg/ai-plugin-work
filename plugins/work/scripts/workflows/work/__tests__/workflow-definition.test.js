@@ -9,7 +9,7 @@
  * GH-206 Task 12: Extract declarative workflow policy config.
  */
 
-const { describe, it, after } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const fs = require('fs');
@@ -543,7 +543,19 @@ describe('workflow-definition: verify[STEPS.implement] (GH-694)', () => {
     cycles: [{ cycle: 1, red: { testExitCode: 1 }, green: { testExitCode: 0 } }],
   };
 
+  // GH-750 flip: these cases are about the legacy evidence semantics — a
+  // recorded tdd-phase.json is what verifies implement — which is no longer
+  // the default. An unset WORK_TDD_MODE resolves to `outcome`, where implement
+  // is proven by the completed-task pointer state instead (lib/tdd-mode.js);
+  // that mode is covered by work/__tests__/outcome-mode-gates.test.js.
+  const PRIOR_TDD_MODE = process.env.WORK_TDD_MODE;
+  before(() => {
+    process.env.WORK_TDD_MODE = 'process';
+  });
+
   after(() => {
+    if (PRIOR_TDD_MODE === undefined) delete process.env.WORK_TDD_MODE;
+    else process.env.WORK_TDD_MODE = PRIOR_TDD_MODE;
     fs.rmSync(tmpBase, { recursive: true, force: true });
   });
 

@@ -152,6 +152,11 @@ TodoWrite([
 
 ### Step 2.5: TDD Phase Loop (Hook-Enforced)
 
+**Applies to `WORK_TDD_MODE=process|shadow` only.** On the default `outcome`
+mode there is no phase loop: both hooks below exit 0, the developer agent gets
+the outcome dispatch prompt (develop freely, advisory test feedback), and the
+task-boundary verifier decides advance from the task's commits.
+
 The TDD loop is enforced by hooks registered in `hooks/hooks.json` — not by agent discipline:
 
 - `work-implement-enforce.js` (PreToolUse, matcher `Edit|Write|MultiEdit`, after the protect-* hooks) blocks file edits that don't match the current TDD phase.
@@ -274,7 +279,7 @@ Task(<agent-name>):
   - Follow existing code patterns
   - Keep changes focused on the request
   - Scope: implement ONLY this task; do NOT implement pending tasks or re-implement completed tasks listed in the task context
-  - TDD is enforced by registered hooks (work-implement-enforce.js phase file-gating; enforce-tdd-on-stop.js stop-gating):
+  - TDD is enforced by registered hooks in WORK_TDD_MODE=process|shadow (work-implement-enforce.js phase file-gating; enforce-tdd-on-stop.js stop-gating). On the default outcome mode both hooks stand aside and the task-boundary verifier judges the commits instead — skip this block and its sub-bullets:
     - RED phase: only test files can be modified
     - GREEN phase: only production code (+ test helpers) can be modified
     - REFACTOR phase: no restrictions

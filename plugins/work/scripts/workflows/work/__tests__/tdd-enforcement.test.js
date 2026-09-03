@@ -119,6 +119,11 @@ function baseEnv(extra = {}) {
     WORKTREES_BASE: tempWorktreesBase,
     TASKS_BASE: tempTasksBase,
     SESSION_GUARD_ENABLED: '0',
+    // This suite is about the legacy RED/GREEN choreography, which is no
+    // longer the default: unset WORK_TDD_MODE resolves to `outcome`, where
+    // there is no phase evidence and no TDD protocol to inject
+    // (lib/tdd-mode.js). Pin the mode the suite is actually about.
+    WORK_TDD_MODE: 'process',
     ...extra,
   };
 }

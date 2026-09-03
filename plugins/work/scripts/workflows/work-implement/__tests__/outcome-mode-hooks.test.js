@@ -6,6 +6,10 @@
  * boundary. Both enforcement hooks must exit 0 immediately in outcome mode
  * (the GH-722 "no legal phase to author the test" deadlock class cannot
  * exist when no phase edit-lock exists).
+ *
+ * `outcome` is also the DEFAULT (GH-750 flip): with WORK_TDD_MODE unset both
+ * hooks must stand aside exactly as they do for the explicit value. The legacy
+ * choreography runs only under an explicit `process` / `shadow`.
  */
 
 const { describe, it } = require('node:test');
@@ -18,9 +22,14 @@ const STOP_HOOK = path.join(__dirname, '..', 'hooks', 'enforce-tdd-on-stop.js');
 
 function runHook(hookPath, stdinObj, extraEnv = {}) {
   return new Promise((resolve) => {
+    const env = { ...process.env, ...extraEnv };
+    // `undefined` in extraEnv means "unset this var" (spawn stringifies it).
+    for (const [key, value] of Object.entries(extraEnv)) {
+      if (value === undefined) delete env[key];
+    }
     const proc = spawn(process.execPath, [hookPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...extraEnv },
+      env,
     });
     let stdout = '';
     let stderr = '';
@@ -53,12 +62,34 @@ describe('outcome mode disables phase-scoped enforcement (GH-756)', () => {
     assert.equal(r.code, 0, r.stderr);
   });
 
-  it('process mode (default) still runs the hook body', async () => {
+  it('explicit process mode still runs the hook body', async () => {
     // Without a ticket/workflow context the hook allows — but it must have
     // READ stdin (i.e. not taken the outcome-mode early exit). We can only
     // assert exit 0 here; behavioral blocking is covered by the existing
     // work-implement-enforce suites.
     const r = await runHook(ENFORCE_HOOK, EDIT_PAYLOAD, { WORK_TDD_MODE: 'process' });
+    assert.equal(r.code, 0, r.stderr);
+  });
+});
+
+describe('outcome is the default mode (GH-750 flip)', () => {
+  it('work-implement-enforce stands aside with WORK_TDD_MODE unset', async () => {
+    // No stdin at all: the hook body reads stdin before deciding, so an
+    // empty payload would throw a JSON parse error if the default were
+    // anything but outcome.
+    const r = await runHook(ENFORCE_HOOK, null, { WORK_TDD_MODE: undefined });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stderr, '', 'no block message under the default mode');
+  });
+
+  it('work-implement-enforce stands aside with an empty WORK_TDD_MODE', async () => {
+    const r = await runHook(ENFORCE_HOOK, null, { WORK_TDD_MODE: '' });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stderr, '');
+  });
+
+  it('enforce-tdd-on-stop stands aside with WORK_TDD_MODE unset', async () => {
+    const r = await runHook(STOP_HOOK, { session_id: 'test' }, { WORK_TDD_MODE: undefined });
     assert.equal(r.code, 0, r.stderr);
   });
 });

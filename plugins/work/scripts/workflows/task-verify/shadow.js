@@ -17,9 +17,10 @@ const path = require('path');
 
 const { observeBoundary, resolveTaskBaseRef } = require('./boundary');
 const { VERDICTS } = require('../lib/outcome-verdicts');
+const { isShadowMode } = require('../lib/tdd-mode');
 
 function shadowEnabled(env = process.env) {
-  return env.WORK_TDD_MODE === 'shadow';
+  return isShadowMode(env);
 }
 
 /** Incumbent vs shadow: who was stricter? */

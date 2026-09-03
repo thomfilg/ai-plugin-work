@@ -14,6 +14,10 @@ const { execFileSync } = require('child_process');
 const { markProgress } = require(path.join(__dirname, '..', '..', 'mark-task-progress'));
 const { resolveTaskType } = require(path.join(__dirname, '..', '..', 'resolve-task-type'));
 
+const { isOutcomeMode, isShadowMode } = require(
+  path.join(__dirname, '..', '..', '..', '..', 'lib', 'tdd-mode')
+);
+
 const { reconcileTasksMetaWithFile } = require(path.join(__dirname, 'reconcile'));
 const { runNonCheckpointFlow } = require(path.join(__dirname, 'evidence-flow'));
 // W3 — planner-defect operator-hold (retry-state keys live there too).
@@ -38,7 +42,7 @@ const {
  * with authority (shadow has none).
  */
 function runShadowObserver(safeName, ctx, taskNum, taskType, incumbent) {
-  if (process.env.WORK_TDD_MODE !== 'shadow') return;
+  if (!isShadowMode()) return;
   try {
     const { maybeRunShadow } = require(
       path.join(__dirname, '..', '..', '..', '..', 'task-verify', 'shadow')
@@ -264,7 +268,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
 
   // GH-756 OUTCOME MODE: advance is decided by the outcome verifier verdict
   // instead of the RED/GREEN evidence flow.
-  if (process.env.WORK_TDD_MODE === 'outcome') {
+  if (isOutcomeMode()) {
     return runOutcomeModeGate(safeName, ctx, deps, {
       ws,
       currentIdx,

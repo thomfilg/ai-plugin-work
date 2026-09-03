@@ -91,6 +91,12 @@ const config = {
     })(),
   TASKS_BASE: null, // set below after WORKTREES_BASE is resolved
   ENABLE_SYMLINK: process.env.ENABLE_SYMLINK ?? '0',
+
+  // Implement-phase verification mode — 'process' | 'shadow' | 'outcome'.
+  // Raw passthrough (empty when unset): lib/tdd-mode.js owns normalization and
+  // the default ('outcome'). Exported here so an `.env`-only value is reachable
+  // through get-config from hooks that read the mode before .env is loaded.
+  WORK_TDD_MODE: process.env.WORK_TDD_MODE || '',
   FOLLOW_UP_PR_POLL_REVIEWS:
     (process.env.FOLLOW_UP_PR_POLL_REVIEWS || 'true').toLowerCase() === 'true',
 

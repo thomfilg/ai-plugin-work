@@ -24,6 +24,8 @@
 const path = require('path');
 const fs = require('fs');
 
+const { isOutcomeMode } = require(path.join(__dirname, '..', '..', 'lib', 'tdd-mode'));
+
 function ticketDir(deps, ticketId) {
   return path.join(deps.TASKS_BASE, deps.safeTicketPath(ticketId));
 }
@@ -179,12 +181,37 @@ function tasksMetaAllCompleted(deps, ticketId) {
 }
 
 /**
+ * OUTCOME MODE (the WORK_TDD_MODE default) proof for implement: no
+ * tdd-phase.json is ever written, and the boundary verifier advanced the task
+ * pointer only on a non-blocking verdict — so a fully completed tasksMeta IS
+ * the evidence. Unlike `tasksMetaAllCompleted`, an ABSENT state file or absent
+ * tasksMeta does NOT vouch here: with no evidence artifacts and no pointer
+ * state, nothing proves implement ran at all (refuse to vouch).
+ * @param {StepDeps} deps
+ */
+function outcomeImplementProven(deps, ticketId) {
+  if (!tasksMetaAllCompleted(deps, ticketId)) return false;
+  let tasks;
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(ticketDir(deps, ticketId), '.work-state.json'), 'utf-8')
+    );
+    tasks = parsed && parsed.tasksMeta && parsed.tasksMeta.tasks;
+  } catch {
+    return false;
+  }
+  return Array.isArray(tasks) && tasks.length > 0;
+}
+
+/**
  * tasks step gating is orchestrator-controlled via DEFER/RUN plan actions.
  * Implement is proven if tdd-phase.json has at least one cycle with red +
- * green evidence AND (GH-694) every tasksMeta task is completed.
+ * green evidence AND (GH-694) every tasksMeta task is completed — or, in
+ * outcome mode, by `outcomeImplementProven` above.
  * @param {StepDeps} deps
  */
 function verifyImplement(deps, ticketId) {
+  if (isOutcomeMode()) return outcomeImplementProven(deps, ticketId);
   try {
     const state = JSON.parse(
       fs.readFileSync(path.join(ticketDir(deps, ticketId), 'tdd-phase.json'), 'utf-8')

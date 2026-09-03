@@ -58,6 +58,16 @@ Load-bearing facts when porting:
 - `transition-step.js` handles state persistence, artifact archival, and TDD gates.
 
 ### TDD Enforcement
+
+> **Mode note (`WORK_TDD_MODE`, default `outcome`).** Everything in this section
+> describes the legacy *process* choreography, which now runs only under an
+> explicit `WORK_TDD_MODE=process` (or `shadow`). On the default `outcome` mode
+> there are no phases, no recorded evidence and no phase edit-locks: agents
+> develop freely and `task-verify/` judges the task's commits at the boundary
+> (see `docs/implement-outcome-verification-plan.md`). `lib/tdd-mode.js` is the
+> single resolver — never compare `process.env.WORK_TDD_MODE` directly, or an
+> unset variable silently reinstates the old default.
+
 - `implement` step is TDD-gated: must record RED → GREEN cycle before transitioning out.
 - `tdd-phase-state.js` is the ONLY way to record evidence — agents cannot self-report.
 - `task-next.js` is the developer-agent entrypoint in multi-task mode
@@ -164,7 +174,20 @@ resolvers themselves; adding to it needs a reason in review.
 
 ### Feature Flags
 
-(None currently. The `WORK_TEST_STRATEGY_VALIDATOR` flag was removed — the
+**`WORK_TDD_MODE`** — implement-phase verification mode, resolved ONLY through
+`lib/tdd-mode.js` (`resolveTddMode` / `isOutcomeMode` / `isShadowMode`, or
+`resolveConfiguredTddMode` in a hook that reads the mode before `.env` is
+loaded). Never compare `process.env.WORK_TDD_MODE` inline — an unset variable
+must resolve to the default, and a bare `=== 'outcome'` silently reinstates the
+old one.
+
+| Value | Behavior |
+|---|---|
+| `outcome` (**default**, also for unset/empty) | The task-boundary verifier (`task-verify/`) judges each task's commits; agents develop freely with advisory test feedback. No phases, no recorded evidence, no phase edit-locks: the enforce hooks exit 0, the implement-exit TDD gate stands down, and per-task proof downstream is "every task completed + no unresolved verifier flags" (the check step hard-fails on unresolved flags). |
+| `process` | The legacy RED/GREEN/REFACTOR choreography documented under **TDD Enforcement** above — now an explicit opt-in. |
+| `shadow` | Legacy gates keep authority; the verifier logs its verdict alongside them with no authority (`task-verify-shadow` rows in `.work-actions.json`). |
+
+(The `WORK_TEST_STRATEGY_VALIDATOR` flag was removed — the
 GH-590 Test Strategy validators and the GH-610 implement-side synthesis
 consumer are permanently on. Legacy `### Test Command` blocks are rejected
 at the draft gate with a migration error pointing at
