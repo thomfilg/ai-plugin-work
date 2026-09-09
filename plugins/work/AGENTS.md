@@ -1,6 +1,6 @@
 # Agents
 
-19 specialized agents in `agents/`. Dispatched via `Task()` — never self-invoke recursively.
+23 specialized agents in `agents/`. Dispatched via `Task()` — never self-invoke recursively.
 
 For project overview and development rules see **[CLAUDE.md](./CLAUDE.md)**.
 For detailed documentation see **[docs/README.md](./docs/README.md)**.
@@ -35,6 +35,7 @@ For detailed documentation see **[docs/README.md](./docs/README.md)**.
 | `developer-react-senior` | React frontend, complex architecture |
 | `developer-react-ui-architect` | UI components, visual design |
 | `developer-devops` | Infrastructure, CI/CD, deployment |
+| `debugger` | Systematic scientific-method debugging with persistent `.debug-session.md` state |
 
 ### Quality
 | Agent | Role |
