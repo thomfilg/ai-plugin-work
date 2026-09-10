@@ -690,15 +690,28 @@ describe('discoverStores descendantScan (cwd ABOVE the project root)', {
     assert.equal(store.projectName, 'repo-a');
   });
 
-  it('returns every marked child, sorted, when the parent holds several', () => {
-    const parent = seedWorkspace('multi', ['zeta', 'alpha']);
-    // An unmarked sibling must not be picked up — the marker is the gate.
-    fs.mkdirSync(path.join(parent, 'unmarked'), { recursive: true });
+  it('ignores unmarked siblings — the marker is the gate', () => {
+    const parent = seedWorkspace('unmarked', ['repo-a']);
+    fs.mkdirSync(path.join(parent, 'no-store'), { recursive: true });
     const stores = makeApi({ descendantScan: true }).discoverStores(parent);
     assert.deepEqual(
       stores.map((s) => s.projectName),
-      ['alpha', 'zeta']
+      ['repo-a']
     );
+  });
+
+  // Ambiguity resolves to nothing, in BOTH directions: picking the first would
+  // send a `synapsys-memorize` write into whichever sibling sorts first, and
+  // returning both would flatten an unrelated project's memories — `enforce`
+  // rules that deny tool calls among them — into this session.
+  it('finds nothing when two children are marked', () => {
+    const parent = seedWorkspace('ambiguous', ['alpha', 'zeta']);
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(parent), []);
+  });
+
+  it('still finds nothing with three marked children', () => {
+    const parent = seedWorkspace('ambiguous3', ['a', 'b', 'c']);
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(parent), []);
   });
 
   it('skips dot-directories', () => {

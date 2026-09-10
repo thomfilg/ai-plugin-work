@@ -38,8 +38,9 @@
  *   discoverable, but the walk never continues PAST home (a sandboxed $HOME
  *   cannot leak the real user's store). When false the walk continues to
  *   the filesystem root. Either way exhaustion returns ''.
- * - `descendantScan` turns on the depth-1 fallback above. Off by default, and
- *   even on it fires only once `local` and `worktree` have both missed.
+ * - `descendantScan` turns on the depth-1 fallback above: off by default, and
+ *   even on it needs `local` and `worktree` to miss and exactly ONE child to
+ *   be marked. `descendantRows` argues why ambiguity resolves to nothing.
  * - `disableHomeStoresEnvVar` optionally names an env var that, when set to
  *   '1' at discovery time, skips the home-rooted tiers (global + shared) —
  *   used by test suites to pin discovery to cwd-rooted fixtures.
@@ -291,21 +292,24 @@ function ancestorMigrationBase(spec, startDir) {
 
 // ── descendant scan ──────────────────────────────────────────────────────────
 
-// Marked children of cwd, one level down, as `{ dir, name }` rows in a stable
-// order. Empty unless the scan is on AND the cwd-rooted tiers came up empty.
+// The ONE marked child of cwd, one level down, as a `{ dir, name }` row.
 //
-// Those tiers all resolve at or above cwd, which assumes cwd sits at or below
-// the project root. An agent CLI attaching several repositories breaks that: it
+// The four tiers all resolve at or above cwd, assuming cwd sits at or below the
+// project root. An agent CLI attaching several repositories breaks that: it
 // clones them side by side and parks cwd on their shared parent, so a store one
 // level down is invisible and the plugin reports itself uninstalled with its
-// memories sitting right there. Neither existing tier reaches it — the ancestor
-// walk looks the wrong way, and the parent is not a git repo at all.
+// memories sitting right there. The ancestor walk looks the wrong way and the
+// parent is no git repo, so neither existing tier reaches it.
 //
-// Depth 1 ONLY: one readdir plus an existsSync per child, the exact geometry
-// those CLIs produce. Symlinked children are skipped (isDirectory() is false
-// for them), so the scan cannot follow a cycle, and an unreadable cwd is a
-// miss rather than a throw. Rows are named for the CHILD — cwd names a
-// directory that is not the project.
+// AMBIGUITY IS A MISS. Two marked children give no basis to choose, and
+// guessing hurts both ways: writers take the FIRST store of a kind
+// (`synapsys-memorize`), so a memory lands in whichever sibling sorts first,
+// and readers flatten every store into one list, so a sibling's memories —
+// `enforce` rules that DENY tool calls among them — apply to this session.
+//
+// Depth 1 ONLY: one readdir plus an existsSync per child. Symlinks are skipped
+// (isDirectory() is false), so no cycle is followed, and an unreadable cwd is a
+// miss rather than a throw.
 function descendantRows(spec, cwd, alreadyFound) {
   if (!spec.descendantScan || alreadyFound > 0) return [];
   let entries;
@@ -314,14 +318,14 @@ function descendantRows(spec, cwd, alreadyFound) {
   } catch {
     return [];
   }
-  const names = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
-  const rows = [];
-  for (const { name } of names.sort((a, b) => (a.name < b.name ? -1 : 1))) {
-    const dir = path.join(cwd, name, ROOT_DIR, spec.folder);
-    if (!fs.existsSync(path.join(dir, spec.marker))) continue;
-    rows.push({ dir, name: projectNameOf(spec, path.join(cwd, name)) });
+  const hits = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const base = path.join(cwd, entry.name);
+    if (fs.existsSync(path.join(base, ROOT_DIR, spec.folder, spec.marker))) hits.push(base);
   }
-  return rows;
+  if (hits.length !== 1) return [];
+  return [{ dir: path.join(hits[0], ROOT_DIR, spec.folder), name: projectNameOf(spec, hits[0]) }];
 }
 
 // ── discovery ────────────────────────────────────────────────────────────────
