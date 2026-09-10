@@ -16,8 +16,7 @@
  *   shared   → ~/.workflow/<folder>-shared   (cross-project)
  *
  * Every one of those resolves AT or ABOVE cwd, so a project one level below is
- * invisible. `descendantScan` adds a bounded fallback for exactly that layout —
- * see `descendantStores` for the case it exists to serve and what bounds it.
+ * invisible — see `descendantRows` for the fallback that covers that layout.
  *
  * The decision matrix IS the config:
  *
@@ -37,9 +36,8 @@
  *   discoverable, but the walk never continues PAST home (a sandboxed $HOME
  *   cannot leak the real user's store). When false the walk continues to
  *   the filesystem root. Either way exhaustion returns ''.
- * - `descendantScan` turns on the depth-1 fallback described above. Off by
- *   default, and even when on it fires ONLY after `local` and `worktree` have
- *   both missed, so it can never perturb a layout that already resolves.
+ * - `descendantScan` turns on the depth-1 fallback above. Off by default, and
+ *   even on it fires only once `local` and `worktree` have both missed.
  * - `disableHomeStoresEnvVar` optionally names an env var that, when set to
  *   '1' at discovery time, skips the home-rooted tiers (global + shared) —
  *   used by test suites to pin discovery to cwd-rooted fixtures.
@@ -291,37 +289,37 @@ function ancestorMigrationBase(spec, startDir) {
 
 // ── descendant scan ──────────────────────────────────────────────────────────
 
-// Immediate children of cwd carrying `<child>/<ROOT_DIR>/<folder>/<marker>`.
+// Marked children of cwd, one level down, as `{ dir, name }` rows in a stable
+// order. Empty unless the scan is on AND the cwd-rooted tiers came up empty.
 //
-// Every other tier resolves at or above cwd, which silently assumes cwd sits
-// AT or BELOW the project root. An agent CLI that attaches several repositories
-// breaks that assumption: it clones them side by side and parks cwd on their
-// shared parent (`/home/user` holding `/home/user/<repo>`), so an installed
-// store one level down is invisible and the plugin reports itself uninstalled
-// while its memories sit right there. The ancestor walk cannot help — the store
-// is below, not above — and neither can the git root, because the parent is
-// not a repository at all.
+// Those tiers all resolve at or above cwd, which assumes cwd sits at or below
+// the project root. An agent CLI attaching several repositories breaks that: it
+// clones them side by side and parks cwd on their shared parent, so a store one
+// level down is invisible and the plugin reports itself uninstalled with its
+// memories sitting right there. Neither existing tier reaches it — the ancestor
+// walk looks the wrong way, and the parent is not a git repo at all.
 //
-// Depth 1 ONLY. That is one readdir plus an existsSync per child, it is the
-// exact geometry those CLIs produce, and a deeper walk would start charging
-// real IO to guess at a layout nobody has asked for. Symlinked children are
-// skipped (isDirectory() is false for them), which also bounds the walk against
-// cycles. Fails open to []: an unreadable cwd is a miss, never a throw.
-function descendantStores(spec, cwd) {
+// Depth 1 ONLY: one readdir plus an existsSync per child, the exact geometry
+// those CLIs produce. Symlinked children are skipped (isDirectory() is false
+// for them), so the scan cannot follow a cycle, and an unreadable cwd is a
+// miss rather than a throw. Rows are named for the CHILD — cwd names a
+// directory that is not the project.
+function descendantRows(spec, cwd, alreadyFound) {
+  if (!spec.descendantScan || alreadyFound > 0) return [];
   let entries;
   try {
     entries = fs.readdirSync(cwd, { withFileTypes: true });
   } catch {
     return [];
   }
-  const hits = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-    const dir = path.join(cwd, entry.name, ROOT_DIR, spec.folder);
-    if (fs.existsSync(path.join(dir, spec.marker))) hits.push(dir);
+  const names = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
+  const rows = [];
+  for (const { name } of names.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const dir = path.join(cwd, name, ROOT_DIR, spec.folder);
+    if (!fs.existsSync(path.join(dir, spec.marker))) continue;
+    rows.push({ dir, name: projectNameOf(spec, path.join(cwd, name)) });
   }
-  // Sorted so a multi-project parent yields a stable, reproducible order.
-  return hits.sort();
+  return rows;
 }
 
 // ── discovery ────────────────────────────────────────────────────────────────
@@ -341,8 +339,7 @@ function discover(spec, cwd) {
   const found = [];
   const seen = new Set();
 
-  // `name` defaults to the cwd-derived projectName; the descendant tier passes
-  // its own, since each hit is a DIFFERENT project than the one cwd names.
+  // `name` defaults to the cwd-derived projectName; descendants pass their own.
   const push = (kind, dir, name = projectName) => {
     if (!dir || !fs.existsSync(path.join(dir, spec.marker))) return;
     const key = path.resolve(dir);
@@ -357,17 +354,12 @@ function discover(spec, cwd) {
     if (skipHome && HOME_TIERS.has(kind)) continue;
     if (kind === 'worktree') {
       push(kind, ancestorStore(spec, path.dirname(resolved)));
-      // Both cwd-rooted tiers have now been tried. Nothing found means cwd is
-      // neither a project root nor below one, so look one level down before
-      // falling through to the home tiers. A hit IS that project's local store
-      // — same `kind`, so every downstream consumer (the `[plugin:local]`
-      // injection header, `--store local`) reads exactly as it would from a
-      // session started inside the repo. Its projectName comes from the child,
-      // not from cwd, which names a directory that is not the project.
-      if (spec.descendantScan && found.length === 0) {
-        for (const dir of descendantStores(spec, resolved)) {
-          push('local', dir, projectNameOf(spec, path.resolve(dir, '..', '..')));
-        }
+      // Both cwd-rooted tiers have been tried; a descendant hit IS that
+      // project's local store, so it carries the same `kind` and every consumer
+      // (the `[plugin:local]` header, `--store local`) reads as it would from a
+      // session started inside the repo.
+      for (const row of descendantRows(spec, resolved, found.length)) {
+        push('local', row.dir, row.name);
       }
     } else {
       push(kind, tierDirOf(spec, kind, resolved, projectName));
