@@ -745,6 +745,61 @@ describe('discoverStores descendantScan (cwd ABOVE the project root)', {
     );
   });
 
+  // The migration gap: discovery resolving a store one level down is only half
+  // the job — `migrationCandidates` has to reach the SAME store, or it is read
+  // on every event and brought forward by nothing.
+  it('adds a migration row for the descendant store', () => {
+    const parent = seedWorkspace('mig', ['repo-a']);
+    const rows = makeApi({ descendantScan: true }).migrationCandidates(parent);
+    const child = rows.find((r) => r.dir.startsWith(path.join(parent, 'repo-a')));
+    assert.ok(child, 'a row covering the marked child');
+    assert.equal(child.dir, path.join(parent, 'repo-a', ROOT, FOLDER));
+    assert.equal(child.legacyDir, path.join(parent, 'repo-a', '.claude', FOLDER));
+  });
+
+  it('adds no descendant migration row when the scan is off', () => {
+    const parent = seedWorkspace('mig-off', ['repo-a']);
+    const rows = makeApi().migrationCandidates(parent);
+    assert.equal(
+      rows.some((r) => r.dir.startsWith(path.join(parent, 'repo-a'))),
+      false
+    );
+  });
+
+  it('adds no descendant migration row when two children are marked', () => {
+    const parent = seedWorkspace('mig-ambiguous', ['alpha', 'zeta']);
+    const rows = makeApi({ descendantScan: true }).migrationCandidates(parent);
+    assert.deepEqual(
+      rows.map((r) => r.kind),
+      ['local', 'worktree', 'home', 'shared']
+    );
+  });
+
+  // A child still at the legacy root is the case the migration row exists for:
+  // discovery cannot see it yet, so only the scan counting BOTH roots reaches
+  // it. Without this the store stays stranded in a parent-cwd session forever.
+  it('reaches a child whose store is still at the legacy root', () => {
+    const parent = fs.mkdtempSync(path.join(base, 'mig-legacy-'));
+    seedMarker(path.join(parent, 'repo-a', '.claude', FOLDER));
+    const api = makeApi({ descendantScan: true });
+
+    // Not discoverable yet — there is no marker under ROOT_DIR.
+    assert.deepEqual(api.discoverStores(parent), []);
+
+    // But migration must still reach it, or nothing ever relocates it.
+    const rows = api.migrationCandidates(parent);
+    const child = rows.find((r) => r.dir.startsWith(path.join(parent, 'repo-a')));
+    assert.ok(child, 'a migration row for the legacy-root child');
+    assert.equal(child.legacyDir, path.join(parent, 'repo-a', '.claude', FOLDER));
+  });
+
+  it('keeps the descendant migration row distinct from the four fixed rows', () => {
+    const parent = seedWorkspace('mig-disjoint', ['repo-a']);
+    const rows = makeApi({ descendantScan: true }).migrationCandidates(parent);
+    const dirs = rows.map((r) => path.resolve(r.dir));
+    assert.equal(new Set(dirs).size, dirs.length, 'rows must be mutually disjoint');
+  });
+
   it('fails open on an unreadable cwd rather than throwing', () => {
     const missing = path.join(base, 'does-not-exist');
     assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(missing), []);

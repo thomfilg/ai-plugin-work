@@ -39,8 +39,9 @@
  *   cannot leak the real user's store). When false the walk continues to
  *   the filesystem root. Either way exhaustion returns ''.
  * - `descendantScan` turns on the depth-1 fallback above: off by default, and
- *   even on it needs `local` and `worktree` to miss and exactly ONE child to
- *   be marked. `descendantRows` argues why ambiguity resolves to nothing.
+ *   even on it needs `local` and `worktree` to miss and exactly ONE child to be
+ *   marked. It also adds that child to `migrationCandidates`, so a store found
+ *   this way is carried forward and not merely read. See `descendantScan.js`.
  * - `disableHomeStoresEnvVar` optionally names an env var that, when set to
  *   '1' at discovery time, skips the home-rooted tiers (global + shared) —
  *   used by test suites to pin discovery to cwd-rooted fixtures.
@@ -60,6 +61,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execSync } = require('node:child_process');
+const { descendantBase } = require('./descendantScan');
 
 // Discovery/precedence order shared by every store instance. When the same
 // artifact exists in multiple tiers, earlier kinds win downstream.
@@ -76,6 +78,10 @@ const ROOT_DIR = '.workflow';
 // left behind by an older install, so it is derived from the SAME tier switch
 // rather than re-hardcoded per plugin.
 const LEGACY_ROOT_DIR = '.claude';
+// Both roots, one scan: discovery and migration must agree on which child (if
+// any) this cwd resolves to. See descendantScan.js for the whole argument.
+const BOTH_ROOTS = Object.freeze([ROOT_DIR, LEGACY_ROOT_DIR]);
+const childBase = (spec, cwd) => descendantBase(spec, cwd, BOTH_ROOTS);
 
 // ── config validation ────────────────────────────────────────────────────────
 
@@ -204,8 +210,8 @@ function candidateRows(spec, cwd, projectName) {
 // `~/<root>/<folder>`, and handing a migrator two locations where one
 // contains the other invites moving a parent out from under a queued child.
 // The `home` row covers the whole per-user namespace instead: every project's
-// global store plus any loose state the plugin keeps beside them. The four
-// rows returned here are mutually disjoint.
+// global store plus any loose state the plugin keeps beside them. Every row
+// returned here is mutually disjoint — four, or five with a descendant.
 function migrationRows(spec, cwd) {
   const home = os.homedir();
   const pair = (kind, tail) => ({
@@ -231,9 +237,13 @@ function migrationRows(spec, cwd) {
       : path.resolve(cwd, '..', LEGACY_ROOT_DIR, spec.folder),
   };
 
+  // The `worktree` mirror obligation, in the other direction: a store discovery
+  // resolves one level DOWN is read on every event, so migration must reach it.
+  const child = childBase(spec, cwd);
   const rows = [
     pair('local', (root) => [cwd, root, spec.folder]),
     worktree,
+    ...(child ? [pair('local', (root) => [child, root, spec.folder])] : []),
     pair('home', (root) => [home, root, spec.folder]),
     pair('shared', (root) => [home, root, spec.sharedFolder]),
   ];
@@ -292,40 +302,12 @@ function ancestorMigrationBase(spec, startDir) {
 
 // ── descendant scan ──────────────────────────────────────────────────────────
 
-// The ONE marked child of cwd, one level down, as a `{ dir, name }` row.
-//
-// The four tiers all resolve at or above cwd, assuming cwd sits at or below the
-// project root. An agent CLI attaching several repositories breaks that: it
-// clones them side by side and parks cwd on their shared parent, so a store one
-// level down is invisible and the plugin reports itself uninstalled with its
-// memories sitting right there. The ancestor walk looks the wrong way and the
-// parent is no git repo, so neither existing tier reaches it.
-//
-// AMBIGUITY IS A MISS. Two marked children give no basis to choose, and
-// guessing hurts both ways: writers take the FIRST store of a kind
-// (`synapsys-memorize`), so a memory lands in whichever sibling sorts first,
-// and readers flatten every store into one list, so a sibling's memories —
-// `enforce` rules that DENY tool calls among them — apply to this session.
-//
-// Depth 1 ONLY: one readdir plus an existsSync per child. Symlinks are skipped
-// (isDirectory() is false), so no cycle is followed, and an unreadable cwd is a
-// miss rather than a throw.
+// Discovery wants the live store dir and a name. A child still at the legacy
+// root yields a dir with no marker, which `push` drops until migration runs.
 function descendantRows(spec, cwd, alreadyFound) {
-  if (!spec.descendantScan || alreadyFound > 0) return [];
-  let entries;
-  try {
-    entries = fs.readdirSync(cwd, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const hits = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-    const base = path.join(cwd, entry.name);
-    if (fs.existsSync(path.join(base, ROOT_DIR, spec.folder, spec.marker))) hits.push(base);
-  }
-  if (hits.length !== 1) return [];
-  return [{ dir: path.join(hits[0], ROOT_DIR, spec.folder), name: projectNameOf(spec, hits[0]) }];
+  const base = alreadyFound > 0 ? '' : childBase(spec, cwd);
+  if (!base) return [];
+  return [{ dir: path.join(base, ROOT_DIR, spec.folder), name: projectNameOf(spec, base) }];
 }
 
 // ── discovery ────────────────────────────────────────────────────────────────
@@ -360,10 +342,8 @@ function discover(spec, cwd) {
     if (skipHome && HOME_TIERS.has(kind)) continue;
     if (kind === 'worktree') {
       push(kind, ancestorStore(spec, path.dirname(resolved)));
-      // Both cwd-rooted tiers have been tried; a descendant hit IS that
-      // project's local store, so it carries the same `kind` and every consumer
-      // (the `[plugin:local]` header, `--store local`) reads as it would from a
-      // session started inside the repo.
+      // A descendant hit IS that project's local store, so it carries the same
+      // `kind` and reads as it would from a session started inside the repo.
       for (const row of descendantRows(spec, resolved, found.length)) {
         push('local', row.dir, row.name);
       }
