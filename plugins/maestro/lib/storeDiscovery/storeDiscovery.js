@@ -17,6 +17,9 @@
  *   global   → ~/.workflow/<folder>/<projectName>
  *   shared   → ~/.workflow/<folder>-shared   (cross-project)
  *
+ * Every one of those resolves AT or ABOVE cwd, so a project one level below is
+ * invisible — see `descendantRows` for the fallback that covers that layout.
+ *
  * The decision matrix IS the config:
  *
  * - `folder` / `marker` name the store directory and its gate file. `folder`
@@ -35,6 +38,10 @@
  *   discoverable, but the walk never continues PAST home (a sandboxed $HOME
  *   cannot leak the real user's store). When false the walk continues to
  *   the filesystem root. Either way exhaustion returns ''.
+ * - `descendantScan` turns on the depth-1 fallback above: off by default, and
+ *   even on it needs `local` and `worktree` to miss and exactly ONE child to be
+ *   marked. It also adds that child to `migrationCandidates`, so a store found
+ *   this way is carried forward and not merely read. See `descendantScan.js`.
  * - `disableHomeStoresEnvVar` optionally names an env var that, when set to
  *   '1' at discovery time, skips the home-rooted tiers (global + shared) —
  *   used by test suites to pin discovery to cwd-rooted fixtures.
@@ -54,6 +61,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execSync } = require('node:child_process');
+const { descendantBase } = require('./descendantScan');
 
 // Discovery/precedence order shared by every store instance. When the same
 // artifact exists in multiple tiers, earlier kinds win downstream.
@@ -70,6 +78,10 @@ const ROOT_DIR = '.workflow';
 // left behind by an older install, so it is derived from the SAME tier switch
 // rather than re-hardcoded per plugin.
 const LEGACY_ROOT_DIR = '.claude';
+// Both roots, one scan: discovery and migration must agree on which child (if
+// any) this cwd resolves to. See descendantScan.js for the whole argument.
+const BOTH_ROOTS = Object.freeze([ROOT_DIR, LEGACY_ROOT_DIR]);
+const childBase = (spec, cwd) => descendantBase(spec, cwd, BOTH_ROOTS);
 
 // ── config validation ────────────────────────────────────────────────────────
 
@@ -120,6 +132,7 @@ function assertConfig(config) {
     sharedFolder: `${folder}-shared`,
     strategy,
     stopsAtHome: optionalBoolean(config, 'ancestorWalkStopsAtHome'),
+    descendantScan: optionalBoolean(config, 'descendantScan'),
     envVar: optionalEnvVarName(config, 'disableHomeStoresEnvVar'),
   });
 }
@@ -197,8 +210,8 @@ function candidateRows(spec, cwd, projectName) {
 // `~/<root>/<folder>`, and handing a migrator two locations where one
 // contains the other invites moving a parent out from under a queued child.
 // The `home` row covers the whole per-user namespace instead: every project's
-// global store plus any loose state the plugin keeps beside them. The four
-// rows returned here are mutually disjoint.
+// global store plus any loose state the plugin keeps beside them. Every row
+// returned here is mutually disjoint — four, or five with a descendant.
 function migrationRows(spec, cwd) {
   const home = os.homedir();
   const pair = (kind, tail) => ({
@@ -224,9 +237,13 @@ function migrationRows(spec, cwd) {
       : path.resolve(cwd, '..', LEGACY_ROOT_DIR, spec.folder),
   };
 
+  // The `worktree` mirror obligation, in the other direction: a store discovery
+  // resolves one level DOWN is read on every event, so migration must reach it.
+  const child = childBase(spec, cwd);
   const rows = [
     pair('local', (root) => [cwd, root, spec.folder]),
     worktree,
+    ...(child ? [pair('local', (root) => [child, root, spec.folder])] : []),
     pair('home', (root) => [home, root, spec.folder]),
     pair('shared', (root) => [home, root, spec.sharedFolder]),
   ];
@@ -283,6 +300,16 @@ function ancestorMigrationBase(spec, startDir) {
   return hit ? hit.base : '';
 }
 
+// ── descendant scan ──────────────────────────────────────────────────────────
+
+// Discovery wants the live store dir and a name. A child still at the legacy
+// root yields a dir with no marker, which `push` drops until migration runs.
+function descendantRows(spec, cwd, alreadyFound) {
+  const base = alreadyFound > 0 ? '' : childBase(spec, cwd);
+  if (!base) return [];
+  return [{ dir: path.join(base, ROOT_DIR, spec.folder), name: projectNameOf(spec, base) }];
+}
+
 // ── discovery ────────────────────────────────────────────────────────────────
 
 function homeTiersDisabled(spec) {
@@ -300,20 +327,26 @@ function discover(spec, cwd) {
   const found = [];
   const seen = new Set();
 
-  const push = (kind, dir) => {
+  // `name` defaults to the cwd-derived projectName; descendants pass their own.
+  const push = (kind, dir, name = projectName) => {
     if (!dir || !fs.existsSync(path.join(dir, spec.marker))) return;
     const key = path.resolve(dir);
     if (seen.has(key)) return;
     seen.add(key);
     // The shared store is cross-project, so it is never stamped with the
     // caller's projectName.
-    found.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
+    found.push({ kind, dir, projectName: kind === 'shared' ? null : name });
   };
 
   for (const kind of PRECEDENCE_ORDER) {
     if (skipHome && HOME_TIERS.has(kind)) continue;
     if (kind === 'worktree') {
       push(kind, ancestorStore(spec, path.dirname(resolved)));
+      // A descendant hit IS that project's local store, so it carries the same
+      // `kind` and reads as it would from a session started inside the repo.
+      for (const row of descendantRows(spec, resolved, found.length)) {
+        push('local', row.dir, row.name);
+      }
     } else {
       push(kind, tierDirOf(spec, kind, resolved, projectName));
     }

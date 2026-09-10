@@ -110,6 +110,19 @@ describe('createStoreDiscovery config validation', () => {
   });
 });
 
+describe('createStoreDiscovery descendantScan validation', () => {
+  it('rejects a non-boolean descendantScan', () => {
+    assert.throws(() => makeApi({ descendantScan: 'yes' }), {
+      name: 'TypeError',
+      message: 'storeDiscovery: "descendantScan" must be a boolean',
+    });
+  });
+
+  it('defaults to off when omitted', () => {
+    assert.doesNotThrow(() => makeApi());
+  });
+});
+
 describe('safeExec', { skip: !HOME_DRIVEN }, () => {
   it('returns trimmed stdout resolved against the given cwd', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-exec-'));
@@ -627,6 +640,172 @@ describe('discoverStores', { skip: !HOME_DRIVEN }, () => {
 // module itself must stay plugin-neutral. Skips cleanly when the plugin file
 // is absent so the factory suite still stands alone.
 
+describe('discoverStores descendantScan (cwd ABOVE the project root)', {
+  skip: !HOME_DRIVEN,
+}, () => {
+  let originalHome;
+  let base;
+  let fakeHome;
+
+  before(() => {
+    originalHome = process.env.HOME;
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-descend-'));
+    fakeHome = path.join(base, 'home');
+    fs.mkdirSync(fakeHome, { recursive: true });
+    process.env.HOME = fakeHome;
+  });
+
+  after(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  // The layout a multi-repo agent session produces: cwd is the PARENT, and each
+  // attached repository sits one level under it carrying its own local store.
+  function seedWorkspace(name, repos) {
+    const parent = fs.mkdtempSync(path.join(base, `${name}-`));
+    for (const repo of repos) seedMarker(path.join(parent, repo, ROOT, FOLDER));
+    return parent;
+  }
+
+  it('finds nothing from the parent when the scan is off (the default)', () => {
+    const parent = seedWorkspace('off', ['repo-a']);
+    assert.deepEqual(makeApi().discoverStores(parent), []);
+  });
+
+  it('finds the child store from the parent when the scan is on', () => {
+    const parent = seedWorkspace('on', ['repo-a']);
+    const stores = makeApi({ descendantScan: true }).discoverStores(parent);
+    assert.deepEqual(
+      stores.map((s) => s.dir),
+      [path.join(parent, 'repo-a', ROOT, FOLDER)]
+    );
+  });
+
+  it('stamps a descendant hit as local, named for the CHILD not for cwd', () => {
+    const parent = seedWorkspace('naming', ['repo-a']);
+    const [store] = makeApi({ descendantScan: true }).discoverStores(parent);
+    assert.equal(store.kind, 'local');
+    assert.equal(store.projectName, 'repo-a');
+  });
+
+  it('ignores unmarked siblings — the marker is the gate', () => {
+    const parent = seedWorkspace('unmarked', ['repo-a']);
+    fs.mkdirSync(path.join(parent, 'no-store'), { recursive: true });
+    const stores = makeApi({ descendantScan: true }).discoverStores(parent);
+    assert.deepEqual(
+      stores.map((s) => s.projectName),
+      ['repo-a']
+    );
+  });
+
+  // Ambiguity resolves to nothing, in BOTH directions: picking the first would
+  // send a `synapsys-memorize` write into whichever sibling sorts first, and
+  // returning both would flatten an unrelated project's memories — `enforce`
+  // rules that deny tool calls among them — into this session.
+  it('finds nothing when two children are marked', () => {
+    const parent = seedWorkspace('ambiguous', ['alpha', 'zeta']);
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(parent), []);
+  });
+
+  it('still finds nothing with three marked children', () => {
+    const parent = seedWorkspace('ambiguous3', ['a', 'b', 'c']);
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(parent), []);
+  });
+
+  it('skips dot-directories', () => {
+    const parent = seedWorkspace('dotdirs', []);
+    seedMarker(path.join(parent, '.cache', ROOT, FOLDER));
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(parent), []);
+  });
+
+  // The no-perturbation guarantee: the fallback fires only after BOTH
+  // cwd-rooted tiers have missed, so a layout that already resolves is
+  // byte-identical with the scan on and off.
+  it('does not scan children when cwd itself carries a local store', () => {
+    const parent = fs.mkdtempSync(path.join(base, 'has-local-'));
+    seedMarker(path.join(parent, ROOT, FOLDER));
+    seedMarker(path.join(parent, 'child', ROOT, FOLDER));
+    assert.deepEqual(
+      makeApi({ descendantScan: true }).discoverStores(parent),
+      makeApi().discoverStores(parent)
+    );
+  });
+
+  it('does not scan children when an ancestor carries a worktree store', () => {
+    const wt = fs.mkdtempSync(path.join(base, 'has-wt-'));
+    seedMarker(path.join(wt, ROOT, FOLDER));
+    const cwd = path.join(wt, 'nested');
+    fs.mkdirSync(cwd, { recursive: true });
+    seedMarker(path.join(cwd, 'child', ROOT, FOLDER));
+    assert.deepEqual(
+      makeApi({ descendantScan: true }).discoverStores(cwd),
+      makeApi().discoverStores(cwd)
+    );
+  });
+
+  // The migration gap: discovery resolving a store one level down is only half
+  // the job — `migrationCandidates` has to reach the SAME store, or it is read
+  // on every event and brought forward by nothing.
+  it('adds a migration row for the descendant store', () => {
+    const parent = seedWorkspace('mig', ['repo-a']);
+    const rows = makeApi({ descendantScan: true }).migrationCandidates(parent);
+    const child = rows.find((r) => r.dir.startsWith(path.join(parent, 'repo-a')));
+    assert.ok(child, 'a row covering the marked child');
+    assert.equal(child.dir, path.join(parent, 'repo-a', ROOT, FOLDER));
+    assert.equal(child.legacyDir, path.join(parent, 'repo-a', '.claude', FOLDER));
+  });
+
+  it('adds no descendant migration row when the scan is off', () => {
+    const parent = seedWorkspace('mig-off', ['repo-a']);
+    const rows = makeApi().migrationCandidates(parent);
+    assert.equal(
+      rows.some((r) => r.dir.startsWith(path.join(parent, 'repo-a'))),
+      false
+    );
+  });
+
+  it('adds no descendant migration row when two children are marked', () => {
+    const parent = seedWorkspace('mig-ambiguous', ['alpha', 'zeta']);
+    const rows = makeApi({ descendantScan: true }).migrationCandidates(parent);
+    assert.deepEqual(
+      rows.map((r) => r.kind),
+      ['local', 'worktree', 'home', 'shared']
+    );
+  });
+
+  // A child still at the legacy root is the case the migration row exists for:
+  // discovery cannot see it yet, so only the scan counting BOTH roots reaches
+  // it. Without this the store stays stranded in a parent-cwd session forever.
+  it('reaches a child whose store is still at the legacy root', () => {
+    const parent = fs.mkdtempSync(path.join(base, 'mig-legacy-'));
+    seedMarker(path.join(parent, 'repo-a', '.claude', FOLDER));
+    const api = makeApi({ descendantScan: true });
+
+    // Not discoverable yet — there is no marker under ROOT_DIR.
+    assert.deepEqual(api.discoverStores(parent), []);
+
+    // But migration must still reach it, or nothing ever relocates it.
+    const rows = api.migrationCandidates(parent);
+    const child = rows.find((r) => r.dir.startsWith(path.join(parent, 'repo-a')));
+    assert.ok(child, 'a migration row for the legacy-root child');
+    assert.equal(child.legacyDir, path.join(parent, 'repo-a', '.claude', FOLDER));
+  });
+
+  it('keeps the descendant migration row distinct from the four fixed rows', () => {
+    const parent = seedWorkspace('mig-disjoint', ['repo-a']);
+    const rows = makeApi({ descendantScan: true }).migrationCandidates(parent);
+    const dirs = rows.map((r) => path.resolve(r.dir));
+    assert.equal(new Set(dirs).size, dirs.length, 'rows must be mutually disjoint');
+  });
+
+  it('fails open on an unreadable cwd rather than throwing', () => {
+    const missing = path.join(base, 'does-not-exist');
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(missing), []);
+  });
+});
+
 const MEMORY_STORE_PATH = path.join(
   __dirname,
   '..',
@@ -679,6 +858,7 @@ describe('parity with the real synapsys call site (memory-store.js)', {
       marker: '.synapsys.json',
       projectNameStrategy: 'git-common-dir',
       ancestorWalkStopsAtHome: false,
+      descendantScan: true,
       disableHomeStoresEnvVar: SYNAPSYS_ENV_VAR,
     });
 

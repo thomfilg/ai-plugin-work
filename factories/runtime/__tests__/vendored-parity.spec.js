@@ -49,7 +49,7 @@ const EXPECTED_MASTER_FILES = {
     'transcript.js',
     'vocab.js',
   ],
-  'factories/storeDiscovery': ['index.js', 'storeDiscovery.js'],
+  'factories/storeDiscovery': ['descendantScan.js', 'index.js', 'storeDiscovery.js'],
   'factories/storeMigration': [
     'index.js',
     'load.js',
