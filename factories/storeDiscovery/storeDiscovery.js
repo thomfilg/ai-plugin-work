@@ -15,6 +15,10 @@
  *   global   → ~/.workflow/<folder>/<projectName>
  *   shared   → ~/.workflow/<folder>-shared   (cross-project)
  *
+ * Every one of those resolves AT or ABOVE cwd, so a project one level below is
+ * invisible. `descendantScan` adds a bounded fallback for exactly that layout —
+ * see `descendantStores` for the case it exists to serve and what bounds it.
+ *
  * The decision matrix IS the config:
  *
  * - `folder` / `marker` name the store directory and its gate file. `folder`
@@ -33,6 +37,9 @@
  *   discoverable, but the walk never continues PAST home (a sandboxed $HOME
  *   cannot leak the real user's store). When false the walk continues to
  *   the filesystem root. Either way exhaustion returns ''.
+ * - `descendantScan` turns on the depth-1 fallback described above. Off by
+ *   default, and even when on it fires ONLY after `local` and `worktree` have
+ *   both missed, so it can never perturb a layout that already resolves.
  * - `disableHomeStoresEnvVar` optionally names an env var that, when set to
  *   '1' at discovery time, skips the home-rooted tiers (global + shared) —
  *   used by test suites to pin discovery to cwd-rooted fixtures.
@@ -118,6 +125,7 @@ function assertConfig(config) {
     sharedFolder: `${folder}-shared`,
     strategy,
     stopsAtHome: optionalBoolean(config, 'ancestorWalkStopsAtHome'),
+    descendantScan: optionalBoolean(config, 'descendantScan'),
     envVar: optionalEnvVarName(config, 'disableHomeStoresEnvVar'),
   });
 }
@@ -281,6 +289,41 @@ function ancestorMigrationBase(spec, startDir) {
   return hit ? hit.base : '';
 }
 
+// ── descendant scan ──────────────────────────────────────────────────────────
+
+// Immediate children of cwd carrying `<child>/<ROOT_DIR>/<folder>/<marker>`.
+//
+// Every other tier resolves at or above cwd, which silently assumes cwd sits
+// AT or BELOW the project root. An agent CLI that attaches several repositories
+// breaks that assumption: it clones them side by side and parks cwd on their
+// shared parent (`/home/user` holding `/home/user/<repo>`), so an installed
+// store one level down is invisible and the plugin reports itself uninstalled
+// while its memories sit right there. The ancestor walk cannot help — the store
+// is below, not above — and neither can the git root, because the parent is
+// not a repository at all.
+//
+// Depth 1 ONLY. That is one readdir plus an existsSync per child, it is the
+// exact geometry those CLIs produce, and a deeper walk would start charging
+// real IO to guess at a layout nobody has asked for. Symlinked children are
+// skipped (isDirectory() is false for them), which also bounds the walk against
+// cycles. Fails open to []: an unreadable cwd is a miss, never a throw.
+function descendantStores(spec, cwd) {
+  let entries;
+  try {
+    entries = fs.readdirSync(cwd, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const hits = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const dir = path.join(cwd, entry.name, ROOT_DIR, spec.folder);
+    if (fs.existsSync(path.join(dir, spec.marker))) hits.push(dir);
+  }
+  // Sorted so a multi-project parent yields a stable, reproducible order.
+  return hits.sort();
+}
+
 // ── discovery ────────────────────────────────────────────────────────────────
 
 function homeTiersDisabled(spec) {
@@ -298,20 +341,34 @@ function discover(spec, cwd) {
   const found = [];
   const seen = new Set();
 
-  const push = (kind, dir) => {
+  // `name` defaults to the cwd-derived projectName; the descendant tier passes
+  // its own, since each hit is a DIFFERENT project than the one cwd names.
+  const push = (kind, dir, name = projectName) => {
     if (!dir || !fs.existsSync(path.join(dir, spec.marker))) return;
     const key = path.resolve(dir);
     if (seen.has(key)) return;
     seen.add(key);
     // The shared store is cross-project, so it is never stamped with the
     // caller's projectName.
-    found.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
+    found.push({ kind, dir, projectName: kind === 'shared' ? null : name });
   };
 
   for (const kind of PRECEDENCE_ORDER) {
     if (skipHome && HOME_TIERS.has(kind)) continue;
     if (kind === 'worktree') {
       push(kind, ancestorStore(spec, path.dirname(resolved)));
+      // Both cwd-rooted tiers have now been tried. Nothing found means cwd is
+      // neither a project root nor below one, so look one level down before
+      // falling through to the home tiers. A hit IS that project's local store
+      // — same `kind`, so every downstream consumer (the `[plugin:local]`
+      // injection header, `--store local`) reads exactly as it would from a
+      // session started inside the repo. Its projectName comes from the child,
+      // not from cwd, which names a directory that is not the project.
+      if (spec.descendantScan && found.length === 0) {
+        for (const dir of descendantStores(spec, resolved)) {
+          push('local', dir, projectNameOf(spec, path.resolve(dir, '..', '..')));
+        }
+      }
     } else {
       push(kind, tierDirOf(spec, kind, resolved, projectName));
     }

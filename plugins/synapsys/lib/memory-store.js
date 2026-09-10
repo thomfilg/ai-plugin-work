@@ -14,12 +14,18 @@ const { BRACKET_LIST_KEYS, coerceFrontmatterValue, toList } = require('./frontma
 //   filesystem root (historical synapsys behavior).
 // - SYNAPSYS_DISABLE_HOME_STORES=1 pins discovery to cwd-rooted stores so a
 //   developer's real global/shared memories never leak into fixture tests.
+// - descendantScan true: a multi-repo agent session parks cwd on the PARENT of
+//   the repositories it attached, one level above every installed store. Without
+//   the fallback SessionStart discovers nothing there and emits
+//   `[synapsys:setup-required]` at a repo whose store is present and populated,
+//   and — the part that costs more — every memory stays dark all session.
 const { createStoreDiscovery } = require('./storeDiscovery');
 const discovery = createStoreDiscovery({
   folder: 'synapsys',
   marker: '.synapsys.json',
   projectNameStrategy: 'git-common-dir',
   ancestorWalkStopsAtHome: false,
+  descendantScan: true,
   disableHomeStoresEnvVar: 'SYNAPSYS_DISABLE_HOME_STORES',
 });
 const {

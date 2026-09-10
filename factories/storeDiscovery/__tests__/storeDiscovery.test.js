@@ -110,6 +110,19 @@ describe('createStoreDiscovery config validation', () => {
   });
 });
 
+describe('createStoreDiscovery descendantScan validation', () => {
+  it('rejects a non-boolean descendantScan', () => {
+    assert.throws(() => makeApi({ descendantScan: 'yes' }), {
+      name: 'TypeError',
+      message: 'storeDiscovery: "descendantScan" must be a boolean',
+    });
+  });
+
+  it('defaults to off when omitted', () => {
+    assert.doesNotThrow(() => makeApi());
+  });
+});
+
 describe('safeExec', { skip: !HOME_DRIVEN }, () => {
   it('returns trimmed stdout resolved against the given cwd', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-exec-'));
@@ -627,6 +640,104 @@ describe('discoverStores', { skip: !HOME_DRIVEN }, () => {
 // module itself must stay plugin-neutral. Skips cleanly when the plugin file
 // is absent so the factory suite still stands alone.
 
+describe('discoverStores descendantScan (cwd ABOVE the project root)', {
+  skip: !HOME_DRIVEN,
+}, () => {
+  let originalHome;
+  let base;
+  let fakeHome;
+
+  before(() => {
+    originalHome = process.env.HOME;
+    base = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-descend-'));
+    fakeHome = path.join(base, 'home');
+    fs.mkdirSync(fakeHome, { recursive: true });
+    process.env.HOME = fakeHome;
+  });
+
+  after(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  // The layout a multi-repo agent session produces: cwd is the PARENT, and each
+  // attached repository sits one level under it carrying its own local store.
+  function seedWorkspace(name, repos) {
+    const parent = fs.mkdtempSync(path.join(base, `${name}-`));
+    for (const repo of repos) seedMarker(path.join(parent, repo, ROOT, FOLDER));
+    return parent;
+  }
+
+  it('finds nothing from the parent when the scan is off (the default)', () => {
+    const parent = seedWorkspace('off', ['repo-a']);
+    assert.deepEqual(makeApi().discoverStores(parent), []);
+  });
+
+  it('finds the child store from the parent when the scan is on', () => {
+    const parent = seedWorkspace('on', ['repo-a']);
+    const stores = makeApi({ descendantScan: true }).discoverStores(parent);
+    assert.deepEqual(
+      stores.map((s) => s.dir),
+      [path.join(parent, 'repo-a', ROOT, FOLDER)]
+    );
+  });
+
+  it('stamps a descendant hit as local, named for the CHILD not for cwd', () => {
+    const parent = seedWorkspace('naming', ['repo-a']);
+    const [store] = makeApi({ descendantScan: true }).discoverStores(parent);
+    assert.equal(store.kind, 'local');
+    assert.equal(store.projectName, 'repo-a');
+  });
+
+  it('returns every marked child, sorted, when the parent holds several', () => {
+    const parent = seedWorkspace('multi', ['zeta', 'alpha']);
+    // An unmarked sibling must not be picked up — the marker is the gate.
+    fs.mkdirSync(path.join(parent, 'unmarked'), { recursive: true });
+    const stores = makeApi({ descendantScan: true }).discoverStores(parent);
+    assert.deepEqual(
+      stores.map((s) => s.projectName),
+      ['alpha', 'zeta']
+    );
+  });
+
+  it('skips dot-directories', () => {
+    const parent = seedWorkspace('dotdirs', []);
+    seedMarker(path.join(parent, '.cache', ROOT, FOLDER));
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(parent), []);
+  });
+
+  // The no-perturbation guarantee: the fallback fires only after BOTH
+  // cwd-rooted tiers have missed, so a layout that already resolves is
+  // byte-identical with the scan on and off.
+  it('does not scan children when cwd itself carries a local store', () => {
+    const parent = fs.mkdtempSync(path.join(base, 'has-local-'));
+    seedMarker(path.join(parent, ROOT, FOLDER));
+    seedMarker(path.join(parent, 'child', ROOT, FOLDER));
+    assert.deepEqual(
+      makeApi({ descendantScan: true }).discoverStores(parent),
+      makeApi().discoverStores(parent)
+    );
+  });
+
+  it('does not scan children when an ancestor carries a worktree store', () => {
+    const wt = fs.mkdtempSync(path.join(base, 'has-wt-'));
+    seedMarker(path.join(wt, ROOT, FOLDER));
+    const cwd = path.join(wt, 'nested');
+    fs.mkdirSync(cwd, { recursive: true });
+    seedMarker(path.join(cwd, 'child', ROOT, FOLDER));
+    assert.deepEqual(
+      makeApi({ descendantScan: true }).discoverStores(cwd),
+      makeApi().discoverStores(cwd)
+    );
+  });
+
+  it('fails open on an unreadable cwd rather than throwing', () => {
+    const missing = path.join(base, 'does-not-exist');
+    assert.deepEqual(makeApi({ descendantScan: true }).discoverStores(missing), []);
+  });
+});
+
 const MEMORY_STORE_PATH = path.join(
   __dirname,
   '..',
@@ -679,6 +790,7 @@ describe('parity with the real synapsys call site (memory-store.js)', {
       marker: '.synapsys.json',
       projectNameStrategy: 'git-common-dir',
       ancestorWalkStopsAtHome: false,
+      descendantScan: true,
       disableHomeStoresEnvVar: SYNAPSYS_ENV_VAR,
     });
 
