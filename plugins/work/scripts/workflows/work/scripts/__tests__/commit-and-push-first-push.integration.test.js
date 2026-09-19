@@ -94,6 +94,7 @@ describe('commit-and-push — fresh /bootstrap worktree first push (GH-697)', ()
 
   it('first push from the fresh worktree succeeds and sets same-name tracking', () => {
     fs.writeFileSync(path.join(WORKTREE, 'change.txt'), 'change\n');
+    sh('git add change.txt', WORKTREE);
     const r = runScript(['--cwd', WORKTREE, '-m', 'fix(work): push new branch upstream (#697)']);
     assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr: ${r.stderr}`);
     assert.match(r.stdout, /committed and pushed/);
@@ -109,6 +110,7 @@ describe('commit-and-push — fresh /bootstrap worktree first push (GH-697)', ()
 
   it('regression: a second push on the now-tracking branch still works', () => {
     fs.writeFileSync(path.join(WORKTREE, 'change2.txt'), 'more\n');
+    sh('git add change2.txt', WORKTREE);
     const r = runScript([
       '--cwd',
       WORKTREE,

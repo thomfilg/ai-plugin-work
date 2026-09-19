@@ -22,13 +22,15 @@ module.exports = function commitStep(add, s, ctx) {
   const { STEPS, t } = ctx;
 
   const directive =
-    `Author a concise semantic commit message (type(scope): description) summarizing ` +
-    `the staged changes for ${t}, referencing the ticket. Do NOT add any AI/tool ` +
-    `attribution. Then run the sanctioned commit script (it stages, validates, ` +
-    `commits, and pushes):\n` +
+    `Stage YOUR changes for ${t} (\`git add <paths>\` — NOT \`git add -A\`, which would ` +
+    `also sweep up any other agent's unrelated uncommitted work in this worktree). ` +
+    `Then author a concise semantic commit message (type(scope): description) ` +
+    `summarizing the staged changes, referencing the ticket. Do NOT add any AI/tool ` +
+    `attribution. Then run the sanctioned commit script (it validates, commits what ` +
+    `you staged, and pushes):\n` +
     `  node "${COMMIT_SCRIPT}" -m "<your message>"\n` +
     `A raw \`git commit\` is blocked. The script rejects a non-conforming message, ` +
-    `an AI attribution line, or an AI git identity — fix and re-run if it does.`;
+    `an AI attribution line, an AI git identity, or nothing staged — fix and re-run if it does.`;
 
   const emitInlineCommit = (reason) =>
     add(STEPS.commit, 'RUN', 'author + commit', reason, {

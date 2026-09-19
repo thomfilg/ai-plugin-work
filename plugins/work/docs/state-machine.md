@@ -90,11 +90,17 @@ post-check steps, and `/check` keys its own cycle on a changes hash
 Both signals EXCLUDE the workflow's own artifacts — the `*.check.md` reports,
 the tasks-dir docs, the state files — via
 `scripts/workflows/lib/workflow-artifact-diff.js`. `TASKS_BASE` may live inside
-the repository, and `commit-and-push.js` stages with `git add -A`, so the
-reports a passing cycle just wrote land in the next commit. Counting them made
+the repository, in which case those reports are tracked files that land in the
+next commit when explicitly staged (GH-741 removed `commit-and-push.js`'s
+blanket `git add -A` — it now commits only what the caller staged, so a
+sanctioned commit no longer sweeps them in automatically). Counting them made
 the check invalidate itself: new hash → the reports were purged and every agent
 re-dispatched → they approved again → the next commit swept those reports in
-→ … The check never converged. A re-run now requires a real code change.
+→ … The check never converged. A re-run now requires a real code change. Note:
+with an in-repo `TASKS_BASE`, nothing currently stages these artifact paths on
+its own — if they are never `git add`ed they simply stay uncommitted, which
+sidesteps this exclusion's original livelock but also means they never reach
+history unless something explicitly stages them.
 
 Classification is deliberately one-sided: a source file must never be mistaken
 for an artifact (that would mask a real change and let a stale approval stand),

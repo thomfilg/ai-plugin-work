@@ -16,14 +16,34 @@ function stepProgress(name) {
 const path = require('path');
 const { execSync } = require('child_process');
 const { writeReportAtomic } = require('../report-utils');
+const {
+  isWorkflowArtifactPath,
+  tasksBaseRelative,
+} = require('../../../lib/workflow-artifact-diff');
 
-module.exports = function registerQualityRecheck(register) {
+// `git status --porcelain` line → repo-relative path. Standard entries are
+// `XY path`; renames are `XY old -> new` (checked against the NEW side).
+function porcelainPath(line) {
+  const rest = line.slice(3);
+  const arrow = rest.indexOf(' -> ');
+  return arrow === -1 ? rest : rest.slice(arrow + 4);
+}
+
+function registerQualityRecheck(register) {
   register('7_quality_recheck', (state, ctx) => {
-    // Check if code was modified during consensus
+    // Check if code was modified during consensus. Excludes the workflow's
+    // own artifacts (*.check.md reports, state files, an in-repo TASKS_BASE)
+    // — GH-741 removed commit-and-push.js's `git add -A`, so those artifacts
+    // can now sit uncommitted indefinitely and would otherwise re-trigger
+    // this step's full quality re-run on every /check traversal.
     let hasModifiedFiles = false;
     try {
       const status = execSync('git status --porcelain', { encoding: 'utf8', timeout: 5000 }).trim();
-      hasModifiedFiles = status !== '';
+      const tasksBaseRel = tasksBaseRelative();
+      hasModifiedFiles = status
+        .split('\n')
+        .filter(Boolean)
+        .some((line) => !isWorkflowArtifactPath(porcelainPath(line), tasksBaseRel));
     } catch {
       /* fail-open */
     }
@@ -81,4 +101,7 @@ module.exports = function registerQualityRecheck(register) {
 
     return null; // auto-advance
   });
-};
+}
+
+module.exports = registerQualityRecheck;
+module.exports.porcelainPath = porcelainPath;
