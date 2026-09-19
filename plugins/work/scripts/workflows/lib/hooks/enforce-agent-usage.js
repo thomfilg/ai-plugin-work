@@ -108,12 +108,16 @@ This ensures consistent PR descriptions with proper analysis.`,
     allowPatterns: [/--allow-empty/, /--amend/, /fixup!/, /squash!/],
     message: `❌ Direct \`git commit\` is not allowed.
 
-✅ Author your semantic message, then commit + push through the guard script — it
-   auto-formats whitespace/wrapping, validates the format, blocks AI attribution,
-   enforces a human git identity, and pushes. It is the ONLY sanctioned commit
-   path; it runs non-interactively (no approval step) and needs NO temp file —
-   repeat -m once per body paragraph, git-style:
+✅ Stage YOUR changes first — \`git add <paths>\` (never \`git add -A\`: a shared
+   worktree can hold other agents' unrelated uncommitted edits, and \`-A\` would
+   sweep them into your commit). Then author your semantic message and commit +
+   push through the guard script — it auto-formats whitespace/wrapping, validates
+   the format, blocks AI attribution, enforces a human git identity, and pushes.
+   It is the ONLY sanctioned commit path; it runs non-interactively (no approval
+   step), commits only what you staged (fails if nothing is staged), and needs NO
+   temp file — repeat -m once per body paragraph, git-style:
 
+     git add <paths>
      node "${COMMIT_SCRIPT}" -m "type(scope): imperative summary (#123)" -m "optional body paragraph"
 
    Message contract (rejections repeat this):
