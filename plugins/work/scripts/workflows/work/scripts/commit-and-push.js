@@ -69,7 +69,7 @@ const FORMAT_HELP = [
   '',
   'This does NOT run `git add -A` — stage YOUR files first (`git add <paths>`),',
   'then run this script. It commits only what is already staged, so it never',
-  'sweeps up another agent\'s unrelated uncommitted work in a shared worktree.',
+  "sweeps up another agent's unrelated uncommitted work in a shared worktree.",
 ].join('\n');
 
 /** Read a `-F` message file; `-` reads stdin so no temp file is ever needed. */
