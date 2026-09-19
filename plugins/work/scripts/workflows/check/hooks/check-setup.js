@@ -80,12 +80,13 @@ function getBranchName() {
  * Uses -w to ignore whitespace-only changes
  *
  * The diff EXCLUDES the workflow's own artifacts (see
- * lib/workflow-artifact-diff.js). When TASKS_BASE sits inside the repo, the
- * `*.check.md` reports this cycle just wrote are tracked files that the next
- * sanctioned commit (`git add -A`) sweeps into HEAD. Hashing them made a
- * passing check invalidate itself: new hash → `shouldPurgeReports` → the
- * reports are deleted and every agent re-dispatched, forever. A cycle now
- * restarts only for a real code change.
+ * lib/workflow-artifact-diff.js). When TASKS_BASE sits inside the repo and the
+ * `*.check.md` reports this cycle just wrote are tracked, staging + committing
+ * them (the sanctioned commit script no longer runs a blanket `git add -A` —
+ * GH-741 — but an explicit `git add` of an in-repo TASKS_BASE still sweeps
+ * them into HEAD) can hash-invalidate a passing check: new hash →
+ * `shouldPurgeReports` → the reports are deleted and every agent
+ * re-dispatched, forever. A cycle now restarts only for a real code change.
  */
 function generateChangesHash() {
   // Use -w to ignore whitespace changes (prevents false cache misses)

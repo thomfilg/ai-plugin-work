@@ -32,10 +32,13 @@ const { commitEvidenceGate } = require(path.join(__dirname, 'commit-evidence-gat
 const { markEvidenceStale, clearEvidenceStale } = require(
   path.join(__dirname, '..', 'lib', 'evidence-staleness')
 );
-// A moved HEAD is only drift when it carried CODE. The check's own reports
-// reach HEAD through the sanctioned `git add -A` commit path, so counting them
-// rewound a check that had just passed — every time — and /check re-ran
-// forever. See lib/workflow-artifact-diff.js.
+// A moved HEAD is only drift when it carried CODE. Historically the check's
+// own reports reached HEAD through the sanctioned commit path's blanket
+// `git add -A`, so counting them rewound a check that had just passed — every
+// time — and /check re-ran forever (GH-741 removed the `-A` sweep; this
+// exclusion still matters whenever the reports ARE staged and committed
+// alongside code, e.g. an explicit `git add` of an in-repo TASKS_BASE). See
+// lib/workflow-artifact-diff.js.
 const { isRealHeadDrift } = require(
   path.join(__dirname, '..', '..', 'lib', 'workflow-artifact-diff')
 );

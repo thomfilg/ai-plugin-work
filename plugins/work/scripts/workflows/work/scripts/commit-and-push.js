@@ -15,11 +15,17 @@
  *   2. validates it against the shared rules (`commit-msg-rules.js`) — semantic
  *      format, no AI attribution, ticket ID, <=72 header, imperative mood, ...;
  *   3. rejects an AI git identity (claude/codex/gemini/...) via `git-identity.js`;
- *   4. stages everything, commits under the human identity, and pushes.
+ *   4. commits WHATEVER IS ALREADY STAGED under the human identity, and pushes.
+ *
+ * This does NOT run `git add -A` (removed after GH-741): with several agents
+ * sharing a worktree, a blanket `git add -A` swept up other agents' unrelated
+ * uncommitted edits into this commit. The caller must `git add <paths>` its
+ * own files first; the script fails fast if the index has nothing staged.
  *
  * Runs non-interactively: there is no confirmation/approval step.
  *
  * Usage (no temp file needed — git-style repeated -m):
+ *   git add <your files>                            (stage YOUR changes first)
  *   node commit-and-push.js -m "feat(scope): add thing (#123)"
  *   node commit-and-push.js -m "feat(scope): add thing (#123)" -m "body paragraph" -m "another"
  *   node commit-and-push.js --header "fix(scope): patch thing (#123)" -m "body paragraph"
@@ -27,7 +33,7 @@
  *   node commit-and-push.js "feat(scope): add thing (#123)"   (positional)
  * Flags: --cwd <dir> (default cwd), --no-push (commit only).
  *
- * Exit codes: 0 success | 1 usage/validation/identity failure | 2 git failure.
+ * Exit codes: 0 success | 1 usage/validation/identity/nothing-staged failure | 2 git failure.
  * Zero runtime dependencies: Node built-ins + in-repo modules only.
  */
 
@@ -60,6 +66,10 @@ const FORMAT_HELP = [
   '  --header "<header>" [-m "<body paragraph>" ...]  explicit header form',
   '  -F <file> | -F -                                 full message from a file or stdin',
   'Flags: --cwd <dir>   --no-push (commit only)',
+  '',
+  'This does NOT run `git add -A` — stage YOUR files first (`git add <paths>`),',
+  'then run this script. It commits only what is already staged, so it never',
+  'sweeps up another agent\'s unrelated uncommitted work in a shared worktree.',
 ].join('\n');
 
 /** Read a `-F` message file; `-` reads stdin so no temp file is ever needed. */
@@ -221,15 +231,37 @@ function git(cwd, args) {
   execFileSync('git', ['-C', cwd, ...args], { stdio: 'inherit' });
 }
 
-/** Stage everything, commit the message, and (unless disabled) push. */
+/** True when the index has no staged changes vs HEAD. */
+function hasStagedChanges(cwd) {
+  const r = execFileSync('git', ['-C', cwd, 'diff', '--cached', '--name-only'], {
+    encoding: 'utf8',
+  });
+  return r.trim() !== '';
+}
+
+/**
+ * Commit whatever is already staged, and (unless disabled) push. Does NOT
+ * run `git add -A` (GH-741): in a shared worktree that swept up other
+ * agents' unrelated uncommitted edits into this commit. The caller must
+ * stage its own files first.
+ */
 function commitAndPush({ message, cwd, push }) {
-  git(cwd, ['add', '-A']);
+  if (!hasStagedChanges(cwd)) {
+    throw new NothingStagedError();
+  }
   git(cwd, ['commit', '-m', message]);
   // `-u origin HEAD` publishes the branch under its own name and sets
   // tracking. A bare `git push` dies in fresh /bootstrap worktrees, whose
   // branch is created tracking origin/<base> (GH-697); this form is
   // idempotent for branches already tracking their same-name remote branch.
   if (push) git(cwd, ['push', '-u', 'origin', 'HEAD']);
+}
+
+/** Marks the "nothing staged" failure so `main` can report it (exit 1, not 2). */
+class NothingStagedError extends Error {
+  constructor() {
+    super('nothing staged');
+  }
 }
 
 /** CLI entry point. */
@@ -252,7 +284,17 @@ function main() {
 
   try {
     commitAndPush(opts);
-  } catch {
+  } catch (err) {
+    if (err instanceof NothingStagedError) {
+      process.stderr.write(
+        'commit rejected: nothing staged\n' +
+          '↳ Hint: this script does not `git add -A` (a shared worktree can hold other ' +
+          "agents' unrelated uncommitted edits). Stage YOUR files first, e.g. `git add " +
+          '<paths>`, then re-run.\n'
+      );
+      process.exit(1);
+      return;
+    }
     // git already wrote its own diagnostics to the inherited stderr.
     process.exit(2);
     return;
@@ -275,4 +317,7 @@ module.exports = {
   formatValidationFailure,
   formatIdentityFailure,
   FORMAT_HELP,
+  hasStagedChanges,
+  commitAndPush,
+  NothingStagedError,
 };

@@ -114,9 +114,11 @@ The plugin registers hooks that enforce workflow discipline:
 
 The `commit-writer` subagent was **removed** (GH-539). Instead:
 
-- The **session agent authors the commit message** inline (it has the context), then commits
-  through the sanctioned script **`commit-and-push.js`**, which stages (`git add -A`),
-  validates, commits, and pushes. No subagent dispatch.
+- The **session agent authors the commit message** inline (it has the context), stages its own
+  changes (`git add <paths>` — never `git add -A`, which would sweep other agents' unrelated
+  uncommitted edits into a shared worktree), then commits through the sanctioned script
+  **`commit-and-push.js`**, which validates, commits whatever was staged, and pushes. It fails
+  fast if nothing is staged. No subagent dispatch.
 - The **always-on `enforce-agent-usage` PreToolUse hook FORCES it**: a raw `git commit` is
   **always blocked** (exit 2) and the agent is told to run `commit-and-push.js`. There is no
   install step and no bypass — the script is the only path, so a commit can never skip

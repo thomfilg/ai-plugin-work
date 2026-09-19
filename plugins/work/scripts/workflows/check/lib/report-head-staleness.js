@@ -9,12 +9,14 @@
  * report that is accepted as-is. Extracted from steps/phase1-agents.js
  * (file-size budget).
  *
- * HEAD movement alone is not staleness: a sibling agent's commit also sweeps
- * in the `*.check.md` reports written this cycle (`commit-and-push.js` stages
- * with `git add -A`, and TASKS_BASE may live inside the repo), so a report
- * could be invalidated by nothing but its own siblings' paperwork and burn
- * every dispatch attempt re-verifying unchanged code. A moved HEAD only
- * invalidates a failing report when it carries a real code change — see
+ * HEAD movement alone is not staleness: when TASKS_BASE lives inside the repo
+ * and the `*.check.md` reports written this cycle are staged and committed
+ * alongside code, a sibling agent's commit also sweeps those reports in (no
+ * longer an automatic `git add -A` sweep since GH-741 — but the reports still
+ * land in HEAD whenever they're explicitly staged), so a report could be
+ * invalidated by nothing but its own siblings' paperwork and burn every
+ * dispatch attempt re-verifying unchanged code. A moved HEAD only invalidates
+ * a failing report when it carries a real code change — see
  * lib/workflow-artifact-diff.js.
  */
 

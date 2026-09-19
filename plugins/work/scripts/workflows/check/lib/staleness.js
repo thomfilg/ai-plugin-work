@@ -168,9 +168,10 @@ function resolveProbe(probeValue, computeFn, cwd) {
 }
 
 // SHA drift — fail-safe: only declare drift when BOTH sides are known.
-// HEAD movement that carries nothing but workflow artifacts is NOT drift: the
-// check's own reports land in HEAD via `commit-and-push.js` (`git add -A`), so
-// counting them re-opened a check that had just passed, forever.
+// HEAD movement that carries nothing but workflow artifacts is NOT drift: if
+// the check's own reports land in HEAD (staged and committed alongside code —
+// no longer an automatic `git add -A` sweep since GH-741), counting them
+// re-opened a check that had just passed, forever.
 function driftReasons(state, recordedHash, currentHash, currentHead, cwd) {
   const reasons = [];
   if (currentHash && recordedHash && recordedHash !== 'unknown' && currentHash !== recordedHash) {
